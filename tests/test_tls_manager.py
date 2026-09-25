@@ -68,8 +68,10 @@ def test_caddyfile_modes_are_guarded_and_use_internal_backend():
     assert "reverse_proxy nasitron:8080" in manual
 
     internal = build_caddyfile("internal", domain="2001:db8::10")
-    assert "[2001:db8::10] {" in internal
-    assert "tls internal" in internal
+    assert "https:// {" in internal
+    assert "tls internal {" in internal
+    assert "on_demand" in internal
+    assert "[2001:db8::10] {" not in internal
 
     acme = build_caddyfile(
         "acme",
