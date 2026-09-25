@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import tempfile
@@ -159,6 +160,14 @@ def _quote(value: str) -> str:
     return json.dumps(value)
 
 
+def _site_address(domain: str) -> str:
+    try:
+        address = ipaddress.ip_address(domain)
+    except ValueError:
+        return domain
+    return f"[{domain}]" if address.version == 6 else domain
+
+
 def _base_caddyfile() -> str:
     return """{
     admin 0.0.0.0:2019
@@ -196,11 +205,12 @@ https:// {
 
     if not domain:
         raise TLSConfigurationError("A TLS hostname or IP address is required.")
+    site = _site_address(domain)
 
     if mode == "internal":
         return (
             _base_caddyfile()
-            + domain
+            + site
             + """ {
     tls internal
     encode zstd gzip
@@ -220,7 +230,7 @@ https:// {
     lines = [
         _base_caddyfile().rstrip(),
         "",
-        f"{domain} {{",
+        f"{site} {{",
         tls_header + " {",
         f"        ca {_quote(acme_ca)}",
     ]

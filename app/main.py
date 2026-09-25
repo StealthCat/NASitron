@@ -12,7 +12,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Integer, cast, func, select
@@ -179,7 +179,10 @@ async def require_web_session(request: Request, call_next):
         return await call_next(request)
 
     if path.startswith("/api/"):
-        raise HTTPException(status_code=401, detail="Authentication required.")
+        return JSONResponse(
+            {"detail": "Authentication required."},
+            status_code=401,
+        )
 
     query = request.url.query
     next_url = path + (f"?{query}" if query else "")
