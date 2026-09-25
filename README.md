@@ -385,3 +385,8 @@ The remote installer is now fully self-contained and supports direct stdin execu
 ## NASitron 0.6.6 locally hosted installer
 
 Every NASitron instance now exposes the packaged self-contained installer at `/install-remote.sh`. The endpoint is public so an unenrolled NAS can retrieve it, carries no instance credentials or secrets, and is delivered through the same HTTPS front end as the rest of NASitron. The Docker image now packages `scripts/install-remote.sh`, the Settings page links to it, and the Docker smoke test downloads the served script and executes its `--help` path.
+
+
+## NASitron 0.6.7 Add Server installation guidance
+
+The **Add Server** page now includes environment-specific remote-host preparation instructions using the locally served `/install-remote.sh` curl-to-bash workflow. The page derives the installer URL from the current NASitron request and reads the active TLS mode. ACME/uploaded-certificate installations show the direct HTTPS command, while internal-CA installations show the Caddy root-CA export/transfer steps and a `curl --cacert` command rather than recommending insecure certificate bypass. The page also walks through SSH key generation and the NASitron connection settings to use after installation.
