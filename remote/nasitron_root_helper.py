@@ -27,11 +27,24 @@ def _tool(name: str, candidates: list[str]) -> str:
     raise HelperError(f"Required tool not found: {name}")
 
 
-ZPOOL = lambda: _tool("zpool", ["/usr/sbin/zpool", "/usr/bin/zpool"])
-SMARTCTL = lambda: _tool("smartctl", ["/usr/sbin/smartctl", "/usr/bin/smartctl"])
-WIPEFS = lambda: _tool("wipefs", ["/usr/sbin/wipefs", "/usr/bin/wipefs"])
-LSBLK = lambda: _tool("lsblk", ["/usr/bin/lsblk", "/bin/lsblk"])
-DMESG = lambda: _tool("dmesg", ["/usr/bin/dmesg", "/bin/dmesg"])
+def ZPOOL() -> str:
+    return _tool("zpool", ["/usr/sbin/zpool", "/usr/bin/zpool"])
+
+
+def SMARTCTL() -> str:
+    return _tool("smartctl", ["/usr/sbin/smartctl", "/usr/bin/smartctl"])
+
+
+def WIPEFS() -> str:
+    return _tool("wipefs", ["/usr/sbin/wipefs", "/usr/bin/wipefs"])
+
+
+def LSBLK() -> str:
+    return _tool("lsblk", ["/usr/bin/lsblk", "/bin/lsblk"])
+
+
+def DMESG() -> str:
+    return _tool("dmesg", ["/usr/bin/dmesg", "/bin/dmesg"])
 
 
 def _run(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
