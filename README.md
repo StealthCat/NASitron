@@ -144,7 +144,7 @@ openssl rand -hex 32
 
 Put the generated value in `.env` as `NASITRON_SECRET_KEY`. **Keep this key stable**: it encrypts stored SSH and SMTP secrets. Changing it later makes those existing encrypted values unreadable.
 
-Optionally set dashboard HTTP Basic authentication:
+Dashboard HTTP Basic authentication is required:
 
 ```dotenv
 NASITRON_WEB_USERNAME=admin
@@ -227,3 +227,22 @@ python -m pytest -q
 ## Current scope
 
 NASitron is read-only for monitoring and tuning collection, with one deliberately narrow maintenance exception: the guarded failed-drive replacement workflow can execute `zpool replace`. It does not expose general remote shell access or arbitrary ZFS administration. Future extensions can add more specialized views (per-vdev latency, snapshot-growth analysis, ZED event ingestion, Prometheus export, and additional notification transports) without changing the collection model.
+
+
+## 0.4 hardening changes
+
+NASitron 0.4 treats the application as an authenticated administrative interface. `NASITRON_SECRET_KEY` must be at least 32 characters, `NASITRON_WEB_USERNAME` is required, and `NASITRON_WEB_PASSWORD` must be at least 12 characters. All mutating forms use CSRF protection. `/healthz` remains public for container health checks.
+
+Drive replacement requires HTTPS by default. On a trusted private management network only, this can be intentionally overridden with `NASITRON_ALLOW_INSECURE_MAINTENANCE=true`. HTTP Basic credentials should otherwise always be protected by an HTTPS reverse proxy.
+
+SMART JSON is parsed even when `smartctl` returns a non-zero health bitmask, preventing a current failing result from being replaced by an older healthy sample. Partial telemetry refreshes are tracked explicitly and do not resolve alerts for subsystems that failed to refresh.
+
+Current state is updated every poll, while full JSON snapshots are written on a configurable interval (15 minutes by default). Database retention cleanup runs hourly, historical chart responses are downsampled to a bounded number of points, and SMART samples are not duplicated between SMART polling intervals.
+
+SMTP delivery is separated from the collection transaction. Pending alerts are batched by server and relay failures use retry backoff.
+
+The replacement workflow now prefers structured OpenZFS status JSON when available, targets failed vdevs by immutable GUID, checks representative size, kernel holders and `wipefs --no-act` signatures, revalidates on the same SSH session, and serializes execution with a remote `flock`. Existing scrub/resilver activity requires an explicit conflict override.
+
+Support bundles have bounded per-command output, one concurrent generator per server, temporary-file streaming, and redaction of `keylocation`, `keystatus`, and administrator-defined ZFS user-property values.
+
+For replacement support, the dedicated SSH account additionally needs narrowly scoped read-only `wipefs --no-act` access and the exact `flock ... zpool replace` command shown in `examples/nasitron.sudoers`. Do not grant unrestricted passwordless sudo.

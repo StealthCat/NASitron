@@ -1,16 +1,23 @@
 # Example /etc/sudoers.d/nasitron
 #
-# Verify command paths on the monitored Ubuntu host with:
+# Verify paths on the monitored Ubuntu host:
 #   command -v smartctl
 #   command -v dmesg
+#   command -v wipefs
+#   command -v flock
 #   command -v zpool
 #
-# smartctl is needed for drive/NVMe health collection.
-# dmesg is only used by the on-demand tuning/support bundle.
-# zpool replace is only needed if you enable/use the failed-drive replacement page.
+# Keep this account dedicated to NASitron. Do not grant unrestricted sudo.
 #
-# IMPORTANT: "zpool replace" is a mutating administrative operation. Grant this
-# capability only to a dedicated NASitron SSH account and protect the dashboard.
+# smartctl: periodic SMART/NVMe health
+# dmesg:    optional on-demand tuning/support bundle
+# wipefs:   read-only signature proof for replacement candidates (--no-act)
+# flock + zpool replace: guarded failed-drive replacement
 #
-# Adjust paths to match the target host before installing this file.
-nasitron ALL=(root) NOPASSWD: /usr/sbin/smartctl -a -j *, /usr/bin/smartctl -a -j *, /usr/bin/dmesg, /bin/dmesg, /usr/sbin/zpool replace *, /usr/bin/zpool replace *
+# Adjust paths if your Ubuntu release installs these elsewhere.
+Cmnd_Alias NASITRON_SMART = /usr/sbin/smartctl -a -j *, /usr/bin/smartctl -a -j *
+Cmnd_Alias NASITRON_DIAGNOSTICS = /usr/bin/dmesg, /bin/dmesg
+Cmnd_Alias NASITRON_WIPEFS = /usr/sbin/wipefs --no-act --noheadings --output TYPE,UUID,LABEL *, /usr/bin/wipefs --no-act --noheadings --output TYPE,UUID,LABEL *
+Cmnd_Alias NASITRON_REPLACE = /usr/bin/flock -n /run/lock/nasitron-zpool-replace.lock zpool replace *
+
+nasitron ALL=(root) NOPASSWD: NASITRON_SMART, NASITRON_DIAGNOSTICS, NASITRON_WIPEFS, NASITRON_REPLACE

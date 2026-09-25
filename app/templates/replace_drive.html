@@ -104,12 +104,24 @@
       </div>
     </section>
 
+    {% if inventory.rejected_candidates %}
+    <section class="panel flush">
+      <div class="panel-title" style="padding:16px 16px 0"><h2>Rejected Drives</h2><span class="badge warning">{{ inventory.rejected_candidates|length }}</span></div>
+      <div class="scroll"><table><thead><tr><th>Device</th><th>Model</th><th>Reason</th></tr></thead><tbody>
+      {% for disk in inventory.rejected_candidates %}
+      <tr><td>{{ disk.device }}</td><td>{{ disk.model or "Unknown model" }}</td><td class="subtle">{{ disk.reason }}</td></tr>
+      {% endfor %}
+      </tbody></table></div>
+    </section>
+    {% endif %}
+
     {% for failed in inventory.failed %}
     <form method="post" action="/servers/{{ server.id }}/replace-drive" class="panel accent-panel replace-form"
           onsubmit="return confirm('Start this ZFS drive replacement and resilver?')">
       <input type="hidden" name="pool" value="{{ failed.pool }}">
+      <input type="hidden" name="old_guid" value="{{ failed.guid }}">
       <input type="hidden" name="old_device" value="{{ failed.device }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <div class="panel-title">
         <h2>Replacement for {{ failed.device }}</h2>
@@ -121,16 +133,22 @@
         <select name="new_device" class="replacement-select" required>
           <option value="">Select a blank drive…</option>
           {% for disk in inventory.candidates %}
+          {% if not failed.size_bytes or disk.size_bytes >= failed.size_bytes %}
           <option value="{{ disk.device }}">{{ disk.device }} — {{ disk.size_bytes|human_bytes }} — {{ disk.model or "Unknown model" }}{% if disk.serial %} — {{ disk.serial }}{% endif %}</option>
+          {% endif %}
           {% endfor %}
         </select>
       </div>
 
       <div class="field">
         <label>Command Preview</label>
-        <div class="command-box command-preview"><span class="cmd">sudo -n zpool replace</span> <span class="cmd-accent">{{ failed.pool }}</span> {{ failed.device }} &lt;replacement-drive&gt;</div>
+        <div class="command-box command-preview"><span class="cmd">sudo -n flock -n /run/lock/nasitron-zpool-replace.lock zpool replace</span> <span class="cmd-accent">{{ failed.pool }}</span> {{ failed.guid }} &lt;replacement-drive&gt;</div>
       </div>
 
+      {% if failed.operation_active %}
+      <div class="message"><strong>Conflicting ZFS operation:</strong> {{ failed.scan }}</div>
+      <label class="checkbox"><input type="checkbox" name="allow_conflicting_operation"> I understand a scrub/resilver is already in progress and explicitly allow the replacement attempt.</label>
+      {% endif %}
       <div class="field">
         <label>Type <code>REPLACE {{ failed.pool }}</code> to confirm this operation</label>
         <input name="confirm_text" autocomplete="off" required placeholder="REPLACE {{ failed.pool }}">
@@ -199,6 +217,8 @@
         <span>Only live failed/offline leaf vdevs are eligible</span>
         <span>Only blank whole disks are offered as candidates</span>
         <span>Stable <code>/dev/disk/by-id</code> paths are preferred</span>
+        <span>Failed vdevs are targeted by immutable ZFS GUID</span>
+        <span><code>wipefs --no-act</code> and kernel-holder checks must prove the candidate is unused</span>
         <span>Selection is revalidated immediately before execution</span>
         <span>No force, wipe, repartition or arbitrary shell action</span>
       </div>
@@ -216,7 +236,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const oldDevice = form.querySelector('input[name="old_device"]').value;
     function updatePreview() {
       const next = select.value || "<replacement-drive>";
-      preview.textContent = "sudo -n zpool replace " + pool + " " + oldDevice + " " + next;
+      const guid = form.querySelector('input[name="old_guid"]').value;
+      preview.textContent = "sudo -n flock -n /run/lock/nasitron-zpool-replace.lock zpool replace " + pool + " " + guid + " " + next;
     }
     select.addEventListener("change", updatePreview);
     updatePreview();

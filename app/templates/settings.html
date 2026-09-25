@@ -9,7 +9,7 @@
   </div>
 </div>
 {% if request.query_params.get('message') %}<div class="message">{{ request.query_params.get('message') }}</div>{% endif %}
-<form method="post" class="grid two">
+<form method="post" class="grid two">\n  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <section class="panel">
     <div class="panel-title"><h2>SMTP Alerts</h2><span class="badge {{ 'good' if values.smtp_enabled == 'true' else 'offline' }}">{{ "Enabled" if values.smtp_enabled == 'true' else "Disabled" }}</span></div>
     <label class="checkbox"><input type="checkbox" name="smtp_enabled" {{ 'checked' if values.smtp_enabled == 'true' else '' }}> Enable email alerts</label>
@@ -41,10 +41,11 @@
     <div class="panel-title" style="margin-top:10px"><h2>Retention</h2><span class="badge">History</span></div>
     <div class="grid two">
       <div class="field"><label>Time-series metrics (days)</label><input type="number" name="metric_retention_days" value="{{ values.metric_retention_days }}"></div>
-      <div class="field"><label>Full snapshots (days)</label><input type="number" name="snapshot_retention_days" value="{{ values.snapshot_retention_days }}"></div>
+      <div class="field"><label>Full snapshots (days)</label><input type="number" min="1" max="3650" name="snapshot_retention_days" value="{{ values.snapshot_retention_days }}"></div>
+      <div class="field"><label>Full snapshot interval (minutes)</label><input type="number" min="1" max="1440" name="full_snapshot_interval_minutes" value="{{ values.full_snapshot_interval_minutes }}"></div>
     </div>
   </section>
   <div class="row"><button class="primary" type="submit">Save Settings</button></div>
 </form>
-<form method="post" action="/settings/test-email" style="margin-top:12px"><button type="submit">Send SMTP Test Message</button></form>
+<form method="post" action="/settings/test-email" style="margin-top:12px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Send SMTP Test Message</button></form>
 {% endblock %}

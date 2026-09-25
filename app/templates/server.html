@@ -18,14 +18,16 @@
     <p class="muted">{{ server.username }}@{{ server.host }}:{{ server.port }} · poll every {{ server.poll_interval_seconds }}s · last OK {{ server.last_ok_at|fmt_dt }}</p>
   </div>
   <div class="row">
-    <form method="post" action="/servers/{{ server.id }}/poll" class="inline"><button type="submit">↻ Poll now</button></form>
+    <form method="post" action="/servers/{{ server.id }}/poll" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">↻ Poll now</button></form>
     <a class="button primary" href="/servers/{{ server.id }}/replace-drive">Maintenance</a>
     <a class="button" href="/servers/{{ server.id }}/support-bundle">Tuning bundle</a>
     <a class="button" href="/servers/{{ server.id }}/edit">Edit</a>
   </div>
 </div>
 
-{% if server.last_error %}
+{% if server.last_collection_state == 'partial' and snapshot %}
+<div class="message"><strong>Partial collection:</strong> some telemetry sources did not refresh. Existing alerts from failed subsystems are preserved until a successful refresh.</div>
+{% elif server.last_error %}
 <div class="message"><strong>Last collection error:</strong> {{ server.last_error }}</div>
 {% endif %}
 
@@ -200,6 +202,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 <section class="section-block">
   <form method="post" action="/servers/{{ server.id }}/delete" onsubmit="return confirm('Delete this server and all stored history?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit">Delete server and history</button>
   </form>
 </section>

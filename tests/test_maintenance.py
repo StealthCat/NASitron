@@ -8,7 +8,7 @@ from app.maintenance import (
 )
 
 
-def test_failed_leaf_vdevs_excludes_parent_vdevs():
+def test_failed_leaf_vdevs_excludes_parent_and_uses_guid():
     text = """
   pool: tank
  state: DEGRADED
@@ -19,16 +19,27 @@ config:
           mirror-0               DEGRADED     0     0     0
             /dev/sda             FAULTED      1     0     2
             /dev/sdb             ONLINE       0     0     0
-        logs
-          /dev/nvme0n1p1         ONLINE       0     0     0
 
 errors: No known data errors
 """
-    failed = _failed_leaf_vdevs("tank", text)
+    guid_text = """
+  pool: tank
+ state: DEGRADED
+config:
+
+        NAME                     STATE     READ WRITE CKSUM
+        100                      DEGRADED     0     0     0
+          200                    DEGRADED     0     0     0
+            300                  FAULTED      1     0     2
+            400                  ONLINE       0     0     0
+
+errors: No known data errors
+"""
+    failed = _failed_leaf_vdevs("tank", text, guid_text=guid_text)
     assert len(failed) == 1
     assert failed[0]["device"] == "/dev/sda"
+    assert failed[0]["guid"] == "300"
     assert failed[0]["state"] == "FAULTED"
-    assert failed[0]["pool"] == "tank"
 
 
 def test_failed_numeric_guid_is_eligible_leaf_target():
@@ -46,34 +57,115 @@ config:
 
 errors: No known data errors
 """
-    failed = _failed_leaf_vdevs("tank", text)
+    guid_text = text.replace("tank                     DEGRADED", "999                      DEGRADED").replace(
+        "raidz1-0               DEGRADED", "888                      DEGRADED"
+    )
+    failed = _failed_leaf_vdevs("tank", text, guid_text=guid_text)
     assert failed[0]["device"] == "1234567890123456789"
-    assert failed[0]["state"] == "UNAVAIL"
+    assert failed[0]["guid"] == "1234567890123456789"
 
 
-def test_validate_replacement_choice_requires_live_exact_match():
+def test_validate_replacement_requires_live_guid_and_size():
     inventory = {
-        "failed": [{"pool": "tank", "device": "/dev/sda", "state": "FAULTED"}],
+        "failed": [
+            {
+                "pool": "tank",
+                "device": "/dev/sda",
+                "guid": "123",
+                "state": "FAULTED",
+                "size_bytes": 10_000,
+                "operation_active": False,
+            }
+        ],
         "candidates": [
             {
                 "device": "/dev/disk/by-id/wwn-new",
                 "path": "/dev/sdz",
-                "size_bytes": 10_000,
-            }
+                "size_bytes": 20_000,
+            },
+            {
+                "device": "/dev/disk/by-id/wwn-small",
+                "path": "/dev/sdy",
+                "size_bytes": 5_000,
+            },
         ],
     }
     failed, candidate = validate_replacement_choice(
         inventory,
-        ReplacementRequest("tank", "/dev/sda", "/dev/disk/by-id/wwn-new"),
+        ReplacementRequest(
+            "tank",
+            "123",
+            "/dev/sda",
+            "/dev/disk/by-id/wwn-new",
+        ),
     )
     assert failed["state"] == "FAULTED"
     assert candidate["path"] == "/dev/sdz"
 
+    with pytest.raises(ValueError, match="smaller"):
+        validate_replacement_choice(
+            inventory,
+            ReplacementRequest(
+                "tank",
+                "123",
+                "/dev/sda",
+                "/dev/disk/by-id/wwn-small",
+            ),
+        )
+
     with pytest.raises(ValueError):
         validate_replacement_choice(
             inventory,
-            ReplacementRequest("tank", "/dev/sda", "/dev/sdy"),
+            ReplacementRequest(
+                "tank",
+                "999",
+                "/dev/sda",
+                "/dev/disk/by-id/wwn-new",
+            ),
         )
+
+
+def test_conflicting_operation_requires_explicit_override():
+    inventory = {
+        "failed": [
+            {
+                "pool": "tank",
+                "device": "/dev/sda",
+                "guid": "123",
+                "state": "FAULTED",
+                "size_bytes": 10_000,
+                "operation_active": True,
+            }
+        ],
+        "candidates": [
+            {
+                "device": "/dev/disk/by-id/wwn-new",
+                "path": "/dev/sdz",
+                "size_bytes": 20_000,
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="already in progress"):
+        validate_replacement_choice(
+            inventory,
+            ReplacementRequest(
+                "tank",
+                "123",
+                "/dev/sda",
+                "/dev/disk/by-id/wwn-new",
+            ),
+        )
+
+    validate_replacement_choice(
+        inventory,
+        ReplacementRequest(
+            "tank",
+            "123",
+            "/dev/sda",
+            "/dev/disk/by-id/wwn-new",
+            allow_conflicting_operation=True,
+        ),
+    )
 
 
 def test_stable_id_map():

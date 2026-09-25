@@ -9,12 +9,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NASITRON_DATA_DIR: /tmp/nasitron-ci
-      NASITRON_SECRET_KEY: ci-test-secret
+      NASITRON_SECRET_KEY: ci-secret-0123456789abcdef0123456789abcdef
+      NASITRON_WEB_USERNAME: ci-admin
+      NASITRON_WEB_PASSWORD: ci-password-strong
+      NASITRON_ALLOW_INSECURE_MAINTENANCE: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt pytest
+      - run: pip install -r requirements.txt pytest httpx ruff
       - run: python -m compileall -q app
+      - run: ruff check app tests
       - run: python -m pytest -q

@@ -16,8 +16,8 @@ class Server(Base):
     __tablename__ = "servers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(120))
-    host: Mapped[str] = mapped_column(String(255))
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    host: Mapped[str] = mapped_column(String(253))
     port: Mapped[int] = mapped_column(Integer, default=22)
     username: Mapped[str] = mapped_column(String(120))
     auth_type: Mapped[str] = mapped_column(String(20), default="key")
@@ -32,14 +32,34 @@ class Server(Base):
     last_poll_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_ok_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_smart_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_full_snapshot_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_collection_state: Mapped[str] = mapped_column(String(20), default="never")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
+    current_state: Mapped["CurrentState | None"] = relationship(
+        back_populates="server", cascade="all, delete-orphan", uselist=False
+    )
     snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="server", cascade="all, delete-orphan")
     metrics: Mapped[list["Metric"]] = relationship(back_populates="server", cascade="all, delete-orphan")
     alerts: Mapped[list["Alert"]] = relationship(back_populates="server", cascade="all, delete-orphan")
+    maintenance_actions: Mapped[list["MaintenanceAction"]] = relationship(
+        back_populates="server", cascade="all, delete-orphan"
+    )
+
+
+class CurrentState(Base):
+    __tablename__ = "current_states"
+
+    server_id: Mapped[int] = mapped_column(
+        ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    payload_json: Mapped[str] = mapped_column(Text)
+
+    server: Mapped[Server] = relationship(back_populates="current_state")
 
 
 class Snapshot(Base):
@@ -86,6 +106,9 @@ class Alert(Base):
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notification_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_notification_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    notification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     server: Mapped[Server] = relationship(back_populates="alerts")
 
@@ -97,7 +120,6 @@ class Setting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
     secret: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
-
 
 
 class MaintenanceAction(Base):
@@ -115,3 +137,5 @@ class MaintenanceAction(Base):
     exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    server: Mapped[Server] = relationship(back_populates="maintenance_actions")

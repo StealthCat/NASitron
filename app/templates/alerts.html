@@ -20,7 +20,7 @@
   <td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message }}</div></td>
   <td>{{ alert.first_seen|fmt_dt }}</td>
   <td>{{ alert.last_seen|fmt_dt }}</td>
-  <td>{% if alert.active and not alert.acknowledged %}<form method="post" action="/alerts/{{ alert.id }}/ack"><button type="submit">Acknowledge</button></form>{% elif alert.acknowledged %}<span class="badge">Acknowledged</span>{% endif %}</td>
+  <td>{% if alert.active and not alert.acknowledged %}<form method="post" action="/alerts/{{ alert.id }}/ack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Acknowledge</button></form>{% elif alert.acknowledged %}<span class="badge">Acknowledged</span>{% endif %}</td>
 </tr>
 {% else %}
 <tr><td colspan="7"><span class="badge good"><span class="dot"></span>No alerts have been recorded</span></td></tr>

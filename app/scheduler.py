@@ -7,12 +7,14 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
 
+from .alerts import deliver_pending_notifications
+from .config import COLLECTOR_WORKERS
 from .db import SessionLocal
 from .models import Server
-from .service import collect_server
+from .service import collect_server, prune_history
 
 _scheduler = BackgroundScheduler(timezone="UTC")
-_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="nasitron-poll")
+_pool: ThreadPoolExecutor | None = None
 _lock = threading.Lock()
 _inflight: set[int] = set()
 
@@ -23,7 +25,7 @@ def _collect_worker(server_id: int) -> None:
             try:
                 collect_server(db, server_id)
             except Exception:
-                # The collection service persists the error/alert state.
+                # collect_server persists the failed-collection state itself.
                 pass
     finally:
         with _lock:
@@ -31,28 +33,58 @@ def _collect_worker(server_id: int) -> None:
 
 
 def trigger_now(server_id: int) -> bool:
+    global _pool
     with _lock:
         if server_id in _inflight:
             return False
+        if _pool is None:
+            return False
         _inflight.add(server_id)
-    _pool.submit(_collect_worker, server_id)
+        pool = _pool
+    pool.submit(_collect_worker, server_id)
     return True
 
 
 def _schedule_due() -> None:
     now = datetime.utcnow()
     with SessionLocal() as db:
-        servers = db.scalars(select(Server).where(Server.enabled.is_(True))).all()
+        servers = db.scalars(
+            select(Server).where(Server.enabled.is_(True))
+        ).all()
         for server in servers:
-            interval = max(15, server.poll_interval_seconds or 60)
-            due = server.last_poll_at is None or now - server.last_poll_at >= timedelta(seconds=interval)
+            interval = max(15, min(86400, server.poll_interval_seconds or 60))
+            due = (
+                server.last_poll_at is None
+                or now - server.last_poll_at >= timedelta(seconds=interval)
+            )
             if due:
                 trigger_now(server.id)
 
 
+def _deliver_notifications() -> None:
+    with SessionLocal() as db:
+        try:
+            deliver_pending_notifications(db)
+        except Exception:
+            db.rollback()
+
+
+def _housekeeping() -> None:
+    with SessionLocal() as db:
+        try:
+            prune_history(db)
+        except Exception:
+            db.rollback()
+
+
 def start_scheduler() -> None:
+    global _pool
     if _scheduler.running:
         return
+    _pool = ThreadPoolExecutor(
+        max_workers=COLLECTOR_WORKERS,
+        thread_name_prefix="nasitron-poll",
+    )
     _scheduler.add_job(
         _schedule_due,
         "interval",
@@ -62,11 +94,34 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    _scheduler.add_job(
+        _deliver_notifications,
+        "interval",
+        minutes=1,
+        id="deliver-alert-notifications",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _scheduler.add_job(
+        _housekeeping,
+        "interval",
+        hours=1,
+        id="database-housekeeping",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     _scheduler.start()
     _schedule_due()
 
 
 def stop_scheduler() -> None:
+    global _pool
     if _scheduler.running:
         _scheduler.shutdown(wait=False)
-    _pool.shutdown(wait=False, cancel_futures=True)
+    if _pool is not None:
+        _pool.shutdown(wait=False, cancel_futures=True)
+        _pool = None
+    with _lock:
+        _inflight.clear()
