@@ -115,7 +115,18 @@ From a NASitron checkout on the NAS:
 sudo ./scripts/install-remote.sh --public-key-file /path/to/nasitron-monitoring.pub
 ```
 
-The installer is self-contained, so it can also be streamed directly into Bash. Because this repository is private, fetch it through the GitHub Contents API with a token that can read the repository:
+The installer is self-contained and is also served directly by every running NASitron instance at `/install-remote.sh`. This is the simplest installation path because the remote NAS does not need GitHub access:
+ 
+```bash
+curl -fsSL https://YOUR-NASITRON-HOST/install-remote.sh \
+  | sudo bash -s -- --public-key 'ssh-ed25519 AAAA...'
+```
+
+There is also a **Settings → NAS Installer** panel with a direct download link and a command using the current NASitron URL. The endpoint is intentionally unauthenticated because the script contains no NASitron credentials or instance secrets and must be reachable before a remote NAS has been enrolled. It is still served over NASitron's normal HTTPS path.
+
+If the NASitron instance uses Caddy's internal CA, install/trust that CA on the remote NAS before piping the script to root. Avoid bypassing certificate validation for unattended installation.
+
+Because this repository is private, you can alternatively fetch the same script through the GitHub Contents API with a token that can read the repository:
 
 ```bash
 export GITHUB_TOKEN='github_pat_...'
@@ -369,3 +380,8 @@ Bootstrap/internal TLS now uses Caddy's internal on-demand issuer on an HTTPS ca
 ## NASitron 0.6.5 one-line remote installation
 
 The remote installer is now fully self-contained and supports direct stdin execution with `curl ... | sudo bash -s -- ...`. Its privileged Python helper is embedded in the installer and is syntax-checked before installation, so a piped install does not need a repository checkout or a second network fetch. For private-repository use, authenticate only the initial GitHub Contents API request; the token does not need to be passed into the root shell.
+
+
+## NASitron 0.6.6 locally hosted installer
+
+Every NASitron instance now exposes the packaged self-contained installer at `/install-remote.sh`. The endpoint is public so an unenrolled NAS can retrieve it, carries no instance credentials or secrets, and is delivered through the same HTTPS front end as the rest of NASitron. The Docker image now packages `scripts/install-remote.sh`, the Settings page links to it, and the Docker smoke test downloads the served script and executes its `--help` path.
