@@ -424,3 +424,121 @@ def test_settings_page_uses_distinct_tabs_and_section_saves_are_isolated():
             set_setting(db, "snapshot_retention_days", "30")
             set_setting(db, "full_snapshot_interval_minutes", "15")
             db.commit()
+
+
+
+def test_server_and_pool_pages_show_zfs_properties():
+    payload = {
+        "system": {
+            "hostname": "property-nas",
+            "memory": {"used_pct": 10, "used_bytes": 100, "total_bytes": 1000},
+            "zfs_version": "zfs-2.2",
+            "load1": 0,
+            "uptime_seconds": 100,
+            "services": "zfs.target=active",
+        },
+        "arc": {
+            "hit_rate_pct": 99.0,
+            "size_bytes": 1,
+            "target_bytes": 1,
+            "min_bytes": 1,
+            "max_bytes": 1,
+            "hits": 1,
+            "misses": 0,
+            "l2_size_bytes": 0,
+            "l2_hit_rate_pct": 0,
+        },
+        "pools": [
+            {
+                "name": "tank",
+                "size_bytes": 1000,
+                "alloc_bytes": 400,
+                "free_bytes": 600,
+                "fragmentation_pct": 10,
+                "capacity_pct": 40,
+                "dedup_ratio": 1,
+                "health": "ONLINE",
+                "io": {},
+                "status": {"scan": "", "vdevs": []},
+                "properties": [
+                    {
+                        "property": "autotrim",
+                        "value": "on",
+                        "source": "local",
+                        "is_set": True,
+                    },
+                    {
+                        "property": "comment",
+                        "value": "-",
+                        "source": "default",
+                        "is_set": False,
+                    },
+                ],
+            }
+        ],
+        "datasets": [
+            {
+                "name": "tank/data",
+                "type": "filesystem",
+                "used_bytes": 100,
+                "available_bytes": 900,
+                "referenced_bytes": 100,
+                "logical_used_bytes": 100,
+                "compression_ratio": 1.25,
+                "mountpoint": "/tank/data",
+                "properties": [
+                    {
+                        "property": "compression",
+                        "value": "zstd",
+                        "source": "local",
+                        "is_set": True,
+                    }
+                ],
+            }
+        ],
+        "drives": [],
+        "collection": {"stale_subsystems": [], "errors": []},
+    }
+
+    with SessionLocal() as db:
+        server = Server(
+            name="zfs-property-test",
+            host="127.0.0.3",
+            username="nasitron",
+            auth_type="password",
+            enabled=False,
+        )
+        db.add(server)
+        db.commit()
+        db.refresh(server)
+        db.add(
+            CurrentState(
+                server_id=server.id,
+                captured_at=datetime.utcnow(),
+                payload_json=json.dumps(payload),
+            )
+        )
+        db.commit()
+        server_id = server.id
+
+    try:
+        with TestClient(app) as client:
+            _login(client)
+
+            detail = client.get(f"/servers/{server_id}")
+            assert detail.status_code == 200
+            assert "Pool properties" in detail.text
+            assert "autotrim" in detail.text
+            assert "compression" in detail.text
+            assert "zstd" in detail.text
+
+            pools_page = client.get("/pools")
+            assert pools_page.status_code == 200
+            assert "ZFS pool options" in pools_page.text
+            assert "autotrim" in pools_page.text
+    finally:
+        with SessionLocal() as db:
+            server = db.get(Server, server_id)
+            if server:
+                db.delete(server)
+                db.commit()
