@@ -1,144 +1,290 @@
 {% extends "base.html" %}
 {% block title %}Settings · NASitron{% endblock %}
 {% block content %}
-<div class="page-head">
+<div class="page-head settings-head">
   <div class="page-title-wrap">
     <div class="hero-kicker">Configuration</div>
     <h1>Settings</h1>
-    <p class="muted">Alert thresholds, history retention, SMTP relay configuration, and HTTPS certificate management.</p>
+    <p class="muted">Configure notifications, health policy, history retention, host enrollment, and HTTPS independently.</p>
   </div>
 </div>
-{% if request.query_params.get('message') %}<div class="message">{{ request.query_params.get('message') }}</div>{% endif %}
-<form method="post" class="grid two">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <section class="panel">
-    <div class="panel-title"><h2>SMTP Alerts</h2><span class="badge {{ 'good' if values.smtp_enabled == 'true' else 'offline' }}">{{ "Enabled" if values.smtp_enabled == 'true' else "Disabled" }}</span></div>
-    <label class="checkbox"><input type="checkbox" name="smtp_enabled" {{ 'checked' if values.smtp_enabled == 'true' else '' }}> Enable email alerts</label>
-    <div class="grid two">
-      <div class="field"><label>SMTP host</label><input name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.example.net"></div>
-      <div class="field"><label>Port</label><input type="number" name="smtp_port" value="{{ values.smtp_port }}"></div>
-    </div>
-    <div class="field"><label>Username</label><input name="smtp_username" value="{{ values.smtp_username }}"></div>
-    <div class="field"><label>Password {% if values.smtp_password_configured %}(configured; leave blank to preserve){% endif %}</label><input type="password" name="smtp_password"></div>
-    <div class="field"><label>From address</label><input name="smtp_from" value="{{ values.smtp_from }}" placeholder="nasitron@example.net"></div>
-    <div class="field"><label>Recipients (comma separated)</label><input name="smtp_to" value="{{ values.smtp_to }}"></div>
-    <div class="row">
-      <label class="checkbox"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls == 'true' else '' }}> STARTTLS</label>
-      <label class="checkbox"><input type="checkbox" name="smtp_ssl" {{ 'checked' if values.smtp_ssl == 'true' else '' }}> Implicit TLS</label>
-    </div>
-    <p class="subtle">SMTP passwords are encrypted at rest using key material derived from <code>NASITRON_SECRET_KEY</code>.</p>
+
+{% if request.query_params.get('message') %}
+<div class="message settings-message">{{ request.query_params.get('message') }}</div>
+{% endif %}
+
+<div class="settings-tabs" data-active-tab="{{ active_tab }}">
+  <div class="settings-tab-list" role="tablist" aria-label="Settings sections">
+    <button type="button" class="settings-tab {{ 'active' if active_tab == 'smtp' else '' }}" role="tab" id="tab-smtp" aria-controls="panel-smtp" aria-selected="{{ 'true' if active_tab == 'smtp' else 'false' }}" data-settings-tab="smtp">
+      <span class="settings-tab-label">Email</span>
+      <span class="settings-tab-sub">SMTP alerts</span>
+    </button>
+    <button type="button" class="settings-tab {{ 'active' if active_tab == 'health' else '' }}" role="tab" id="tab-health" aria-controls="panel-health" aria-selected="{{ 'true' if active_tab == 'health' else 'false' }}" data-settings-tab="health">
+      <span class="settings-tab-label">Health</span>
+      <span class="settings-tab-sub">Thresholds</span>
+    </button>
+    <button type="button" class="settings-tab {{ 'active' if active_tab == 'history' else '' }}" role="tab" id="tab-history" aria-controls="panel-history" aria-selected="{{ 'true' if active_tab == 'history' else 'false' }}" data-settings-tab="history">
+      <span class="settings-tab-label">History</span>
+      <span class="settings-tab-sub">Retention</span>
+    </button>
+    <button type="button" class="settings-tab {{ 'active' if active_tab == 'enrollment' else '' }}" role="tab" id="tab-enrollment" aria-controls="panel-enrollment" aria-selected="{{ 'true' if active_tab == 'enrollment' else 'false' }}" data-settings-tab="enrollment">
+      <span class="settings-tab-label">Enrollment</span>
+      <span class="settings-tab-sub">Remote hosts</span>
+    </button>
+    <button type="button" class="settings-tab {{ 'active' if active_tab == 'tls' else '' }}" role="tab" id="tab-tls" aria-controls="panel-tls" aria-selected="{{ 'true' if active_tab == 'tls' else 'false' }}" data-settings-tab="tls">
+      <span class="settings-tab-label">HTTPS</span>
+      <span class="settings-tab-sub">TLS &amp; ACME</span>
+    </button>
+  </div>
+
+  <section class="settings-tab-panel {{ 'active' if active_tab == 'smtp' else '' }}" id="panel-smtp" role="tabpanel" aria-labelledby="tab-smtp" data-settings-panel="smtp" {% if active_tab != 'smtp' %}hidden{% endif %}>
+    <form method="post" class="panel accent-panel settings-panel-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="section" value="smtp">
+      <div class="panel-title">
+        <div>
+          <div class="hero-kicker">Notifications</div>
+          <h2>SMTP Alerts</h2>
+        </div>
+        <span class="badge {{ 'good' if values.smtp_enabled == 'true' else 'offline' }}">{{ "Enabled" if values.smtp_enabled == 'true' else "Disabled" }}</span>
+      </div>
+      <p class="muted">Send NASitron health and collection alerts through your SMTP relay.</p>
+
+      <label class="checkbox"><input type="checkbox" name="smtp_enabled" {{ 'checked' if values.smtp_enabled == 'true' else '' }}> Enable email alerts</label>
+
+      <div class="grid two settings-field-grid">
+        <div class="field"><label>SMTP host</label><input name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.example.net"></div>
+        <div class="field"><label>Port</label><input type="number" min="1" max="65535" name="smtp_port" value="{{ values.smtp_port }}"></div>
+        <div class="field"><label>Username</label><input name="smtp_username" value="{{ values.smtp_username }}"></div>
+        <div class="field"><label>Password {% if values.smtp_password_configured %}(configured; leave blank to preserve){% endif %}</label><input type="password" name="smtp_password"></div>
+        <div class="field"><label>From address</label><input name="smtp_from" value="{{ values.smtp_from }}" placeholder="nasitron@example.net"></div>
+        <div class="field"><label>Recipients (comma separated)</label><input name="smtp_to" value="{{ values.smtp_to }}"></div>
+      </div>
+
+      <div class="row settings-inline-options">
+        <label class="checkbox"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls == 'true' else '' }}> STARTTLS</label>
+        <label class="checkbox"><input type="checkbox" name="smtp_ssl" {{ 'checked' if values.smtp_ssl == 'true' else '' }}> Implicit TLS</label>
+      </div>
+
+      <div class="row between settings-form-footer">
+        <p class="subtle">SMTP passwords are encrypted at rest using key material derived from <code>NASITRON_SECRET_KEY</code>.</p>
+        <button class="primary" type="submit">Save Email Settings</button>
+      </div>
+    </form>
+
+    <form method="post" action="/settings/test-email" class="settings-secondary-action">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit">Send SMTP Test Message</button>
+    </form>
   </section>
 
-  <section class="panel">
-    <div class="panel-title"><h2>Health Thresholds</h2><span class="badge">Policy</span></div>
-    <div class="grid two">
-      <div class="field"><label>Pool capacity warning %</label><input type="number" min="1" max="100" name="pool_capacity_warning" value="{{ values.pool_capacity_warning }}"></div>
-      <div class="field"><label>Pool capacity critical %</label><input type="number" min="1" max="100" name="pool_capacity_critical" value="{{ values.pool_capacity_critical }}"></div>
-      <div class="field"><label>Drive temp warning °C</label><input type="number" min="1" max="150" name="drive_temp_warning_c" value="{{ values.drive_temp_warning_c }}"></div>
-      <div class="field"><label>Drive temp critical °C</label><input type="number" min="1" max="150" name="drive_temp_critical_c" value="{{ values.drive_temp_critical_c }}"></div>
-      <div class="field"><label>NVMe endurance warning (% used)</label><input type="number" min="1" max="100" name="nvme_percentage_used_warning" value="{{ values.nvme_percentage_used_warning }}"></div>
-      <div class="field"><label>NVMe endurance critical (% used)</label><input type="number" min="1" max="100" name="nvme_percentage_used_critical" value="{{ values.nvme_percentage_used_critical }}"></div>
-      <div class="field"><label>Scrub age warning (days, 0 disables)</label><input type="number" name="scrub_age_warning_days" value="{{ values.scrub_age_warning_days }}"></div>
-      <div class="field"><label>Collection failures before alert</label><input type="number" name="collection_failure_threshold" value="{{ values.collection_failure_threshold }}"></div>
-    </div>
-    <div class="panel-title" style="margin-top:10px"><h2>Retention</h2><span class="badge">History</span></div>
-    <div class="grid two">
-      <div class="field"><label>Time-series metrics (days)</label><input type="number" min="1" max="3650" name="metric_retention_days" value="{{ values.metric_retention_days }}"></div>
-      <div class="field"><label>Full snapshots (days)</label><input type="number" min="1" max="3650" name="snapshot_retention_days" value="{{ values.snapshot_retention_days }}"></div>
-      <div class="field"><label>Full snapshot interval (minutes)</label><input type="number" min="1" max="1440" name="full_snapshot_interval_minutes" value="{{ values.full_snapshot_interval_minutes }}"></div>
+  <section class="settings-tab-panel {{ 'active' if active_tab == 'health' else '' }}" id="panel-health" role="tabpanel" aria-labelledby="tab-health" data-settings-panel="health" {% if active_tab != 'health' %}hidden{% endif %}>
+    <form method="post" class="panel accent-panel settings-panel-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="section" value="health">
+      <div class="panel-title">
+        <div>
+          <div class="hero-kicker">Alert Policy</div>
+          <h2>Health Thresholds</h2>
+        </div>
+        <span class="badge">Policy</span>
+      </div>
+      <p class="muted">Choose when NASitron raises warning and critical health conditions.</p>
+
+      <div class="grid two settings-field-grid">
+        <div class="field"><label>Pool capacity warning %</label><input type="number" min="1" max="100" name="pool_capacity_warning" value="{{ values.pool_capacity_warning }}"></div>
+        <div class="field"><label>Pool capacity critical %</label><input type="number" min="1" max="100" name="pool_capacity_critical" value="{{ values.pool_capacity_critical }}"></div>
+        <div class="field"><label>Drive temperature warning °C</label><input type="number" min="1" max="150" name="drive_temp_warning_c" value="{{ values.drive_temp_warning_c }}"></div>
+        <div class="field"><label>Drive temperature critical °C</label><input type="number" min="1" max="150" name="drive_temp_critical_c" value="{{ values.drive_temp_critical_c }}"></div>
+        <div class="field"><label>NVMe endurance warning (% used)</label><input type="number" min="1" max="100" name="nvme_percentage_used_warning" value="{{ values.nvme_percentage_used_warning }}"></div>
+        <div class="field"><label>NVMe endurance critical (% used)</label><input type="number" min="1" max="100" name="nvme_percentage_used_critical" value="{{ values.nvme_percentage_used_critical }}"></div>
+        <div class="field"><label>Scrub age warning (days, 0 disables)</label><input type="number" min="0" max="3650" name="scrub_age_warning_days" value="{{ values.scrub_age_warning_days }}"></div>
+        <div class="field"><label>Collection failures before alert</label><input type="number" min="1" max="100" name="collection_failure_threshold" value="{{ values.collection_failure_threshold }}"></div>
+      </div>
+
+      <div class="row between settings-form-footer">
+        <p class="subtle">Warning thresholds must remain lower than their matching critical thresholds.</p>
+        <button class="primary" type="submit">Save Health Settings</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="settings-tab-panel {{ 'active' if active_tab == 'history' else '' }}" id="panel-history" role="tabpanel" aria-labelledby="tab-history" data-settings-panel="history" {% if active_tab != 'history' %}hidden{% endif %}>
+    <form method="post" class="panel accent-panel settings-panel-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="section" value="history">
+      <div class="panel-title">
+        <div>
+          <div class="hero-kicker">Storage</div>
+          <h2>History &amp; Retention</h2>
+        </div>
+        <span class="badge">History</span>
+      </div>
+      <p class="muted">Control how much metric and snapshot history NASitron retains.</p>
+
+      <div class="grid three settings-field-grid">
+        <div class="field"><label>Time-series metrics (days)</label><input type="number" min="1" max="3650" name="metric_retention_days" value="{{ values.metric_retention_days }}"></div>
+        <div class="field"><label>Full snapshots (days)</label><input type="number" min="1" max="3650" name="snapshot_retention_days" value="{{ values.snapshot_retention_days }}"></div>
+        <div class="field"><label>Full snapshot interval (minutes)</label><input type="number" min="1" max="1440" name="full_snapshot_interval_minutes" value="{{ values.full_snapshot_interval_minutes }}"></div>
+      </div>
+
+      <div class="row between settings-form-footer">
+        <p class="subtle">Current state is still refreshed every normal polling cycle; these values control retained history.</p>
+        <button class="primary" type="submit">Save History Settings</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="settings-tab-panel {{ 'active' if active_tab == 'enrollment' else '' }}" id="panel-enrollment" role="tabpanel" aria-labelledby="tab-enrollment" data-settings-panel="enrollment" {% if active_tab != 'enrollment' %}hidden{% endif %}>
+    <div class="panel accent-panel">
+      <div class="panel-title">
+        <div>
+          <div class="hero-kicker">Remote Host Setup</div>
+          <h2>Automatic Enrollment</h2>
+        </div>
+        <a class="button primary" href="/servers/new">Add Server</a>
+      </div>
+      <p class="muted">Generate a one-time curl-to-bash enrollment command for a remote NAS. The installer creates the restricted SSH access needed by NASitron and registers the server automatically.</p>
+
+      <div class="grid three settings-enrollment-summary">
+        <div class="mini-stat"><span>Transport</span><strong>Outbound SSH</strong></div>
+        <div class="mini-stat"><span>Credentials</span><strong>NASitron-managed key</strong></div>
+        <div class="mini-stat"><span>Enrollment</span><strong>One-time token</strong></div>
+      </div>
+
+      <p class="subtle">The generic installer endpoint remains available for advanced/manual use, but automatic registration should be started from <strong>Add Server</strong> so NASitron can create a one-time enrollment record.</p>
     </div>
   </section>
-  <div class="row"><button class="primary" type="submit">Save Settings</button></div>
-</form>
-<form method="post" action="/settings/test-email" style="margin-top:12px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Send SMTP Test Message</button></form>
 
-<section class="section-block panel">
-  <div class="panel-title">
-    <div>
-      <div class="hero-kicker">Remote Host Setup</div>
-      <h2>Automatic Enrollment</h2>
-    </div>
-    <a class="button primary" href="/servers/new">Add Server</a>
-  </div>
-  <p class="muted">Use <strong>Add Server</strong> to generate a one-time curl-to-bash enrollment command. That command installs NASitron access on the remote NAS and automatically registers the server back into this NASitron instance.</p>
-  <p class="subtle">The generic installer endpoint remains available for advanced/manual use, but it does not contain one-time enrollment context by itself.</p>
-</section>
-
-<section class="section-block panel accent-panel">
-  <div class="panel-title">
-    <div>
-      <div class="hero-kicker">HTTPS</div>
-      <h2>TLS Certificate Management</h2>
-    </div>
-    <span class="badge good">Caddy</span>
-  </div>
-  <p class="muted">Use NASitron's internal CA for bootstrap access, upload a PEM certificate/key, or obtain and renew a certificate from a custom ACME server. Saving reloads Caddy without restarting NASitron.</p>
-
-  <form method="post" action="/settings/tls" enctype="multipart/form-data">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="grid two">
-      <div class="field">
-        <label>TLS mode</label>
-        <select name="tls_mode">
-          <option value="internal" {{ 'selected' if values.tls_mode == 'internal' else '' }}>Internal CA / bootstrap</option>
-          <option value="manual" {{ 'selected' if values.tls_mode == 'manual' else '' }}>Uploaded certificate</option>
-          <option value="acme" {{ 'selected' if values.tls_mode == 'acme' else '' }}>ACME managed certificate</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>TLS hostname or IP</label>
-        <input name="tls_domain" value="{{ values.tls_domain }}" placeholder="nas.example.com">
-        <div class="subtle">Required for ACME mode. Internal/bootstrap TLS accepts the IP or hostname you browse to.</div>
-      </div>
-    </div>
-
-    <div class="tls-section">
-      <div class="panel-title"><h3>Uploaded certificate</h3><span class="badge {{ 'good' if values.tls_status.configured else 'offline' }}">{{ "Configured" if values.tls_status.configured else "Not configured" }}</span></div>
-      {% if values.tls_status.subject %}
-      <div class="grid three">
-        <div class="mini-stat"><span>Subject</span><strong>{{ values.tls_status.subject }}</strong></div>
-        <div class="mini-stat"><span>Issuer</span><strong>{{ values.tls_status.issuer }}</strong></div>
-        <div class="mini-stat"><span>Expires</span><strong>{{ values.tls_status.not_after }}</strong></div>
-      </div>
-      {% endif %}
-      <div class="grid two" style="margin-top:12px">
-        <div class="field">
-          <label>Certificate chain (PEM)</label>
-          <input type="file" name="certificate" accept=".pem,.crt,.cer,application/x-pem-file">
+  <section class="settings-tab-panel {{ 'active' if active_tab == 'tls' else '' }}" id="panel-tls" role="tabpanel" aria-labelledby="tab-tls" data-settings-panel="tls" {% if active_tab != 'tls' %}hidden{% endif %}>
+    <div class="panel accent-panel">
+      <div class="panel-title">
+        <div>
+          <div class="hero-kicker">HTTPS</div>
+          <h2>TLS Certificate Management</h2>
         </div>
-        <div class="field">
-          <label>Private key (unencrypted PEM)</label>
-          <input type="file" name="private_key" accept=".pem,.key,application/x-pem-file">
-        </div>
+        <span class="badge good">Caddy</span>
       </div>
-      <div class="subtle">Both files are required together the first time. NASitron verifies the private key matches the leaf certificate.</div>
-    </div>
+      <p class="muted">Use NASitron's internal CA for bootstrap access, upload a PEM certificate/key, or obtain and renew a certificate from a custom ACME server.</p>
 
-    <div class="tls-section">
-      <div class="panel-title"><h3>ACME</h3><span class="badge">Automatic renewal</span></div>
-      <div class="grid two">
-        <div class="field">
-          <label>ACME account email</label>
-          <input type="email" name="tls_acme_email" value="{{ values.tls_acme_email }}" placeholder="admin@example.com">
+      <form method="post" action="/settings/tls" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="grid two settings-field-grid">
+          <div class="field">
+            <label>TLS mode</label>
+            <select name="tls_mode">
+              <option value="internal" {{ 'selected' if values.tls_mode == 'internal' else '' }}>Internal CA / bootstrap</option>
+              <option value="manual" {{ 'selected' if values.tls_mode == 'manual' else '' }}>Uploaded certificate</option>
+              <option value="acme" {{ 'selected' if values.tls_mode == 'acme' else '' }}>ACME managed certificate</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>TLS hostname or IP</label>
+            <input name="tls_domain" value="{{ values.tls_domain }}" placeholder="nas.example.com">
+            <div class="subtle">Required for ACME mode. Internal/bootstrap TLS accepts the IP or hostname you browse to.</div>
+          </div>
         </div>
-        <div class="field">
-          <label>ACME directory URL</label>
-          <input name="tls_acme_ca" value="{{ values.tls_acme_ca }}" placeholder="https://acme.example.com/directory">
-        </div>
-      </div>
-      <div class="field">
-        <label>Optional custom ACME CA root (PEM)</label>
-        <input type="file" name="acme_ca_root" accept=".pem,.crt,.cer,application/x-pem-file">
-        <div class="subtle">Use this when the custom ACME endpoint is signed by a private CA outside Caddy's normal trust store.</div>
-      </div>
-      <label class="checkbox"><input type="checkbox" name="clear_acme_ca_root"> Remove the currently stored custom ACME CA root</label>
-      <div class="subtle">HTTP-01/TLS-ALPN validation requires the ACME service to reach this host on ports 80/443 unless the server uses another supported challenge policy.</div>
-    </div>
 
-    <div class="row between" style="margin-top:14px">
-      <div class="subtle">Caddy's admin API remains private to the Compose network.</div>
-      <button class="primary" type="submit">Apply HTTPS Configuration</button>
+        <div class="tls-section">
+          <div class="panel-title"><h3>Uploaded certificate</h3><span class="badge {{ 'good' if values.tls_status.configured else 'offline' }}">{{ "Configured" if values.tls_status.configured else "Not configured" }}</span></div>
+          {% if values.tls_status.subject %}
+          <div class="grid three">
+            <div class="mini-stat"><span>Subject</span><strong>{{ values.tls_status.subject }}</strong></div>
+            <div class="mini-stat"><span>Issuer</span><strong>{{ values.tls_status.issuer }}</strong></div>
+            <div class="mini-stat"><span>Expires</span><strong>{{ values.tls_status.not_after }}</strong></div>
+          </div>
+          {% endif %}
+          <div class="grid two" style="margin-top:12px">
+            <div class="field">
+              <label>Certificate chain (PEM)</label>
+              <input type="file" name="certificate" accept=".pem,.crt,.cer,application/x-pem-file">
+            </div>
+            <div class="field">
+              <label>Private key (unencrypted PEM)</label>
+              <input type="file" name="private_key" accept=".pem,.key,application/x-pem-file">
+            </div>
+          </div>
+          <div class="subtle">Both files are required together the first time. NASitron verifies the private key matches the leaf certificate.</div>
+        </div>
+
+        <div class="tls-section">
+          <div class="panel-title"><h3>ACME</h3><span class="badge">Automatic renewal</span></div>
+          <div class="grid two">
+            <div class="field">
+              <label>ACME account email</label>
+              <input type="email" name="tls_acme_email" value="{{ values.tls_acme_email }}" placeholder="admin@example.com">
+            </div>
+            <div class="field">
+              <label>ACME directory URL</label>
+              <input name="tls_acme_ca" value="{{ values.tls_acme_ca }}" placeholder="https://acme.example.com/directory">
+            </div>
+          </div>
+          <div class="field">
+            <label>Optional custom ACME CA root (PEM)</label>
+            <input type="file" name="acme_ca_root" accept=".pem,.crt,.cer,application/x-pem-file">
+            <div class="subtle">Use this when the custom ACME endpoint is signed by a private CA outside Caddy's normal trust store.</div>
+          </div>
+          <label class="checkbox"><input type="checkbox" name="clear_acme_ca_root"> Remove the currently stored custom ACME CA root</label>
+          <div class="subtle">HTTP-01/TLS-ALPN validation requires the ACME service to reach this host on ports 80/443 unless the server uses another supported challenge policy.</div>
+        </div>
+
+        <div class="row between settings-form-footer">
+          <div class="subtle">Saving reloads Caddy without restarting NASitron. Caddy's admin API remains private to the Compose network.</div>
+          <button class="primary" type="submit">Apply HTTPS Configuration</button>
+        </div>
+      </form>
     </div>
-  </form>
-</section>
+  </section>
+</div>
+
+<script>
+(function initSettingsTabs() {
+  const root = document.querySelector(".settings-tabs");
+  if (!root) return;
+
+  const tabs = Array.from(root.querySelectorAll("[data-settings-tab]"));
+  const panels = Array.from(root.querySelectorAll("[data-settings-panel]"));
+  const allowed = new Set(tabs.map((tab) => tab.dataset.settingsTab));
+
+  function activate(name, updateUrl) {
+    if (!allowed.has(name)) name = "smtp";
+
+    tabs.forEach((tab) => {
+      const active = tab.dataset.settingsTab === name;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", active ? "true" : "false");
+      tab.tabIndex = active ? 0 : -1;
+    });
+
+    panels.forEach((panel) => {
+      const active = panel.dataset.settingsPanel === name;
+      panel.classList.toggle("active", active);
+      panel.hidden = !active;
+    });
+
+    if (updateUrl) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", name);
+      history.replaceState(null, "", url);
+    }
+  }
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => activate(tab.dataset.settingsTab, true));
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      let targetIndex = index;
+      if (event.key === "ArrowLeft") targetIndex = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === "ArrowRight") targetIndex = (index + 1) % tabs.length;
+      if (event.key === "Home") targetIndex = 0;
+      if (event.key === "End") targetIndex = tabs.length - 1;
+      tabs[targetIndex].focus();
+      activate(tabs[targetIndex].dataset.settingsTab, true);
+    });
+  });
+
+  activate(root.dataset.activeTab || "smtp", false);
+})();
+</script>
 {% endblock %}
