@@ -233,7 +233,7 @@ NASitron is read-only for monitoring and tuning collection, with one deliberatel
 
 NASitron 0.4 treats the application as an authenticated administrative interface. `NASITRON_SECRET_KEY` must be at least 32 characters, `NASITRON_WEB_USERNAME` is required, and `NASITRON_WEB_PASSWORD` must be at least 12 characters. All mutating forms use CSRF protection. `/healthz` remains public for container health checks.
 
-Drive replacement requires HTTPS by default. On a trusted private management network only, this can be intentionally overridden with `NASITRON_ALLOW_INSECURE_MAINTENANCE=true`. HTTP Basic credentials should otherwise always be protected by an HTTPS reverse proxy.
+Drive replacement requires HTTPS by default. On a trusted private management network only, this can be intentionally overridden with `NASITRON_ALLOW_INSECURE_MAINTENANCE=true`. HTTP Basic credentials should otherwise always be protected by an HTTPS reverse proxy. When TLS terminates at a reverse proxy, set `NASITRON_FORWARDED_ALLOW_IPS` to that trusted proxy IP/network so Uvicorn may honor `X-Forwarded-Proto`; do not use `*` unless untrusted clients cannot reach NASitron directly.
 
 SMART JSON is parsed even when `smartctl` returns a non-zero health bitmask, preventing a current failing result from being replaced by an older healthy sample. Partial telemetry refreshes are tracked explicitly and do not resolve alerts for subsystems that failed to refresh.
 
@@ -246,3 +246,6 @@ The replacement workflow now prefers structured OpenZFS status JSON when availab
 Support bundles have bounded per-command output, one concurrent generator per server, temporary-file streaming, and redaction of `keylocation`, `keystatus`, and administrator-defined ZFS user-property values.
 
 For replacement support, the dedicated SSH account additionally needs narrowly scoped read-only `wipefs --no-act` access and the exact `flock ... zpool replace` command shown in `examples/nasitron.sudoers`. Do not grant unrestricted passwordless sudo.
+
+
+SQLite persistence is serialized across collector threads while SSH collection remains concurrent, reducing writer contention without sacrificing multi-server polling concurrency.

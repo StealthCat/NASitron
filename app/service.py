@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -13,6 +14,11 @@ from .metrics import store_metrics
 from .models import CurrentState, Metric, Server, Snapshot
 from .parser import build_snapshot
 from .settings_store import get_int
+
+# SSH collection may run concurrently, but database persistence is serialized.
+# This preserves multi-server polling concurrency without making SQLite's single
+# writer unnecessarily contend across collector threads.
+_db_write_lock = threading.Lock()
 
 
 def _merge_previous_smart(snapshot: dict[str, Any], previous: dict[str, Any] | None) -> None:
@@ -72,55 +78,57 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
         _merge_previous_smart(snapshot, previous)
 
         payload = json.dumps(snapshot, separators=(",", ":"))
-        _write_current_state(db, server.id, now, payload)
-        store_metrics(db, server.id, now, snapshot)
+        with _db_write_lock:
+            _write_current_state(db, server.id, now, payload)
+            store_metrics(db, server.id, now, snapshot)
 
-        snapshot_interval = max(
-            1, min(1440, get_int(db, "full_snapshot_interval_minutes", 15))
-        )
-        full_snapshot_due = (
-            server.last_full_snapshot_at is None
-            or now - server.last_full_snapshot_at
-            >= timedelta(minutes=snapshot_interval)
-        )
-        if full_snapshot_due:
-            db.add(
-                Snapshot(
-                    server_id=server.id,
-                    captured_at=now,
-                    payload_json=payload,
-                )
+            snapshot_interval = max(
+                1, min(1440, get_int(db, "full_snapshot_interval_minutes", 15))
             )
-            server.last_full_snapshot_at = now
+            full_snapshot_due = (
+                server.last_full_snapshot_at is None
+                or now - server.last_full_snapshot_at
+                >= timedelta(minutes=snapshot_interval)
+            )
+            if full_snapshot_due:
+                db.add(
+                    Snapshot(
+                        server_id=server.id,
+                        captured_at=now,
+                        payload_json=payload,
+                    )
+                )
+                server.last_full_snapshot_at = now
 
-        server.last_poll_at = now
-        server.last_error = None
-        server.consecutive_failures = 0
-        server.last_collection_state = (
-            "partial" if snapshot.get("collection", {}).get("partial") else "ok"
-        )
-        if server.last_collection_state == "ok":
-            server.last_ok_at = now
-        if include_smart:
-            # Mark the attempt time even when one drive fails to answer so a bad
-            # device is not hammered continuously on every lightweight poll.
-            server.last_smart_at = now
+            server.last_poll_at = now
+            server.last_error = None
+            server.consecutive_failures = 0
+            server.last_collection_state = (
+                "partial" if snapshot.get("collection", {}).get("partial") else "ok"
+            )
+            if server.last_collection_state == "ok":
+                server.last_ok_at = now
+            if include_smart:
+                # Mark the attempt time even when one drive fails to answer so a bad
+                # device is not hammered continuously on every lightweight poll.
+                server.last_smart_at = now
 
-        collection_recovered(db, server)
-        evaluate_snapshot(db, server, snapshot)
-        db.commit()
+            collection_recovered(db, server)
+            evaluate_snapshot(db, server, snapshot)
+            db.commit()
         return snapshot
     except Exception as exc:
         db.rollback()
-        server = db.get(Server, server_id)
-        if server is None:
-            raise
-        server.last_poll_at = now
-        server.last_error = str(exc)
-        server.last_collection_state = "failed"
-        server.consecutive_failures = (server.consecutive_failures or 0) + 1
-        collection_failed(db, server, str(exc))
-        db.commit()
+        with _db_write_lock:
+            server = db.get(Server, server_id)
+            if server is None:
+                raise
+            server.last_poll_at = now
+            server.last_error = str(exc)
+            server.last_collection_state = "failed"
+            server.consecutive_failures = (server.consecutive_failures or 0) + 1
+            collection_failed(db, server, str(exc))
+            db.commit()
         raise
 
 
