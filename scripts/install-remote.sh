@@ -605,11 +605,6 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 
-log "Validating NASitron account permissions"
-runuser -u "$NASITRON_USER" -- zpool list -H -o name >/dev/null 2>&1 ||   die "$NASITRON_USER cannot read the ZFS pool inventory"
-runuser -u "$NASITRON_USER" -- lsblk -J -b -o NAME,KNAME,PATH,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL,FSTYPE,UUID,PTTYPE,PARTTYPE,MOUNTPOINTS >/dev/null 2>&1 ||   die "$NASITRON_USER cannot read the block-device inventory"
-sudo -u "$NASITRON_USER" sudo -n "$HELPER_PATH" dmesg >/dev/null 2>&1 ||   die "Restricted passwordless sudo helper validation failed"
-
 SSH_PORT="$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }')"
 SSH_PORT="${SSH_PORT:-22}"
 HOST_FQDN="$(hostname -f 2>/dev/null || hostname)"
@@ -661,7 +656,7 @@ payload = pathlib.Path(path).read_bytes()
 print(hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest())
 PY
 )"
-  CURL_ENROLL=(curl -fsS -X POST
+  CURL_ENROLL=(curl -fsS --retry 4 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 -X POST
     -H "Content-Type: application/json"
     -H "X-NASitron-Enrollment-Signature: $ENROLL_SIGNATURE"
     --data-binary "@$ENROLL_PAYLOAD"
@@ -669,7 +664,7 @@ PY
   if [[ "$ENROLL_INSECURE" -eq 1 ]]; then
     CURL_ENROLL+=(-k)
   fi
-  ENROLL_RESPONSE="$("${CURL_ENROLL[@]}" "$ENROLL_URL")" || die "NASitron enrollment callback failed"
+  ENROLL_RESPONSE="$("${CURL_ENROLL[@]}" "$ENROLL_URL")" || die "NASitron enrollment callback failed. Verify this host can reach $ENROLL_URL"
   SERVER_ID="$(python3 - "$ENROLL_RESPONSE" <<'PY'
 import json
 import sys
@@ -684,6 +679,21 @@ print(payload["server_id"])
 PY
 )" || die "NASitron enrollment response was invalid"
   log "NASitron registration complete (server ID $SERVER_ID)"
+fi
+
+log "Validating NASitron account permissions"
+VALIDATION_WARNINGS=0
+if ! runuser -u "$NASITRON_USER" -- zpool list -H -o name >/dev/null 2>&1; then
+  printf '[NASitron] WARNING: %s cannot currently read the ZFS pool inventory; NASitron will report the collection error.\n' "$NASITRON_USER" >&2
+  VALIDATION_WARNINGS=$((VALIDATION_WARNINGS + 1))
+fi
+if ! runuser -u "$NASITRON_USER" -- lsblk -J -b -o NAME,KNAME,PATH,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL,FSTYPE,UUID,PTTYPE,PARTTYPE,MOUNTPOINTS >/dev/null 2>&1; then
+  printf '[NASitron] WARNING: %s cannot currently read the block-device inventory; NASitron will report the collection error.\n' "$NASITRON_USER" >&2
+  VALIDATION_WARNINGS=$((VALIDATION_WARNINGS + 1))
+fi
+if ! sudo -u "$NASITRON_USER" sudo -n "$HELPER_PATH" dmesg >/dev/null 2>&1; then
+  printf '[NASitron] WARNING: diagnostic dmesg access validation failed; core enrollment remains valid and NASitron will show any diagnostic limitation.\n' >&2
+  VALIDATION_WARNINGS=$((VALIDATION_WARNINGS + 1))
 fi
 
 cat <<EOF
