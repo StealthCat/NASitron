@@ -877,8 +877,12 @@ def metric_history(
         .limit(1)
     ).first()
     points = [{"t": row.captured_at.isoformat() + "Z", "v": float(row.value)} for row in rows]
-    if latest and points[-1]["t"] != latest[0].isoformat() + "Z":
-        points.append({"t": latest[0].isoformat() + "Z", "v": latest[1]})
+    if latest:
+        latest_point = {"t": latest[0].isoformat() + "Z", "v": latest[1]}
+        if points[-1]["t"] == latest_point["t"]:
+            points[-1] = latest_point
+        else:
+            points.append(latest_point)
     sample_count = sum(int(row.sample_count) for row in rows)
 
     return {
