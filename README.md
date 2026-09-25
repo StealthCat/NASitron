@@ -409,3 +409,12 @@ The Add Server enrollment command now performs true end-to-end enrollment. NASit
 After the installer configures the remote NAS, it sends a signed callback containing the detected hostname/IP, SSH port, username, and SSH host-key fingerprint. NASitron verifies the HMAC proof, consumes the enrollment once, creates or updates the matching Server record, enables monitoring, and begins collection. The Add Server page polls the enrollment status and redirects to the new server automatically when registration completes.
 
 For internal-CA deployments the callback may use curl's TLS verification bypass, but the registration payload is HMAC-signed with a secret that is never transmitted in the callback. The one-time enrollment expires after 30 minutes and cannot be replayed after successful registration.
+
+
+## NASitron 0.6.10 seamless enrollment installer
+
+The Add Server workflow now serves a one-time enrollment-specific installer script. The visible command no longer carries SSH public-key, callback URL, or enrollment-secret arguments. With trusted HTTPS it is simply a curl of the one-time install URL piped to sudo bash. The downloaded script already contains the NASitron-generated public key and callback context, performs remote setup, and registers the host automatically when it finishes.
+
+Internal-CA deployments keep the same one-command experience using a temporary-file download plus SHA-256 verification before execution. The hash is calculated from the exact one-time enrollment script, not the generic installer.
+
+The Settings page now points administrators to Add Server for automatic enrollment so the generic manual installer is not confused with the self-registering path.
