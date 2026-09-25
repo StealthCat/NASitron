@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "NASitron"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 DATA_DIR = Path(os.getenv("NASITRON_DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
