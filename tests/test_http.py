@@ -1,10 +1,16 @@
 from datetime import datetime, timedelta
+import hashlib
+import hmac
+import json
+import re
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.crypto import decrypt
 from app.db import SessionLocal
 from app.main import app
-from app.models import CurrentState, Metric, Server
+from app.models import CurrentState, Metric, RemoteEnrollment, Server
 from app.security import csrf_token
 from app.settings_store import set_setting
 
@@ -229,8 +235,11 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
         assert "curl -kfsSL" in response.text
         assert "sha256sum -c -" in response.text
         assert "sudo bash" in response.text
-        assert "--public-key" not in response.text
-        assert "Copy the generated private key" in response.text
+        assert "--public-key" in response.text
+        assert "--enroll-url" in response.text
+        assert "--enroll-secret" in response.text
+        assert "--enroll-insecure" in response.text
+        assert "registers the server automatically" in response.text
         assert "Installer SHA-256" in response.text
 
         with SessionLocal() as db:
@@ -241,11 +250,109 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
         response = client.get("/servers/new")
         assert response.status_code == 200
         assert "curl -fsSL" in response.text
-        assert "| sudo bash" in response.text
+        assert "| sudo bash -s --" in response.text
         assert "curl -kfsSL" not in response.text
-        assert "--public-key" not in response.text
+        assert "--public-key" in response.text
+        assert "--enroll-url" in response.text
+        assert "--enroll-secret" in response.text
 
         with SessionLocal() as db:
             set_setting(db, "tls_mode", "internal")
             set_setting(db, "tls_domain", "localhost")
+            db.commit()
+
+
+def test_remote_enrollment_callback_creates_server_and_is_one_time():
+    created_server_id = None
+    enrollment_id = None
+    try:
+        with TestClient(app) as client:
+            _login(client)
+            with SessionLocal() as db:
+                set_setting(db, "tls_mode", "acme")
+                set_setting(db, "tls_domain", "nas.example.com")
+                db.commit()
+
+            page = client.get("/servers/new")
+            assert page.status_code == 200
+            match = re.search(r'data-enrollment-id="([A-Za-z0-9_-]+)"', page.text)
+            assert match is not None
+            enrollment_id = match.group(1)
+
+            with SessionLocal() as db:
+                enrollment = db.get(RemoteEnrollment, enrollment_id)
+                assert enrollment is not None
+                assert enrollment.used_at is None
+                secret = decrypt(enrollment.secret_enc)
+                assert secret
+                assert "nasitron-enrollment-" in enrollment.public_key
+
+            payload = json.dumps(
+                {
+                    "host": "127.0.0.254",
+                    "host_key_fingerprint": "SHA256:test-fingerprint",
+                    "hostname": "auto-enrolled-test",
+                    "port": 22,
+                    "username": "nasitron",
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+            signature = hmac.new(
+                secret.encode(),
+                payload,
+                hashlib.sha256,
+            ).hexdigest()
+
+            callback = client.post(
+                f"/api/enroll/{enrollment_id}/complete",
+                content=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-NASitron-Enrollment-Signature": signature,
+                },
+            )
+            assert callback.status_code == 200
+            result = callback.json()
+            assert result["status"] == "registered"
+            created_server_id = result["server_id"]
+
+            status = client.get(f"/api/enrollments/{enrollment_id}/status")
+            assert status.status_code == 200
+            assert status.json() == {
+                "status": "complete",
+                "server_id": created_server_id,
+            }
+
+            servers_page = client.get("/servers")
+            assert servers_page.status_code == 200
+            assert "auto-enrolled-test" in servers_page.text
+
+            replay = client.post(
+                f"/api/enroll/{enrollment_id}/complete",
+                content=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-NASitron-Enrollment-Signature": signature,
+                },
+            )
+            assert replay.status_code == 409
+
+            with SessionLocal() as db:
+                server = db.get(Server, created_server_id)
+                assert server is not None
+                assert server.host == "127.0.0.254"
+                assert server.auth_type == "key"
+                assert server.sudo_for_smart is True
+                assert decrypt(server.private_key_enc)
+    finally:
+        with SessionLocal() as db:
+            if enrollment_id:
+                enrollment = db.get(RemoteEnrollment, enrollment_id)
+                if enrollment:
+                    db.delete(enrollment)
+            if created_server_id:
+                server = db.get(Server, created_server_id)
+                if server:
+                    db.delete(server)
             db.commit()
