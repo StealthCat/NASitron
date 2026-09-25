@@ -18,6 +18,7 @@
   </div>
   <div class="row">
     <form method="post" action="/servers/{{ server.id }}/poll" class="inline"><button type="submit">Poll now</button></form>
+    <a class="button" href="/servers/{{ server.id }}/replace-drive">Replace failed drive</a>
     <a class="button" href="/servers/{{ server.id }}/support-bundle">Download tuning bundle</a>
     <a class="button" href="/servers/{{ server.id }}/edit">Edit</a>
   </div>
