@@ -233,12 +233,13 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
         assert "curl -kfsSL" in response.text
         assert "sha256sum -c -" in response.text
         assert "sudo bash" in response.text
-        assert "--public-key" in response.text
-        assert "--enroll-url" in response.text
-        assert "--enroll-secret" in response.text
-        assert "--enroll-insecure" in response.text
+        assert "--public-key" not in response.text
+        assert "--enroll-url" not in response.text
+        assert "--enroll-secret" not in response.text
         assert "registers the server automatically" in response.text
         assert "Installer SHA-256" in response.text
+        assert "/api/enroll/" in response.text
+        assert "/install.sh?token=" in response.text
 
         with SessionLocal() as db:
             set_setting(db, "tls_mode", "acme")
@@ -248,11 +249,22 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
         response = client.get("/servers/new")
         assert response.status_code == 200
         assert "curl -fsSL" in response.text
-        assert "| sudo bash -s --" in response.text
+        assert "| sudo bash" in response.text
         assert "curl -kfsSL" not in response.text
-        assert "--public-key" in response.text
-        assert "--enroll-url" in response.text
-        assert "--enroll-secret" in response.text
+        assert "--public-key" not in response.text
+        assert "--enroll-url" not in response.text
+        assert "--enroll-secret" not in response.text
+        match = re.search(
+            r'(http://testserver/api/enroll/[A-Za-z0-9_-]+/install\.sh\?token=[0-9a-f]{64})',
+            response.text,
+        )
+        assert match is not None
+        bootstrap = client.get(match.group(1))
+        assert bootstrap.status_code == 200
+        assert "NASITRON_SSH_PUBLIC_KEY=" in bootstrap.text
+        assert "NASITRON_ENROLL_URL=" in bootstrap.text
+        assert "NASITRON_ENROLL_SECRET=" in bootstrap.text
+        assert "nasitron-enrollment-" in bootstrap.text
 
         with SessionLocal() as db:
             set_setting(db, "tls_mode", "internal")
