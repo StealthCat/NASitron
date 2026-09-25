@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import shlex
 import tempfile
 from contextlib import asynccontextmanager
@@ -17,6 +19,8 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.orm import Session, selectinload
 from starlette.background import BackgroundTask
@@ -32,7 +36,7 @@ from .config import (
     TIMEZONE,
     validate_runtime_config,
 )
-from .crypto import encrypt
+from .crypto import decrypt, encrypt
 from .db import SessionLocal, init_db
 from .instance_lock import InstanceLock
 from .maintenance import (
@@ -47,7 +51,7 @@ from .middleware import (
     RequireHTTPSMiddleware,
     SecurityHeadersMiddleware,
 )
-from .models import Alert, CurrentState, MaintenanceAction, Metric, Server
+from .models import Alert, CurrentState, MaintenanceAction, Metric, RemoteEnrollment, Server
 from .scheduler import start_scheduler, stop_scheduler, trigger_now
 from .security import (
     SESSION_COOKIE_NAME,
@@ -179,6 +183,7 @@ async def require_web_session(request: Request, call_next):
     if (
         path in {"/healthz", "/login", "/install-remote.sh"}
         or path.startswith("/static/")
+        or path.startswith("/api/enroll/")
     ):
         return await call_next(request)
     if request_is_authenticated(request):
@@ -283,6 +288,142 @@ def download_remote_installer():
         filename="nasitron-install-remote.sh",
         headers={"X-NASitron-Version": APP_VERSION},
     )
+
+
+@app.post("/api/enroll/{enrollment_id}/complete")
+async def complete_remote_enrollment(
+    enrollment_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", enrollment_id):
+        raise HTTPException(status_code=404)
+
+    enrollment = db.get(RemoteEnrollment, enrollment_id)
+    if enrollment is None:
+        raise HTTPException(status_code=404)
+    now = datetime.utcnow()
+    if enrollment.used_at is not None:
+        raise HTTPException(status_code=409, detail="Enrollment token has already been used.")
+    if enrollment.expires_at <= now:
+        raise HTTPException(status_code=410, detail="Enrollment token has expired.")
+
+    body = await request.body()
+    supplied_signature = request.headers.get(
+        "X-NASitron-Enrollment-Signature", ""
+    ).strip().lower()
+    secret = decrypt(enrollment.secret_enc) or ""
+    if not secret or not re.fullmatch(r"[0-9a-f]{64}", supplied_signature):
+        raise HTTPException(status_code=403, detail="Invalid enrollment proof.")
+    expected_signature = hmac.new(
+        secret.encode("utf-8"), body, hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(supplied_signature, expected_signature):
+        raise HTTPException(status_code=403, detail="Invalid enrollment proof.")
+
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid enrollment payload.")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid enrollment payload.")
+
+    hostname = bounded_text(
+        str(payload.get("hostname") or ""),
+        "Remote hostname",
+        maximum=120,
+    )
+    host = validate_host(str(payload.get("host") or ""), "Remote host")
+    port = bounded_int(int(payload.get("port") or 22), "SSH port", 1, 65535)
+    username = bounded_text(
+        str(payload.get("username") or "nasitron"),
+        "SSH username",
+        maximum=120,
+    )
+    fingerprint = bounded_text(
+        str(payload.get("host_key_fingerprint") or ""),
+        "SSH host-key fingerprint",
+        minimum=0,
+        maximum=128,
+    )
+
+    private_key = decrypt(enrollment.private_key_enc)
+    if not private_key:
+        raise HTTPException(status_code=500, detail="Enrollment key is unavailable.")
+    try:
+        SSHCollector.parse_private_key(private_key, None)
+    except CollectorError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    server = db.scalar(
+        select(Server).where(
+            Server.host == host,
+            Server.port == port,
+            Server.username == username,
+        )
+    )
+    if server is None:
+        name = hostname
+        suffix = 2
+        while db.scalar(select(Server.id).where(Server.name == name)) is not None:
+            tail = f" ({suffix})"
+            name = hostname[: max(1, 120 - len(tail))] + tail
+            suffix += 1
+        server = Server(
+            name=name,
+            host=host,
+            port=port,
+            username=username,
+            auth_type="key",
+            private_key_enc=encrypt(private_key),
+            private_key_passphrase_enc=None,
+            poll_interval_seconds=60,
+            smart_interval_minutes=15,
+            sudo_for_smart=True,
+            strict_host_key=False,
+            host_key_fingerprint=fingerprint or None,
+            enabled=True,
+        )
+        db.add(server)
+        db.flush()
+    else:
+        server.auth_type = "key"
+        server.password_enc = None
+        server.private_key_enc = encrypt(private_key)
+        server.private_key_passphrase_enc = None
+        server.sudo_for_smart = True
+        server.enabled = True
+        if fingerprint:
+            server.host_key_fingerprint = fingerprint
+
+    enrollment.used_at = now
+    enrollment.server_id = server.id
+    db.commit()
+    trigger_now(server.id)
+    return {
+        "status": "registered",
+        "server_id": server.id,
+        "server_name": server.name,
+        "host": server.host,
+    }
+
+
+@app.get("/api/enrollments/{enrollment_id}/status")
+def remote_enrollment_status(
+    enrollment_id: str,
+    db: Session = Depends(get_db),
+):
+    enrollment = db.get(RemoteEnrollment, enrollment_id)
+    if enrollment is None:
+        raise HTTPException(status_code=404)
+    if enrollment.used_at is not None and enrollment.server_id is not None:
+        return {
+            "status": "complete",
+            "server_id": enrollment.server_id,
+        }
+    if enrollment.expires_at <= datetime.utcnow():
+        return {"status": "expired"}
+    return {"status": "pending"}
 
 
 def _decode_state(row: CurrentState | None) -> dict | None:
@@ -600,17 +741,57 @@ def new_server(request: Request, db: Session = Depends(get_db)):
     tls_domain = (get_setting(db, "tls_domain") or "").strip()
     installer_url = str(request.url_for("download_remote_installer"))
     installer_sha256 = hashlib.sha256(INSTALLER_PATH.read_bytes()).hexdigest()
+
+    enrollment_id = secrets.token_urlsafe(18)
+    enrollment_secret = secrets.token_urlsafe(32)
+    private_key_obj = Ed25519PrivateKey.generate()
+    private_key = private_key_obj.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.OpenSSH,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    public_key = private_key_obj.public_key().public_bytes(
+        encoding=serialization.Encoding.OpenSSH,
+        format=serialization.PublicFormat.OpenSSH,
+    ).decode("utf-8")
+    public_key += f" nasitron-enrollment-{enrollment_id}"
+
+    enrollment = RemoteEnrollment(
+        id=enrollment_id,
+        secret_enc=encrypt(enrollment_secret) or "",
+        public_key=public_key,
+        private_key_enc=encrypt(private_key) or "",
+        expires_at=datetime.utcnow() + timedelta(minutes=30),
+    )
+    db.add(enrollment)
+    db.commit()
+
+    complete_url = str(
+        request.url_for(
+            "complete_remote_enrollment",
+            enrollment_id=enrollment_id,
+        )
+    )
+    installer_args = (
+        f"--public-key {shlex.quote(public_key)} "
+        f"--enroll-url {shlex.quote(complete_url)} "
+        f"--enroll-secret {shlex.quote(enrollment_secret)}"
+    )
     installer_url_shell = shlex.quote(installer_url)
     if tls_mode == "internal":
         installer_command = (
             '(tmp="$(mktemp)" && '
             f'curl -kfsSL {installer_url_shell} -o "$tmp" && '
             f"printf '%s  %s\\n' {shlex.quote(installer_sha256)} \"$tmp\" "
-            '| sha256sum -c - && sudo bash "$tmp"; '
+            '| sha256sum -c - && '
+            f'sudo bash "$tmp" {installer_args} --enroll-insecure; '
             'rc=$?; rm -f "$tmp"; exit "$rc")'
         )
     else:
-        installer_command = f"curl -fsSL {installer_url_shell} | sudo bash"
+        installer_command = (
+            f"curl -fsSL {installer_url_shell} | "
+            f"sudo bash -s -- {installer_args}"
+        )
     return templates.TemplateResponse(
         request=request,
         name="server_form.html",
@@ -623,6 +804,8 @@ def new_server(request: Request, db: Session = Depends(get_db)):
             "installer_command": installer_command,
             "installer_tls_mode": tls_mode,
             "installer_tls_domain": tls_domain,
+            "enrollment_id": enrollment_id,
+            "enrollment_expires_minutes": 30,
         },
     )
 
