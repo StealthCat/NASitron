@@ -1,20 +1,26 @@
 from __future__ import annotations
 
+import copy
 import json
 import shlex
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterator
 
 from .collector import CollectorError, SSHCollector
+from .config import REMOTE_HELPER_PATH
 from .models import Server
 from .parser import parse_pool_status, parse_pool_status_json
 
 FAILED_STATES = {"DEGRADED", "FAULTED", "OFFLINE", "UNAVAIL", "REMOVED"}
+_INVENTORY_TTL_SECONDS = 15.0
 
 _lock_guard = threading.Lock()
 _server_locks: dict[int, threading.Lock] = {}
+_cache_lock = threading.Lock()
+_inventory_cache: dict[int, tuple[float, dict[str, Any]]] = {}
 
 
 @dataclass(frozen=True)
@@ -36,6 +42,9 @@ def maintenance_lock(server_id: int) -> Iterator[None]:
         yield
     finally:
         lock.release()
+        with _lock_guard:
+            if _server_locks.get(server_id) is lock and not lock.locked():
+                _server_locks.pop(server_id, None)
 
 
 def _node_has_usage(node: dict[str, Any]) -> bool:
@@ -43,9 +52,7 @@ def _node_has_usage(node: dict[str, Any]) -> bool:
         return True
     if any(x for x in (node.get("mountpoints") or []) if x):
         return True
-    if node.get("children"):
-        return True
-    return False
+    return bool(node.get("children"))
 
 
 def _whole_disks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -68,9 +75,9 @@ def _stable_id_map(text: str) -> dict[str, list[str]]:
     return result
 
 
-def _best_stable_path(paths: list[str], fallback: str) -> str:
+def _best_stable_path(paths: list[str]) -> str | None:
     if not paths:
-        return fallback
+        return None
     preferred = sorted(
         paths,
         key=lambda p: (
@@ -144,7 +151,7 @@ def _failed_leaf_vdevs(
 
 def _discover_with_ssh(ssh: SSHCollector) -> dict[str, Any]:
     pool_result = ssh.run("zpool list -H -o name", timeout=20)
-    if pool_result["exit"] != 0:
+    if pool_result["exit"] != 0 or pool_result.get("stdout_truncated"):
         raise CollectorError(
             "Unable to list ZFS pools: "
             + (pool_result["stderr"] or pool_result["stdout"]).strip()
@@ -158,17 +165,20 @@ def _discover_with_ssh(ssh: SSHCollector) -> dict[str, Any]:
     for pool in pools:
         quoted = shlex.quote(pool)
         text_result = ssh.run(f"zpool status -P -L {quoted}", timeout=20)
-        if text_result["exit"] != 0:
+        if text_result["exit"] != 0 or text_result.get("stdout_truncated"):
             raise CollectorError(
                 f"Unable to read zpool status for {pool}: "
                 + (text_result["stderr"] or text_result["stdout"]).strip()
             )
-        json_result = ssh.run(
-            f"zpool status -j --json-int -P -L {quoted}",
-            timeout=20,
-        )
+
+        json_result = {"stdout": "", "exit": 2}
         guid_result = {"stdout": "", "exit": 1}
-        if json_result["exit"] != 0:
+        if ssh.server.zpool_status_json_supported is not False:
+            json_result = ssh.run(
+                f"zpool status -j --json-int -P -L {quoted}",
+                timeout=20,
+            )
+        if json_result.get("exit") != 0 or json_result.get("stdout_truncated"):
             guid_result = ssh.run(f"zpool status -g {quoted}", timeout=20)
 
         statuses[pool] = text_result["stdout"]
@@ -178,7 +188,7 @@ def _discover_with_ssh(ssh: SSHCollector) -> dict[str, Any]:
                 pool,
                 text_result["stdout"],
             )
-            if json_result["exit"] == 0
+            if json_result.get("exit") == 0 and not json_result.get("stdout_truncated")
             else None
         )
         if parsed is None:
@@ -196,8 +206,12 @@ def _discover_with_ssh(ssh: SSHCollector) -> dict[str, Any]:
             _failed_leaf_vdevs(
                 pool,
                 text_result["stdout"],
-                json_result.get("stdout", "") if json_result["exit"] == 0 else "",
-                guid_result.get("stdout", "") if guid_result["exit"] == 0 else "",
+                json_result.get("stdout", "")
+                if json_result.get("exit") == 0
+                else "",
+                guid_result.get("stdout", "")
+                if guid_result.get("exit") == 0
+                else "",
             )
         )
 
@@ -205,7 +219,7 @@ def _discover_with_ssh(ssh: SSHCollector) -> dict[str, Any]:
         "lsblk -J -b -o NAME,KNAME,PATH,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL,FSTYPE,UUID,PTTYPE,PARTTYPE,MOUNTPOINTS",
         timeout=20,
     )
-    if lsblk_result["exit"] != 0:
+    if lsblk_result["exit"] != 0 or lsblk_result.get("stdout_truncated"):
         raise CollectorError(
             "Unable to inventory block devices: "
             + (lsblk_result["stderr"] or lsblk_result["stdout"]).strip()
@@ -225,7 +239,9 @@ done""",
         timeout=20,
     )
     stable_map = (
-        _stable_id_map(by_id_result["stdout"]) if by_id_result["exit"] == 0 else {}
+        _stable_id_map(by_id_result["stdout"])
+        if by_id_result["exit"] == 0 and not by_id_result.get("stdout_truncated")
+        else {}
     )
 
     disks = _whole_disks(block.get("blockdevices", []))
@@ -241,44 +257,44 @@ done""",
 
     candidates: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
+    helper = shlex.quote(REMOTE_HELPER_PATH)
     for disk in disks:
         path = str(disk.get("path") or "")
         kname = str(disk.get("kname") or disk.get("name") or "")
-        reason = ""
         if not path:
             continue
-        if _node_has_usage(disk):
+
+        stable_path = _best_stable_path(stable_map.get(path, []))
+        reason = ""
+        if stable_path is None:
+            reason = "no stable /dev/disk/by-id whole-disk identifier"
+        elif _node_has_usage(disk):
             reason = "filesystem, partition table, UUID, mountpoint, or child device present"
         elif any(_is_path_on_disk(vdev, path) for vdev in used_vdev_paths):
             reason = "already belongs to a ZFS pool"
+        elif not kname.replace("-", "").replace("_", "").isalnum():
+            reason = "unexpected kernel device name"
         else:
-            if not kname.replace("-", "").replace("_", "").isalnum():
-                reason = "unexpected kernel device name"
-                holder_result = {"exit": 1}
-            else:
-                holder_result = ssh.run(
-                    f'test -z "$(find /sys/class/block/{kname}/holders '
-                    '-mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)"',
-                    timeout=10,
-                )
+            holder_result = ssh.run(
+                f'test -z "$(find /sys/class/block/{kname}/holders '
+                '-mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)"',
+                timeout=10,
+            )
             if holder_result["exit"] != 0:
                 reason = "device has active kernel holders"
             else:
                 wipefs_result = ssh.run(
-                    "sudo -n wipefs --no-act --noheadings "
-                    "--output TYPE,UUID,LABEL "
-                    + shlex.quote(path),
+                    f"sudo -n {helper} wipefs-check {shlex.quote(stable_path)}",
                     timeout=20,
                 )
                 if wipefs_result["exit"] != 0:
-                    reason = "could not prove disk is signature-free with wipefs"
+                    reason = "could not prove disk is signature-free with the NASitron root helper"
                 elif wipefs_result["stdout"].strip():
                     reason = "filesystem/RAID/partition signature detected"
 
-        stable_path = _best_stable_path(stable_map.get(path, []), path)
         item = {
             "path": path,
-            "device": stable_path,
+            "device": stable_path or path,
             "size_bytes": int(disk.get("size") or 0),
             "rotational": bool(disk.get("rota")),
             "transport": disk.get("tran") or "",
@@ -301,9 +317,29 @@ done""",
     }
 
 
-def discover_replacement_options(server: Server) -> dict[str, Any]:
+def discover_replacement_options(
+    server: Server,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    now = time.monotonic()
+    if not force:
+        with _cache_lock:
+            cached = _inventory_cache.get(server.id)
+            if cached and now - cached[0] <= _INVENTORY_TTL_SECONDS:
+                return copy.deepcopy(cached[1])
+
     with SSHCollector(server) as ssh:
-        return _discover_with_ssh(ssh)
+        inventory = _discover_with_ssh(ssh)
+
+    with _cache_lock:
+        _inventory_cache[server.id] = (now, copy.deepcopy(inventory))
+    return inventory
+
+
+def invalidate_inventory_cache(server_id: int) -> None:
+    with _cache_lock:
+        _inventory_cache.pop(server_id, None)
 
 
 def validate_replacement_choice(
@@ -343,7 +379,8 @@ def validate_replacement_choice(
     )
     if candidate is None:
         raise ValueError(
-            "The selected replacement disk is no longer blank and unallocated, or is no longer present."
+            "The selected replacement disk is no longer blank, stable-ID-addressable, "
+            "unallocated, or present."
         )
 
     required_size = int(failed.get("size_bytes") or 0)
@@ -358,27 +395,28 @@ def validate_replacement_choice(
 def replace_drive(server: Server, request: ReplacementRequest) -> dict[str, Any]:
     with maintenance_lock(server.id):
         with SSHCollector(server) as ssh:
-            # Validate and execute on the same SSH session. The remote flock
-            # also prevents another NASitron instance from issuing zpool
-            # replace at the exact same time.
             inventory = _discover_with_ssh(ssh)
             failed, candidate = validate_replacement_choice(inventory, request)
 
+            helper = shlex.quote(REMOTE_HELPER_PATH)
+            allow = "1" if request.allow_conflicting_operation else "0"
             command = (
-                "sudo -n flock -n /run/lock/nasitron-zpool-replace.lock "
-                "zpool replace "
+                f"sudo -n {helper} replace "
                 + shlex.quote(request.pool)
                 + " "
                 + shlex.quote(request.old_guid)
                 + " "
                 + shlex.quote(request.new_device)
+                + " "
+                + allow
             )
-            result = ssh.run(command, timeout=120)
+            result = ssh.run(command, timeout=150)
             status = ssh.run(
                 f"zpool status -P -L {shlex.quote(request.pool)}",
                 timeout=30,
             )
 
+    invalidate_inventory_cache(server.id)
     return {
         "ok": result["exit"] == 0,
         "exit": result["exit"],
