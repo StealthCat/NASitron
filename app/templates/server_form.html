@@ -158,6 +158,10 @@ toggleAuth();
     } catch (_error) {
       // Keep polling; a transient browser/network failure should not cancel enrollment.
     }
+    if (attempts === 15) {
+      status.textContent = "Still waiting for registration. Check the remote installer terminal for “NASitron registration complete” or a callback error; this page will keep checking automatically.";
+      status.classList.add("warning");
+    }
     if (attempts < 900) {
       window.setTimeout(poll, 2000);
     }
