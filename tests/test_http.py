@@ -229,7 +229,8 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
         assert response.status_code == 200
         assert "Prepare the NAS with one command" in response.text
         assert "<details" in response.text
-        assert "/install-remote.sh" in response.text
+        assert "/api/enroll/" in response.text
+        assert "/install.sh?token=" in response.text
         assert "curl -kfsSL" in response.text
         assert "sha256sum -c -" in response.text
         assert "sudo bash" in response.text
