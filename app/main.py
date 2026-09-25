@@ -1611,6 +1611,207 @@ def acknowledge_alert(
     return RedirectResponse("/alerts", status_code=303)
 
 
+@app.get("/users", response_class=HTMLResponse)
+def users_page(request: Request, db: Session = Depends(get_db)):
+    _require_admin(request)
+    users = db.scalars(select(WebUser).order_by(WebUser.username)).all()
+    enabled_admins = db.scalar(
+        select(func.count(WebUser.id)).where(
+            WebUser.is_admin.is_(True),
+            WebUser.enabled.is_(True),
+        )
+    ) or 0
+    return templates.TemplateResponse(
+        request=request,
+        name="users.html",
+        context={
+            "request": request,
+            "users": users,
+            "enabled_admins": enabled_admins,
+        },
+    )
+
+
+@app.get("/users/new", response_class=HTMLResponse)
+def new_user_page(request: Request):
+    _require_admin(request)
+    return templates.TemplateResponse(
+        request=request,
+        name="user_form.html",
+        context={
+            "request": request,
+            "user": None,
+            "error": None,
+        },
+    )
+
+
+@app.post("/users/new")
+def create_web_user(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+    is_admin: bool = Form(False),
+    enabled: bool = Form(False),
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    _require_admin(request)
+    clean_username = _clean_web_username(username)
+    clean_password = _validate_web_password(password)
+    if clean_password != password_confirm:
+        bad_request("Password confirmation does not match.")
+    if db.scalar(select(WebUser.id).where(WebUser.username == clean_username)) is not None:
+        bad_request("A user with that username already exists.")
+
+    user = WebUser(
+        username=clean_username,
+        password_hash=hash_password(clean_password),
+        is_admin=is_admin,
+        enabled=enabled,
+        session_version=1,
+    )
+    db.add(user)
+    db.commit()
+    return RedirectResponse(
+        "/users?message=" + quote(f"User {clean_username} created."),
+        status_code=303,
+    )
+
+
+@app.get("/users/{user_id}/edit", response_class=HTMLResponse)
+def edit_user_page(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _require_admin(request)
+    user = db.get(WebUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request=request,
+        name="user_form.html",
+        context={
+            "request": request,
+            "user": user,
+            "error": None,
+        },
+    )
+
+
+@app.post("/users/{user_id}/edit")
+def update_web_user(
+    user_id: int,
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(""),
+    password_confirm: str = Form(""),
+    is_admin: bool = Form(False),
+    enabled: bool = Form(False),
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    current = _require_admin(request)
+    user = db.get(WebUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404)
+
+    clean_username = _clean_web_username(username)
+    duplicate = db.scalar(
+        select(WebUser.id).where(
+            WebUser.username == clean_username,
+            WebUser.id != user.id,
+        )
+    )
+    if duplicate is not None:
+        bad_request("A user with that username already exists.")
+
+    if user.id == current.id and not enabled:
+        bad_request("You cannot disable your own account.")
+    if user.id == current.id and not is_admin:
+        bad_request("You cannot remove your own administrator role.")
+
+    if user.is_admin and user.enabled and (not is_admin or not enabled):
+        enabled_admins = db.scalar(
+            select(func.count(WebUser.id)).where(
+                WebUser.is_admin.is_(True),
+                WebUser.enabled.is_(True),
+            )
+        ) or 0
+        if enabled_admins <= 1:
+            bad_request("NASitron must retain at least one enabled administrator.")
+
+    security_changed = (
+        user.username != clean_username
+        or user.is_admin != is_admin
+        or user.enabled != enabled
+    )
+
+    user.username = clean_username
+    user.is_admin = is_admin
+    user.enabled = enabled
+
+    if password or password_confirm:
+        if password != password_confirm:
+            bad_request("Password confirmation does not match.")
+        clean_password = _validate_web_password(password, "New password")
+        user.password_hash = hash_password(clean_password)
+        security_changed = True
+
+    if security_changed:
+        user.session_version = int(user.session_version or 0) + 1
+
+    db.commit()
+
+    if user.id == current.id and security_changed:
+        response = RedirectResponse(
+            "/login?message=" + quote("Account updated. Sign in again."),
+            status_code=303,
+        )
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        return response
+
+    return RedirectResponse(
+        "/users?message=" + quote(f"User {clean_username} updated."),
+        status_code=303,
+    )
+
+
+@app.post("/users/{user_id}/delete")
+def delete_web_user(
+    user_id: int,
+    request: Request,
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    current = _require_admin(request)
+    user = db.get(WebUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404)
+    if user.id == current.id:
+        bad_request("You cannot delete your own account.")
+
+    if user.is_admin and user.enabled:
+        enabled_admins = db.scalar(
+            select(func.count(WebUser.id)).where(
+                WebUser.is_admin.is_(True),
+                WebUser.enabled.is_(True),
+            )
+        ) or 0
+        if enabled_admins <= 1:
+            bad_request("NASitron must retain at least one enabled administrator.")
+
+    username = user.username
+    db.delete(user)
+    db.commit()
+    return RedirectResponse(
+        "/users?message=" + quote(f"User {username} deleted."),
+        status_code=303,
+    )
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, db: Session = Depends(get_db)):
     keys = [
