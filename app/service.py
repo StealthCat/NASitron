@@ -77,6 +77,18 @@ def _merge_previous_subsystems(
         snapshot["datasets"] = previous.get("datasets", [])
         stale.add("zfs.datasets")
 
+    prev_datasets = {
+        str(dataset.get("name")): dataset
+        for dataset in previous.get("datasets", [])
+        if dataset.get("name")
+    }
+    if "zfs.dataset_properties" in errors:
+        for dataset in snapshot.get("datasets", []):
+            old = prev_datasets.get(str(dataset.get("name") or ""))
+            if old:
+                dataset["properties"] = old.get("properties", [])
+        stale.add("zfs.dataset_properties")
+
     prev_pools = _pool_map(previous)
     for pool in snapshot.get("pools", []):
         name = str(pool.get("name") or "")
@@ -90,6 +102,9 @@ def _merge_previous_subsystems(
         if "zfs.iostat" in errors:
             pool["io"] = old.get("io", pool.get("io", {}))
             stale.add("zfs.iostat")
+        if "zfs.pool_properties" in errors:
+            pool["properties"] = old.get("properties", [])
+            stale.add("zfs.pool_properties")
 
     prev_drives = previous.get("drives", [])
     if "drives.inventory" in errors:
