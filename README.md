@@ -115,13 +115,27 @@ From a NASitron checkout on the NAS:
 sudo ./scripts/install-remote.sh --public-key-file /path/to/nasitron-monitoring.pub
 ```
 
-Or, after copying only the installer script to the NAS:
+The installer is self-contained, so it can also be streamed directly into Bash. Because this repository is private, fetch it through the GitHub Contents API with a token that can read the repository:
 
 ```bash
-sudo ./install-remote.sh --public-key 'ssh-ed25519 AAAA...'
+export GITHUB_TOKEN='github_pat_...'
+export NASITRON_PUBKEY='ssh-ed25519 AAAA...'
+
+curl -fsSL \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github.raw+json" \
+  "https://api.github.com/repos/StealthCat/NASitron/contents/scripts/install-remote.sh?ref=main" \
+  | sudo bash -s -- --public-key "$NASITRON_PUBKEY"
 ```
 
-When run outside a repository checkout, the installer downloads the matching root helper from `StealthCat/NASitron`. If the repository is private, set `GITHUB_TOKEN` or `NASITRON_GITHUB_TOKEN` for that download, or run the installer from a local checkout so no download is required.
+The GitHub token is used only by `curl` to retrieve the private installer. The script contains the matching root helper inline and does not download any additional NASitron files after it starts. For a reproducible installation, replace `ref=main` with a known commit SHA.
+
+If the repository is ever made public, the shorter raw-GitHub form also works:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/StealthCat/NASitron/main/scripts/install-remote.sh \
+  | sudo bash -s -- --public-key 'ssh-ed25519 AAAA...'
+```
 
 The installer:
 
@@ -135,7 +149,7 @@ The installer:
 - validates ZFS inventory access, block-device inventory access, and non-interactive helper sudo
 - enables/reloads OpenSSH and prints the detected host/IP, SSH port, and server host-key fingerprints for entry into NASitron
 
-Run `./scripts/install-remote.sh --help` for options such as a custom remote username/helper path, skipping package installation, or skipping the sshd hardening drop-in.
+Run `./scripts/install-remote.sh --help` for options such as a custom remote username/helper path, skipping package installation, or skipping the sshd hardening drop-in. The same options can be passed after `bash -s --` when using the curl pipeline.
 
 Most `zpool status/list/iostat`, `zfs list/get`, `/proc`, and `lsblk` data remains unprivileged. SMART, diagnostic `dmesg`, blank-disk inspection, and guarded ZFS replacement are exposed only through NASitron's root helper. Do not replace the generated sudo rule with wildcard sudo access to `zpool`, `smartctl`, `wipefs`, or a shell.
 
@@ -350,3 +364,8 @@ Bootstrap/internal TLS now uses Caddy's internal on-demand issuer on an HTTPS ca
 ## NASitron 0.6.4 remote NAS installer
 
 `scripts/install-remote.sh` automates remote-host preparation for NASitron. It is designed to be safely re-run, defaults to key-only SSH for the dedicated monitoring account, installs the root helper and exact helper-only sudo policy, validates the resulting access, and prints the connection details and SSH host-key fingerprints needed by the NASitron UI.
+
+
+## NASitron 0.6.5 one-line remote installation
+
+The remote installer is now fully self-contained and supports direct stdin execution with `curl ... | sudo bash -s -- ...`. Its privileged Python helper is embedded in the installer and is syntax-checked before installation, so a piped install does not need a repository checkout or a second network fetch. For private-repository use, authenticate only the initial GitHub Contents API request; the token does not need to be passed into the root shell.
