@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Replace failed drive · {{ server.name }} · NASitron{% endblock %}
+{% block content %}
+<div class="hero row between">
+  <div>
+    <h1>Replace failed drive</h1>
+    <div class="muted">{{ server.name }} · {{ server.host }}</div>
+  </div>
+  <a class="button" href="/servers/{{ server.id }}">Back to server</a>
+</div>
+
+{% if request.query_params.get('message') %}
+<div class="message">{{ request.query_params.get('message') }}</div>
+{% endif %}
+
+<div class="panel" style="border-color:var(--warn); margin-bottom:20px">
+  <h2>Guarded ZFS maintenance</h2>
+  <p>This page performs a real <code>zpool replace</code> on the remote server and will normally start a resilver. NASitron does not use <code>-f</code>, wipe disks, create partitions, or otherwise force a candidate disk into service.</p>
+  <p class="muted" style="margin-bottom:0">A replacement candidate is shown only when the live host reports it as a whole disk with no filesystem, no mountpoint, no child partitions/mappings, and no current ZFS membership. The inventory is checked again immediately before the command runs.</p>
+</div>
+
+{% if inventory_error %}
+<div class="panel">
+  <h2>Unable to inventory replacement drives</h2>
+  <pre>{{ inventory_error }}</pre>
+  <p class="muted">Verify SSH access plus permissions for <code>zpool status</code> and <code>lsblk</code>.</p>
+</div>
+{% else %}
+
+<h2>Failed or offline ZFS leaf devices</h2>
+{% if not inventory.failed %}
+<div class="panel">
+  <span class="badge good"><span class="dot"></span>No replaceable failed leaf devices detected</span>
+  <p class="muted" style="margin-bottom:0">NASitron only offers leaf vdevs currently reported as DEGRADED, FAULTED, OFFLINE, UNAVAIL, or REMOVED.</p>
+</div>
+{% else %}
+<div class="grid cards">
+{% for failed in inventory.failed %}
+<div class="panel">
+  <div class="row between">
+    <div>
+      <h2 style="margin-bottom:4px">{{ failed.pool }}</h2>
+      <div><strong>{{ failed.device }}</strong></div>
+    </div>
+    <span class="badge critical">{{ failed.state }}</span>
+  </div>
+
+  <dl class="statlist" style="margin-top:14px">
+    <dt>Vdev role</dt><dd>{{ failed.role }}</dd>
+    <dt>Read / write / checksum</dt><dd>{{ failed.read_errors }} / {{ failed.write_errors }} / {{ failed.checksum_errors }}</dd>
+  </dl>
+
+  {% if inventory.candidates %}
+  <form method="post" action="/servers/{{ server.id }}/replace-drive" class="replace-form"
+        onsubmit="return confirm('Start this ZFS drive replacement and resilver?')">
+    <input type="hidden" name="pool" value="{{ failed.pool }}">
+    <input type="hidden" name="old_device" value="{{ failed.device }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="field" style="margin-top:16px">
+      <label>Replacement drive</label>
+      <select name="new_device" class="replacement-select" required>
+        <option value="">Choose an available blank disk…</option>
+        {% for disk in inventory.candidates %}
+        <option value="{{ disk.device }}">
+          {{ disk.device }} — {{ disk.size_bytes|human_bytes }} — {{ disk.model or "Unknown model" }}{% if disk.serial %} — {{ disk.serial }}{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Command preview</label>
+      <pre class="command-preview">sudo -n zpool replace {{ failed.pool }} {{ failed.device }} &lt;replacement-drive&gt;</pre>
+    </div>
+
+    <div class="field">
+      <label>Type <code>REPLACE {{ failed.pool }}</code> to confirm</label>
+      <input name="confirm_text" autocomplete="off" required placeholder="REPLACE {{ failed.pool }}">
+    </div>
+
+    <button class="danger" type="submit">Replace failed drive</button>
+  </form>
+  {% else %}
+  <p class="muted" style="margin-top:16px;margin-bottom:0">No blank, unallocated whole disks are currently available on this server.</p>
+  {% endif %}
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<h2 style="margin-top:26px">Available replacement drives</h2>
+<div class="panel flush scroll">
+<table>
+<thead><tr><th>Stable device path</th><th>Kernel path</th><th>Model / serial</th><th>Size</th><th>Media</th><th>Transport</th></tr></thead>
+<tbody>
+{% for disk in inventory.candidates %}
+<tr>
+  <td><strong>{{ disk.device }}</strong></td>
+  <td>{{ disk.path }}</td>
+  <td>{{ disk.model or "—" }}<div class="subtle">{{ disk.serial or "No serial" }}</div></td>
+  <td>{{ disk.size_bytes|human_bytes }}</td>
+  <td>{{ "HDD" if disk.rotational else "SSD/NVMe" }}</td>
+  <td>{{ disk.transport or "—" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">No eligible blank whole disks were detected.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+
+<h2 style="margin-top:26px">Maintenance history</h2>
+<div class="panel flush scroll">
+<table>
+<thead><tr><th>Time</th><th>Result</th><th>Pool</th><th>Old device</th><th>New device</th><th>Command / output</th></tr></thead>
+<tbody>
+{% for action in actions %}
+<tr>
+  <td>{{ action.created_at|fmt_dt }}</td>
+  <td><span class="badge {{ 'good' if action.success else 'critical' }}">{{ "SUCCESS" if action.success else "FAILED" }}</span></td>
+  <td>{{ action.pool }}</td>
+  <td>{{ action.old_device }}</td>
+  <td>{{ action.new_device }}</td>
+  <td>
+    {% if action.command %}<code>{{ action.command }}</code>{% endif %}
+    {% if action.output %}<details style="margin-top:6px"><summary>Output</summary><pre>{{ action.output }}</pre></details>{% endif %}
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">No maintenance actions have been recorded for this server.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+<script>
+document.querySelectorAll(".replace-form").forEach(form => {
+  const select = form.querySelector(".replacement-select");
+  const preview = form.querySelector(".command-preview");
+  const pool = form.querySelector('input[name="pool"]').value;
+  const oldDevice = form.querySelector('input[name="old_device"]').value;
+  function updatePreview() {
+    const next = select.value || "<replacement-drive>";
+    preview.textContent = "sudo -n zpool replace " + pool + " " + oldDevice + " " + next;
+  }
+  select.addEventListener("change", updatePreview);
+  updatePreview();
+});
+</script>
+{% endblock %}
