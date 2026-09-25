@@ -9,7 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import Alert, Server
-from .settings_store import get_bool, get_int, get_many, get_setting
+from .settings_store import get_bool, get_int, get_many
 
 
 def _utcnow() -> datetime:
