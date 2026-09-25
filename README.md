@@ -160,7 +160,7 @@ Start the application:
 docker compose up -d --build
 ```
 
-The supplied Compose stack includes Caddy. By default it publishes HTTP/HTTPS on `0.0.0.0:80` and `0.0.0.0:443`, while the NASitron application port stays private on the Compose network. Change `NASITRON_LISTEN_IP`, `NASITRON_HTTP_PORT`, and `NASITRON_HTTPS_PORT` in `.env` to choose the Docker host bind address and ports. On first start Caddy uses its internal CA for `NASITRON_TLS_HOST`, so a browser may require you to trust or accept the bootstrap certificate. After signing in, open **Settings → TLS Certificate Management** to upload a certificate/key or switch to ACME.
+The supplied Compose stack includes Caddy. By default it publishes HTTP/HTTPS on `0.0.0.0:80` and `0.0.0.0:443`, while the NASitron application port stays private on the Compose network. Change `NASITRON_LISTEN_IP`, `NASITRON_HTTP_PORT`, and `NASITRON_HTTPS_PORT` in `.env` to choose the Docker host bind address and ports. On first start Caddy uses an on-demand internal-CA bootstrap site, so you can browse to the NAS by its IP address or local hostname without an SNI/host mismatch. The certificate is locally issued, so your browser may still require you to trust or accept Caddy's local CA. After signing in, open **Settings → TLS Certificate Management** to upload a certificate/key or switch to ACME.
 
 ### 3. Host-key behavior
 
@@ -334,3 +334,8 @@ The **Settings → TLS Certificate Management** panel supports three modes:
 TLS changes are sent to Caddy's admin API over the private Compose network using the Caddyfile adapter. Caddy applies valid changes without downtime and retains the old active configuration if a reload fails. The generated Caddyfile is also stored in the NASitron data volume so the selected TLS mode survives container restarts.
 
 For public HTTP-01 or TLS-ALPN ACME validation, the ACME service must be able to reach the configured hostname on ports 80/443. Private ACME deployments may additionally upload the CA root that signs the ACME directory endpoint.
+
+
+## NASitron 0.6.3 bootstrap TLS fix
+
+Bootstrap/internal TLS now uses Caddy's internal on-demand issuer on an HTTPS catch-all site. This prevents TLS handshake failures when `NASITRON_TLS_HOST` is left at `localhost` but the UI is opened through the NAS IP address or another local hostname. ACME mode remains hostname-specific. Compose also detects the legacy persisted exact-host internal-TLS configuration and falls back to the new bootstrap configuration so existing installations can recover without deleting their data volume.
