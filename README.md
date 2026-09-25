@@ -1,6 +1,6 @@
 # NASitron
 
-NASitron is a Dockerized, agentless monitoring dashboard for Ubuntu servers running OpenZFS. It connects to one or more NAS hosts over SSH, collects ZFS/storage/system telemetry on a configurable schedule, keeps historical metrics, raises health alerts, sends email through a configurable SMTP relay, and can produce a compressed diagnostic bundle intended for ZFS tuning analysis.
+NASitron is a Dockerized, agentless monitoring dashboard for Ubuntu servers running OpenZFS. It connects to one or more NAS hosts over SSH, collects ZFS/storage/system telemetry on a configurable schedule, keeps historical metrics, raises health alerts, sends email through a configurable SMTP relay, can produce a compressed diagnostic bundle intended for ZFS tuning analysis, and provides a guarded workflow for replacing failed ZFS drives with available blank disks.
 
 ## What it monitors
 
@@ -55,6 +55,28 @@ Built-in alert conditions include:
 
 Alert state is deduplicated, remains visible until resolved, and can be acknowledged. New/re-triggered conditions can be sent through an SMTP relay.
 
+## Failed-drive replacement
+
+Each server page includes **Replace failed drive**, which performs a fresh live inventory over SSH and identifies:
+
+- failed/offline ZFS leaf devices in states such as DEGRADED, FAULTED, OFFLINE, UNAVAIL, or REMOVED
+- whole physical disks that currently have no filesystem, mountpoint, child partitions/mappings, or ZFS membership
+- stable `/dev/disk/by-id/` paths for replacement candidates when available
+
+Before a replacement can run, NASitron shows the exact `zpool replace` command, requires typed confirmation, validates a short-lived maintenance token, and then **re-runs the live disk inventory immediately before execution**. If the selected replacement disk has become mounted, partitioned, assigned to ZFS, or otherwise ineligible, the operation is refused.
+
+NASitron runs only:
+
+```bash
+sudo -n zpool replace <pool> <failed-device> <replacement-device>
+```
+
+It deliberately does **not** add `-f`, wipe filesystem signatures, repartition disks, or otherwise force a disk into service. OpenZFS still performs its own compatibility and size checks. Successful commands normally begin a resilver, which can be monitored on the normal server dashboard.
+
+Every attempted replacement is written to the local maintenance history with the selected devices, command, exit status, and returned pool status/output.
+
+This feature requires a narrowly scoped passwordless sudo rule for `zpool replace`; see [examples/nasitron.sudoers](examples/nasitron.sudoers).
+
 ## Tuning/support bundle
 
 The **Download tuning bundle** action performs a deeper live collection and returns:
@@ -105,10 +127,11 @@ Always verify the real paths first:
 ```bash
 command -v smartctl
 command -v dmesg
+command -v zpool
 sudo visudo -f /etc/sudoers.d/nasitron
 ```
 
-The `dmesg` allowance is optional and is used only by the on-demand support bundle.
+The `dmesg` allowance is optional and is used only by the on-demand support bundle. The `zpool replace` allowance is optional and should be granted only if you intend to use NASitron's drive-replacement workflow.
 
 ### 2. Configure NASitron
 
@@ -178,8 +201,10 @@ The scheduler can monitor multiple servers concurrently. Each host's collection 
 - Keep `NASITRON_SECRET_KEY` outside source control and back it up with the persistent database.
 - Enable dashboard authentication or place NASitron behind an authenticated reverse proxy before exposing it beyond a trusted network.
 - Do not grant unrestricted passwordless sudo to the monitoring account.
+- The optional drive-replacement page is intentionally the only current feature that mutates ZFS state; it is limited to `zpool replace` and records every attempt.
+- Protect the web UI with HTTP Basic authentication or an authenticated reverse proxy before granting the remote account `zpool replace` capability.
 - TOFU is convenient for initial setup; strict host-key verification is preferable once keys are known.
-- NASitron performs read-only monitoring commands. It does not change pool, dataset, ARC, or kernel tuning values.
+- Monitoring, tuning-bundle collection, and all other current NASitron functions remain read-only.
 
 ## Development
 
@@ -196,9 +221,9 @@ Tests:
 
 ```bash
 python -m compileall -q app
-pytest -q
+python -m pytest -q
 ```
 
 ## Current scope
 
-The initial release is intentionally read-only. The diagnostic bundle is designed to support informed tuning recommendations without allowing the web application to mutate ZFS parameters remotely. Future extensions can add more specialized views (per-vdev latency, snapshot-growth analysis, ZED event ingestion, Prometheus export, and additional notification transports) without changing the collection model.
+NASitron is read-only for monitoring and tuning collection, with one deliberately narrow maintenance exception: the guarded failed-drive replacement workflow can execute `zpool replace`. It does not expose general remote shell access or arbitrary ZFS administration. Future extensions can add more specialized views (per-vdev latency, snapshot-growth analysis, ZED event ingestion, Prometheus export, and additional notification transports) without changing the collection model.
