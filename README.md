@@ -450,3 +450,15 @@ NASitron now stores web-console users in its database and includes an administra
 On an empty user database, the existing `NASITRON_WEB_USERNAME` and `NASITRON_WEB_PASSWORD` values seed the initial administrator. After the first account exists, the database is authoritative: changing that administrator's password in the UI is not overwritten by the environment values on restart.
 
 Passwords are stored as salted scrypt hashes. Password changes, username changes, role changes, and disabling an account increment that user's session version, immediately invalidating existing signed sessions for that account. NASitron prevents an administrator from deleting or disabling their own account or removing their own administrator role, and it prevents removal of the last enabled administrator.
+
+
+## NASitron 0.6.16 SMTP and Mailjet-compatible email delivery
+
+The **Settings → Email** tab now supports two selectable outbound email transports:
+
+- **SMTP relay** — the existing host/port/username/password transport with STARTTLS or implicit TLS.
+- **Mailjet-compatible API** — HTTPS Send API v3.1 style delivery using Basic Authentication with an API key and secret key.
+
+The Mailjet API URL is configurable and defaults to `https://api.mailjet.com/v3.1/send`, allowing use of Mailjet itself or another HTTPS service that implements the same request format. Sender and recipient settings are shared between the transports. Mailjet API credentials and SMTP passwords are encrypted at rest with `NASITRON_SECRET_KEY`.
+
+The test-email action uses whichever transport is currently selected, and normal alert notification retries/backoff are shared by both transports.
