@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import json
 import smtplib
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from typing import Any
@@ -9,16 +13,129 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import Alert, Server
-from .settings_store import get_bool, get_int, get_many
+from .settings_store import get_bool, get_int, get_many, get_setting
 
 
 def _utcnow() -> datetime:
     return datetime.utcnow()
 
 
+def _email_addresses(value: str) -> list[str]:
+    return [
+        item.strip()
+        for item in value.replace(";", ",").split(",")
+        if item.strip()
+    ]
+
+
+def _send_smtp(
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    sender: str,
+    recipients: list[str],
+    subject: str,
+    body: str,
+    use_ssl: bool,
+    starttls: bool,
+) -> None:
+    if use_ssl and starttls:
+        raise RuntimeError("SMTP implicit TLS and STARTTLS cannot both be enabled")
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = ", ".join(recipients)
+    msg.set_content(body)
+
+    smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+    with smtp_cls(host, port, timeout=15) as smtp:
+        if not use_ssl and starttls:
+            smtp.starttls()
+        if username:
+            smtp.login(username, password)
+        smtp.send_message(msg)
+
+
+def _send_mailjet(
+    *,
+    api_url: str,
+    api_key: str,
+    secret_key: str,
+    sender: str,
+    recipients: list[str],
+    subject: str,
+    body: str,
+) -> None:
+    if not api_url or not api_key or not secret_key:
+        raise RuntimeError(
+            "Mailjet relay is selected but API URL, API key, or secret key is not configured"
+        )
+
+    messages = [
+        {
+            "From": {"Email": sender, "Name": "NASitron"},
+            "To": [{"Email": recipient}],
+            "Subject": subject,
+            "TextPart": body,
+        }
+        for recipient in recipients
+    ]
+    payload = json.dumps({"Messages": messages}, separators=(",", ":")).encode("utf-8")
+    auth = base64.b64encode(f"{api_key}:{secret_key}".encode("utf-8")).decode("ascii")
+    request = urllib.request.Request(
+        api_url,
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "NASitron-Mailjet",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response_body = response.read(1024 * 1024)
+            status = int(getattr(response, "status", 200))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(8192).decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"Mailjet relay returned HTTP {exc.code}: {detail or exc.reason}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Mailjet relay connection failed: {exc.reason}") from exc
+
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"Mailjet relay returned HTTP {status}")
+
+    if response_body:
+        try:
+            result = json.loads(response_body)
+        except json.JSONDecodeError:
+            result = None
+        if isinstance(result, dict):
+            statuses = [
+                str(message.get("Status") or "").lower()
+                for message in result.get("Messages", [])
+                if isinstance(message, dict)
+            ]
+            if statuses and any(status_value != "success" for status_value in statuses):
+                raise RuntimeError(
+                    "Mailjet relay rejected one or more messages: "
+                    + response_body[:8192].decode("utf-8", errors="replace")
+                )
+
+
 def send_email(db: Session, subject: str, body: str, force: bool = False) -> bool:
     if not force and not get_bool(db, "smtp_enabled", False):
         return False
+
+    transport = get_setting(db, "email_transport", "smtp").strip().lower()
+    if transport not in {"smtp", "mailjet"}:
+        raise RuntimeError(f"Unsupported email transport: {transport}")
 
     settings = get_many(
         db,
@@ -31,42 +148,50 @@ def send_email(db: Session, subject: str, body: str, force: bool = False) -> boo
             "smtp_password",
             "smtp_ssl",
             "smtp_starttls",
+            "mailjet_api_url",
+            "mailjet_api_key",
+            "mailjet_secret_key",
         ],
     )
+    sender = settings["smtp_from"]
+    recipients = _email_addresses(settings["smtp_to"])
+    if not sender or not recipients:
+        raise RuntimeError(
+            "Email alerts require a From address and at least one recipient"
+        )
+
+    if transport == "mailjet":
+        _send_mailjet(
+            api_url=settings["mailjet_api_url"],
+            api_key=settings["mailjet_api_key"],
+            secret_key=settings["mailjet_secret_key"],
+            sender=sender,
+            recipients=recipients,
+            subject=subject,
+            body=body,
+        )
+        return True
+
     host = settings["smtp_host"]
+    if not host:
+        raise RuntimeError("SMTP is selected but no SMTP host is configured")
     try:
         port = int(settings["smtp_port"])
     except ValueError:
         port = 587
-    sender = settings["smtp_from"]
-    recipients = [
-        x.strip()
-        for x in settings["smtp_to"].replace(";", ",").split(",")
-        if x.strip()
-    ]
-    if not host or not sender or not recipients:
-        raise RuntimeError(
-            "SMTP is enabled but host, From, or recipients are not configured"
-        )
 
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = ", ".join(recipients)
-    msg.set_content(body)
-
-    use_ssl = settings["smtp_ssl"].strip().lower() in {"1", "true", "yes", "on"}
-    starttls = settings["smtp_starttls"].strip().lower() in {"1", "true", "yes", "on"}
-    if use_ssl and starttls:
-        raise RuntimeError("SMTP implicit TLS and STARTTLS cannot both be enabled")
-
-    smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
-    with smtp_cls(host, port, timeout=15) as smtp:
-        if not use_ssl and starttls:
-            smtp.starttls()
-        if settings["smtp_username"]:
-            smtp.login(settings["smtp_username"], settings["smtp_password"])
-        smtp.send_message(msg)
+    _send_smtp(
+        host=host,
+        port=port,
+        username=settings["smtp_username"],
+        password=settings["smtp_password"],
+        sender=sender,
+        recipients=recipients,
+        subject=subject,
+        body=body,
+        use_ssl=settings["smtp_ssl"].strip().lower() in {"1", "true", "yes", "on"},
+        starttls=settings["smtp_starttls"].strip().lower() in {"1", "true", "yes", "on"},
+    )
     return True
 
 
