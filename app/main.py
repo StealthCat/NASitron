@@ -416,6 +416,7 @@ def test_email(db: Session = Depends(get_db)):
             db,
             "[NASitron] SMTP test",
             f"NASitron {APP_VERSION} successfully connected to the configured SMTP relay.",
+            force=True,
         )
         result = "SMTP test message sent."
     except Exception as exc:
