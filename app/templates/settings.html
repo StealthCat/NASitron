@@ -5,7 +5,7 @@
   <div class="page-title-wrap">
     <div class="hero-kicker">Configuration</div>
     <h1>Settings</h1>
-    <p class="muted">Alert thresholds, history retention, and SMTP relay configuration.</p>
+    <p class="muted">Alert thresholds, history retention, SMTP relay configuration, and HTTPS certificate management.</p>
   </div>
 </div>
 {% if request.query_params.get('message') %}<div class="message">{{ request.query_params.get('message') }}</div>{% endif %}
@@ -51,4 +51,82 @@
   <div class="row"><button class="primary" type="submit">Save Settings</button></div>
 </form>
 <form method="post" action="/settings/test-email" style="margin-top:12px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Send SMTP Test Message</button></form>
+
+<section class="section-block panel accent-panel">
+  <div class="panel-title">
+    <div>
+      <div class="hero-kicker">HTTPS</div>
+      <h2>TLS Certificate Management</h2>
+    </div>
+    <span class="badge good">Caddy</span>
+  </div>
+  <p class="muted">Use NASitron's internal CA for bootstrap access, upload a PEM certificate/key, or obtain and renew a certificate from a custom ACME server. Saving reloads Caddy without restarting NASitron.</p>
+
+  <form method="post" action="/settings/tls" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grid two">
+      <div class="field">
+        <label>TLS mode</label>
+        <select name="tls_mode">
+          <option value="internal" {{ 'selected' if values.tls_mode == 'internal' else '' }}>Internal CA / bootstrap</option>
+          <option value="manual" {{ 'selected' if values.tls_mode == 'manual' else '' }}>Uploaded certificate</option>
+          <option value="acme" {{ 'selected' if values.tls_mode == 'acme' else '' }}>ACME managed certificate</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>TLS hostname or IP</label>
+        <input name="tls_domain" value="{{ values.tls_domain }}" placeholder="nas.example.com">
+        <div class="subtle">Required for internal and ACME modes.</div>
+      </div>
+    </div>
+
+    <div class="tls-section">
+      <div class="panel-title"><h3>Uploaded certificate</h3><span class="badge {{ 'good' if values.tls_status.configured else 'offline' }}">{{ "Configured" if values.tls_status.configured else "Not configured" }}</span></div>
+      {% if values.tls_status.subject %}
+      <div class="grid three">
+        <div class="mini-stat"><span>Subject</span><strong>{{ values.tls_status.subject }}</strong></div>
+        <div class="mini-stat"><span>Issuer</span><strong>{{ values.tls_status.issuer }}</strong></div>
+        <div class="mini-stat"><span>Expires</span><strong>{{ values.tls_status.not_after }}</strong></div>
+      </div>
+      {% endif %}
+      <div class="grid two" style="margin-top:12px">
+        <div class="field">
+          <label>Certificate chain (PEM)</label>
+          <input type="file" name="certificate" accept=".pem,.crt,.cer,application/x-pem-file">
+        </div>
+        <div class="field">
+          <label>Private key (unencrypted PEM)</label>
+          <input type="file" name="private_key" accept=".pem,.key,application/x-pem-file">
+        </div>
+      </div>
+      <div class="subtle">Both files are required together the first time. NASitron verifies the private key matches the leaf certificate.</div>
+    </div>
+
+    <div class="tls-section">
+      <div class="panel-title"><h3>ACME</h3><span class="badge">Automatic renewal</span></div>
+      <div class="grid two">
+        <div class="field">
+          <label>ACME account email</label>
+          <input type="email" name="tls_acme_email" value="{{ values.tls_acme_email }}" placeholder="admin@example.com">
+        </div>
+        <div class="field">
+          <label>ACME directory URL</label>
+          <input name="tls_acme_ca" value="{{ values.tls_acme_ca }}" placeholder="https://acme.example.com/directory">
+        </div>
+      </div>
+      <div class="field">
+        <label>Optional custom ACME CA root (PEM)</label>
+        <input type="file" name="acme_ca_root" accept=".pem,.crt,.cer,application/x-pem-file">
+        <div class="subtle">Use this when the custom ACME endpoint is signed by a private CA outside Caddy's normal trust store.</div>
+      </div>
+      <label class="checkbox"><input type="checkbox" name="clear_acme_ca_root"> Remove the currently stored custom ACME CA root</label>
+      <div class="subtle">HTTP-01/TLS-ALPN validation requires the ACME service to reach this host on ports 80/443 unless the server uses another supported challenge policy.</div>
+    </div>
+
+    <div class="row between" style="margin-top:14px">
+      <div class="subtle">Caddy's admin API remains private to the Compose network.</div>
+      <button class="primary" type="submit">Apply HTTPS Configuration</button>
+    </div>
+  </form>
+</section>
 {% endblock %}

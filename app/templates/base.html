@@ -58,8 +58,12 @@
       <div class="sidebar-meta">
         <span>Ubuntu + OpenZFS</span>
         <span>Secure SSH polling</span>
-        <span>#FC1859 interface</span>
+        <span>HTTPS web session</span>
       </div>
+      <form method="post" action="/logout" class="sidebar-logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="button ghost">Sign out</button>
+      </form>
     </div>
   </aside>
 
