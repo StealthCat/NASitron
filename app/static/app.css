@@ -558,3 +558,18 @@ pre {
   .prep-summary-meta { justify-content: space-between; }
   .prep-step-card { grid-template-columns: 1fr; }
 }
+
+
+.enrollment-status {
+  margin: 12px 0 0;
+}
+.enrollment-status.good {
+  border-color: rgba(56,223,163,.24);
+  background: rgba(56,223,163,.08);
+  color: #d8fff1;
+}
+.enrollment-status.warning {
+  border-color: rgba(245,184,75,.25);
+  background: rgba(245,184,75,.08);
+  color: #ffe9ba;
+}
