@@ -103,35 +103,41 @@ SSH passwords, SSH private keys/passphrases, NASitron's encryption key, and SMTP
 
 ### 1. Prepare the Ubuntu ZFS host
 
-Install the useful collection tools:
+The recommended setup is the idempotent remote installer at `scripts/install-remote.sh`. Generate a dedicated SSH keypair on your administration workstation or another trusted machine; keep the private key for the NASitron server form and copy only the public key to the NAS.
 
 ```bash
-sudo apt update
-sudo apt install openssh-server zfsutils-linux smartmontools
+ssh-keygen -t ed25519 -f ./nasitron-monitoring -C "NASitron monitoring"
 ```
 
-Create a dedicated account:
+From a NASitron checkout on the NAS:
 
 ```bash
-sudo adduser --disabled-password --gecos "" nasitron
-sudo install -d -m 700 -o nasitron -g nasitron /home/nasitron/.ssh
-sudoedit /home/nasitron/.ssh/authorized_keys
-sudo chown nasitron:nasitron /home/nasitron/.ssh/authorized_keys
-sudo chmod 600 /home/nasitron/.ssh/authorized_keys
+sudo ./scripts/install-remote.sh --public-key-file /path/to/nasitron-monitoring.pub
 ```
 
-Most `zpool status/list/iostat`, `zfs list/get`, `/proc` and `lsblk` data is readable without root. SMART generally is not. If you want SMART/NVMe data, install a tightly scoped sudoers rule based on [examples/nasitron.sudoers](examples/nasitron.sudoers).
-
-Always verify the real paths first:
+Or, after copying only the installer script to the NAS:
 
 ```bash
-command -v smartctl
-command -v dmesg
-command -v zpool
-sudo visudo -f /etc/sudoers.d/nasitron
+sudo ./install-remote.sh --public-key 'ssh-ed25519 AAAA...'
 ```
 
-The `dmesg` allowance is optional and is used only by the on-demand support bundle. The `zpool replace` allowance is optional and should be granted only if you intend to use NASitron's drive-replacement workflow.
+When run outside a repository checkout, the installer downloads the matching root helper from `StealthCat/NASitron`. If the repository is private, set `GITHUB_TOKEN` or `NASITRON_GITHUB_TOKEN` for that download, or run the installer from a local checkout so no download is required.
+
+The installer:
+
+- installs OpenSSH, `sudo`, Python, OpenZFS utilities, smartmontools, util-linux, curl, and CA certificates on apt-based Ubuntu/Debian systems
+- creates or reuses a dedicated `nasitron` service account
+- installs the supplied SSH public key while preserving existing authorized keys
+- locks password authentication for the NASitron account
+- installs an sshd per-user hardening rule that disables forwarding, tunnels, agent forwarding, X11, and TTY allocation
+- installs `/usr/local/sbin/nasitron-root-helper` as `root:root` mode `0755`
+- installs and validates a narrowly scoped `/etc/sudoers.d/nasitron` rule for that helper only
+- validates ZFS inventory access, block-device inventory access, and non-interactive helper sudo
+- enables/reloads OpenSSH and prints the detected host/IP, SSH port, and server host-key fingerprints for entry into NASitron
+
+Run `./scripts/install-remote.sh --help` for options such as a custom remote username/helper path, skipping package installation, or skipping the sshd hardening drop-in.
+
+Most `zpool status/list/iostat`, `zfs list/get`, `/proc`, and `lsblk` data remains unprivileged. SMART, diagnostic `dmesg`, blank-disk inspection, and guarded ZFS replacement are exposed only through NASitron's root helper. Do not replace the generated sudo rule with wildcard sudo access to `zpool`, `smartctl`, `wipefs`, or a shell.
 
 ### 2. Configure NASitron
 
@@ -339,3 +345,8 @@ For public HTTP-01 or TLS-ALPN ACME validation, the ACME service must be able to
 ## NASitron 0.6.3 bootstrap TLS fix
 
 Bootstrap/internal TLS now uses Caddy's internal on-demand issuer on an HTTPS catch-all site. This prevents TLS handshake failures when `NASITRON_TLS_HOST` is left at `localhost` but the UI is opened through the NAS IP address or another local hostname. ACME mode remains hostname-specific. Compose also detects the legacy persisted exact-host internal-TLS configuration and falls back to the new bootstrap configuration so existing installations can recover without deleting their data volume.
+
+
+## NASitron 0.6.4 remote NAS installer
+
+`scripts/install-remote.sh` automates remote-host preparation for NASitron. It is designed to be safely re-run, defaults to key-only SSH for the dedicated monitoring account, installs the root helper and exact helper-only sudo policy, validates the resulting access, and prints the connection details and SSH host-key fingerprints needed by the NASitron UI.
