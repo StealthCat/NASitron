@@ -1,23 +1,15 @@
-# Example /etc/sudoers.d/nasitron
+# /etc/sudoers.d/nasitron
 #
-# Verify paths on the monitored Ubuntu host:
-#   command -v smartctl
-#   command -v dmesg
-#   command -v wipefs
-#   command -v flock
-#   command -v zpool
+# Install remote/nasitron_root_helper.py as:
+#   /usr/local/sbin/nasitron-root-helper
+# owned by root:root and mode 0755.
 #
-# Keep this account dedicated to NASitron. Do not grant unrestricted sudo.
+# The helper is the authorization boundary. It accepts only:
+#   smartctl <device>
+#   dmesg
+#   wipefs-check <device>
+#   replace <pool> <failed-guid> <replacement-by-id> <allow-conflict:0|1>
 #
-# smartctl: periodic SMART/NVMe health
-# dmesg:    optional on-demand tuning/support bundle
-# wipefs:   read-only signature proof for replacement candidates (--no-act)
-# flock + zpool replace: guarded failed-drive replacement
-#
-# Adjust paths if your Ubuntu release installs these elsewhere.
-Cmnd_Alias NASITRON_SMART = /usr/sbin/smartctl -a -j *, /usr/bin/smartctl -a -j *
-Cmnd_Alias NASITRON_DIAGNOSTICS = /usr/bin/dmesg, /bin/dmesg
-Cmnd_Alias NASITRON_WIPEFS = /usr/sbin/wipefs --no-act --noheadings --output TYPE,UUID,LABEL *, /usr/bin/wipefs --no-act --noheadings --output TYPE,UUID,LABEL *
-Cmnd_Alias NASITRON_REPLACE = /usr/bin/flock -n /run/lock/nasitron-zpool-replace.lock zpool replace *
-
-nasitron ALL=(root) NOPASSWD: NASITRON_SMART, NASITRON_DIAGNOSTICS, NASITRON_WIPEFS, NASITRON_REPLACE
+# Do not replace this with wildcard rules for zpool, smartctl, wipefs, or flock.
+# sudo argument wildcards can match whitespace and additional arguments.
+nasitron ALL=(root) NOPASSWD: /usr/local/sbin/nasitron-root-helper

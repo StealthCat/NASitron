@@ -4,7 +4,6 @@ import base64
 import gzip
 import hmac
 import json
-import math
 import os
 import re
 import tempfile
@@ -18,13 +17,14 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, Respo
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.orm import Session, selectinload
 from starlette.background import BackgroundTask
 
 from .alerts import send_email
 from .collector import CollectorError, SSHCollector
 from .config import (
+    ALLOW_INSECURE_HTTP,
     APP_NAME,
     APP_VERSION,
     MAX_METRIC_POINTS,
@@ -35,17 +35,29 @@ from .config import (
 )
 from .crypto import encrypt
 from .db import SessionLocal, init_db
-from .maintenance import ReplacementRequest, discover_replacement_options, replace_drive
+from .instance_lock import InstanceLock
+from .maintenance import (
+    ReplacementRequest,
+    discover_replacement_options,
+    invalidate_inventory_cache,
+    replace_drive,
+)
 from .metrics import METRIC_NAMES
+from .middleware import (
+    RequestBodyLimitMiddleware,
+    RequireHTTPSMiddleware,
+    SecurityHeadersMiddleware,
+)
 from .models import Alert, CurrentState, MaintenanceAction, Metric, Server
 from .scheduler import start_scheduler, stop_scheduler, trigger_now
 from .security import csrf_token, require_csrf, require_secure_maintenance
 from .service import latest_snapshot
-from .settings_store import ensure_defaults, get_setting, set_setting
+from .settings_store import ensure_defaults, get_many, get_setting, set_setting
 from .support import sanitize_diagnostics, support_bundle_lock
 from .validation import (
     bad_request,
     bounded_int,
+    bounded_multiline,
     bounded_secret,
     bounded_text,
     validate_email,
@@ -57,6 +69,7 @@ from .validation import (
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals["csrf_token"] = csrf_token
+_instance_lock = InstanceLock()
 
 
 def get_db():
@@ -105,11 +118,7 @@ def fmt_dt(value) -> str:
             return value
     if value.tzinfo is None:
         value = value.replace(tzinfo=ZoneInfo("UTC"))
-    try:
-        zone = ZoneInfo(TIMEZONE)
-    except Exception:
-        zone = ZoneInfo("UTC")
-    return value.astimezone(zone).strftime("%Y-%m-%d %H:%M:%S %Z")
+    return value.astimezone(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 templates.env.filters["human_bytes"] = human_bytes
@@ -120,15 +129,22 @@ templates.env.filters["fmt_dt"] = fmt_dt
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_runtime_config()
-    init_db()
-    with SessionLocal() as db:
-        ensure_defaults(db)
-    start_scheduler()
-    yield
-    stop_scheduler()
+    _instance_lock.acquire()
+    try:
+        init_db()
+        with SessionLocal() as db:
+            ensure_defaults(db)
+        start_scheduler()
+        yield
+    finally:
+        stop_scheduler()
+        _instance_lock.release()
 
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestBodyLimitMiddleware)
+app.add_middleware(RequireHTTPSMiddleware)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
@@ -136,6 +152,15 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 async def required_basic_auth(request: Request, call_next):
     if request.url.path == "/healthz":
         return await call_next(request)
+    if not ALLOW_INSECURE_HTTP and request.url.scheme.lower() != "https":
+        return Response(
+            content=(
+                "HTTPS is required. Terminate TLS at a trusted reverse proxy or "
+                "set NASITRON_ALLOW_INSECURE_HTTP=true only on a trusted network."
+            ),
+            status_code=426,
+            headers={"Upgrade": "TLS/1.2, HTTP/1.1"},
+        )
 
     auth = request.headers.get("Authorization", "")
     valid = False
@@ -168,6 +193,18 @@ def _decode_state(row: CurrentState | None) -> dict | None:
         return json.loads(row.payload_json)
     except json.JSONDecodeError:
         return None
+
+
+def _expected_pools(server: Server) -> set[str]:
+    try:
+        value = json.loads(server.expected_pools_json or "[]")
+    except json.JSONDecodeError:
+        value = []
+    return {
+        item
+        for item in value
+        if isinstance(item, str) and item
+    } if isinstance(value, list) else set()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -209,10 +246,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
         if snapshot and server.last_collection_state != "failed":
             online_servers += 1
-            if "zfs.arc" not in {
-                item.get("subsystem")
-                for item in snapshot.get("collection", {}).get("errors", [])
-            }:
+            if "zfs.arc" not in set(
+                snapshot.get("collection", {}).get("stale_subsystems", [])
+            ):
                 arc_rates.append(float(snapshot.get("arc", {}).get("hit_rate_pct") or 0))
 
         if not snapshot:
@@ -309,24 +345,14 @@ def _validated_server_fields(
     if auth_type not in {"key", "password"}:
         bad_request("Authentication type must be key or password.")
     clean_password = bounded_secret(password, "SSH password", maximum=4096)
-    clean_key = bounded_secret(private_key, "SSH private key", maximum=65536)
+    clean_key = bounded_multiline(private_key, "SSH private key", maximum=65536)
     clean_passphrase = bounded_secret(
         private_key_passphrase,
         "SSH private-key passphrase",
         maximum=4096,
     )
-    poll = bounded_int(
-        poll_interval_seconds,
-        "Poll interval",
-        15,
-        86400,
-    )
-    smart = bounded_int(
-        smart_interval_minutes,
-        "SMART interval",
-        1,
-        1440,
-    )
+    poll = bounded_int(poll_interval_seconds, "Poll interval", 15, 86400)
+    smart = bounded_int(smart_interval_minutes, "SMART interval", 1, 1440)
     if clean_key:
         try:
             SSHCollector.parse_private_key(clean_key, clean_passphrase or None)
@@ -466,6 +492,8 @@ def update_server(
     if duplicate is not None:
         bad_request("A server with this name already exists.")
 
+    host_changed = server.host != fields["host"] or server.port != fields["port"]
+
     if fields["auth_type"] == "key":
         if not fields["private_key"] and not server.private_key_enc:
             bad_request("A private key is required for key authentication.")
@@ -495,9 +523,62 @@ def update_server(
     server.sudo_for_smart = sudo_for_smart
     server.strict_host_key = strict_host_key
     server.enabled = enabled
+    if host_changed:
+        server.host_key_fingerprint = None
+        server.zpool_status_json_supported = None
     db.commit()
+    invalidate_inventory_cache(server.id)
     if enabled:
         trigger_now(server.id)
+    return RedirectResponse(f"/servers/{server.id}", status_code=303)
+
+
+@app.get("/servers/{server_id}/host-key", response_class=HTMLResponse)
+def host_key_page(server_id: int, request: Request, db: Session = Depends(get_db)):
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(404)
+    candidate = None
+    error = None
+    try:
+        candidate = SSHCollector.fetch_host_key(server)
+    except Exception as exc:
+        error = str(exc)
+    return templates.TemplateResponse(
+        request=request,
+        name="host_key.html",
+        context={
+            "request": request,
+            "server": server,
+            "candidate": candidate,
+            "error": error,
+        },
+    )
+
+
+@app.post("/servers/{server_id}/host-key")
+def enroll_host_key(
+    server_id: int,
+    fingerprint: str = Form(...),
+    confirm_text: str = Form(...),
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(404)
+    clean_fp = bounded_text(fingerprint, "Fingerprint", maximum=128)
+    clean_confirm = bounded_text(confirm_text, "Fingerprint confirmation", maximum=128)
+    if clean_confirm != clean_fp:
+        bad_request("Fingerprint confirmation does not match.")
+    try:
+        candidate = SSHCollector.enroll_host_key(server, clean_fp)
+    except CollectorError as exc:
+        bad_request(str(exc))
+    server.host_key_fingerprint = candidate["fingerprint"]
+    server.strict_host_key = True
+    db.commit()
+    trigger_now(server.id)
     return RedirectResponse(f"/servers/{server.id}", status_code=303)
 
 
@@ -509,6 +590,7 @@ def delete_server(
 ):
     server = db.get(Server, server_id)
     if server:
+        invalidate_inventory_cache(server.id)
         db.delete(server)
         db.commit()
     return RedirectResponse("/", status_code=303)
@@ -541,8 +623,61 @@ def server_detail(server_id: int, request: Request, db: Session = Depends(get_db
     return templates.TemplateResponse(
         request=request,
         name="server.html",
-        context={"request": request, "server": server, "snapshot": snapshot, "alerts": alerts},
+        context={
+            "request": request,
+            "server": server,
+            "snapshot": snapshot,
+            "alerts": alerts,
+            "expected_pools": sorted(_expected_pools(server)),
+        },
     )
+
+
+@app.post("/servers/{server_id}/expected-pools/forget")
+def forget_expected_pool(
+    server_id: int,
+    pool_name: str = Form(...),
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(404)
+    pool = bounded_text(pool_name, "Pool name", maximum=255)
+    expected = _expected_pools(server)
+    if pool not in expected:
+        bad_request("That pool is not in the expected-pool inventory.")
+    expected.remove(pool)
+    server.expected_pools_json = json.dumps(sorted(expected))
+
+    state = db.get(CurrentState, server.id)
+    if state:
+        current = _decode_state(state)
+        if current:
+            collection = current.setdefault("collection", {})
+            collection["expected_pools"] = sorted(expected)
+            collection["missing_pools"] = [
+                item for item in collection.get("missing_pools", []) if item != pool
+            ]
+            state.payload_json = json.dumps(current, separators=(",", ":"))
+
+    now = datetime.utcnow()
+    for alert in db.scalars(
+        select(Alert).where(Alert.server_id == server.id, Alert.active.is_(True))
+    ).all():
+        if (
+            alert.key == f"pool.missing:{pool}"
+            or alert.key == f"pool.health:{pool}"
+            or alert.key == f"pool.capacity:{pool}"
+            or alert.key == f"pool.scrub_age:{pool}"
+            or alert.key.startswith(f"vdev.errors:{pool}:")
+            or alert.key.startswith(f"vdev.state:{pool}:")
+        ):
+            alert.active = False
+            alert.resolved_at = now
+            alert.next_notification_at = None
+    db.commit()
+    return RedirectResponse(f"/servers/{server.id}", status_code=303)
 
 
 @app.get("/servers/{server_id}/replace-drive", response_class=HTMLResponse)
@@ -611,9 +746,10 @@ def perform_drive_replacement(
         bad_request("Vdev GUID must be numeric.")
     clean_old = bounded_text(old_device, "Failed device", maximum=1024)
     clean_new = bounded_text(new_device, "Replacement device", maximum=1024)
+    clean_confirm = bounded_text(confirm_text, "Confirmation text", maximum=300)
 
     expected = f"REPLACE {clean_pool}"
-    if confirm_text.strip() != expected:
+    if clean_confirm != expected:
         message = f"Confirmation text did not match. Type exactly: {expected}"
         return RedirectResponse(
             f"/servers/{server_id}/replace-drive?message=" + quote(message),
@@ -710,58 +846,57 @@ def metric_history(
         Metric.scope == scope,
         Metric.captured_at >= since,
     )
-    count = int(db.scalar(select(func.count(Metric.id)).where(*filters)) or 0)
-    if count == 0:
-        return {"name": name, "scope": scope, "points": []}
+    bucket_seconds = max(1, (hours * 3600 + MAX_METRIC_POINTS - 1) // MAX_METRIC_POINTS)
+    epoch = cast(func.strftime("%s", Metric.captured_at), Integer)
+    bucket = cast(epoch / bucket_seconds, Integer).label("bucket")
 
-    stride = max(1, math.ceil(count / MAX_METRIC_POINTS))
-    if stride == 1:
-        rows = db.execute(
-            select(Metric.captured_at, Metric.value)
-            .where(*filters)
-            .order_by(Metric.captured_at, Metric.id)
-        ).all()
-    else:
-        numbered = (
-            select(
-                Metric.captured_at.label("captured_at"),
-                Metric.value.label("value"),
-                func.row_number()
-                .over(order_by=(Metric.captured_at, Metric.id))
-                .label("rn"),
-            )
-            .where(*filters)
-            .subquery()
+    rows = db.execute(
+        select(
+            bucket,
+            func.max(Metric.captured_at).label("captured_at"),
+            func.avg(Metric.value).label("value"),
+            func.count(Metric.id).label("sample_count"),
         )
-        rows = db.execute(
-            select(numbered.c.captured_at, numbered.c.value)
-            .where(((numbered.c.rn - 1) % stride) == 0)
-            .order_by(numbered.c.captured_at)
-        ).all()
+        .where(*filters)
+        .group_by(bucket)
+        .order_by(bucket)
+    ).all()
+    if not rows:
+        return {
+            "name": name,
+            "scope": scope,
+            "sample_count": 0,
+            "returned_points": 0,
+            "points": [],
+        }
 
-        latest = db.execute(
-            select(Metric.captured_at, Metric.value)
-            .where(*filters)
-            .order_by(Metric.captured_at.desc(), Metric.id.desc())
-            .limit(1)
-        ).first()
-        if latest and (not rows or rows[-1][0] != latest[0]):
-            rows.append(latest)
+    latest = db.execute(
+        select(Metric.captured_at, Metric.value)
+        .where(*filters)
+        .order_by(Metric.captured_at.desc(), Metric.id.desc())
+        .limit(1)
+    ).first()
+    points = [{"t": row.captured_at.isoformat() + "Z", "v": float(row.value)} for row in rows]
+    if latest and points[-1]["t"] != latest[0].isoformat() + "Z":
+        points.append({"t": latest[0].isoformat() + "Z", "v": latest[1]})
+    sample_count = sum(int(row.sample_count) for row in rows)
 
     return {
         "name": name,
         "scope": scope,
-        "sample_count": count,
-        "returned_points": len(rows),
-        "points": [
-            {"t": row[0].isoformat() + "Z", "v": row[1]}
-            for row in rows
-        ],
+        "sample_count": sample_count,
+        "returned_points": len(points),
+        "bucket_seconds": bucket_seconds,
+        "points": points,
     }
 
 
-@app.get("/servers/{server_id}/support-bundle")
-def support_bundle(server_id: int, db: Session = Depends(get_db)):
+@app.post("/servers/{server_id}/support-bundle")
+def support_bundle(
+    server_id: int,
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
     server = db.get(Server, server_id)
     if not server:
         raise HTTPException(404)
@@ -772,7 +907,7 @@ def support_bundle(server_id: int, db: Session = Depends(get_db)):
         diagnostics = sanitize_diagnostics(raw)
         payload = {
             "format": "nasitron-support-bundle",
-            "format_version": 2,
+            "format_version": 3,
             "generated_at_utc": datetime.utcnow().isoformat() + "Z",
             "nasitron_version": APP_VERSION,
             "server": {
@@ -849,7 +984,6 @@ def acknowledge_alert(
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, db: Session = Depends(get_db)):
-    values = {}
     keys = [
         "smtp_enabled",
         "smtp_host",
@@ -863,14 +997,15 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
         "pool_capacity_critical",
         "drive_temp_warning_c",
         "drive_temp_critical_c",
+        "nvme_percentage_used_warning",
+        "nvme_percentage_used_critical",
         "scrub_age_warning_days",
         "collection_failure_threshold",
         "metric_retention_days",
         "snapshot_retention_days",
         "full_snapshot_interval_minutes",
     ]
-    for key in keys:
-        values[key] = get_setting(db, key)
+    values = get_many(db, keys)
     values["smtp_password_configured"] = bool(get_setting(db, "smtp_password"))
     return templates.TemplateResponse(
         request=request,
@@ -894,6 +1029,8 @@ def save_settings(
     pool_capacity_critical: int = Form(90),
     drive_temp_warning_c: int = Form(45),
     drive_temp_critical_c: int = Form(55),
+    nvme_percentage_used_warning: int = Form(80),
+    nvme_percentage_used_critical: int = Form(95),
     scrub_age_warning_days: int = Form(35),
     collection_failure_threshold: int = Form(2),
     metric_retention_days: int = Form(90),
@@ -926,36 +1063,31 @@ def save_settings(
     clean_to = validate_recipient_list(smtp_to) if smtp_to.strip() else ""
 
     if smtp_enabled and (not clean_smtp_host or not clean_from or not clean_to):
-        bad_request("SMTP host, From address, and at least one recipient are required when SMTP is enabled.")
+        bad_request(
+            "SMTP host, From address, and at least one recipient are required when SMTP is enabled."
+        )
 
     warn_cap, crit_cap = validate_threshold_pair(
-        pool_capacity_warning,
-        pool_capacity_critical,
-        "Pool capacity",
-        1,
-        100,
+        pool_capacity_warning, pool_capacity_critical, "Pool capacity", 1, 100
     )
     warn_temp, crit_temp = validate_threshold_pair(
-        drive_temp_warning_c,
-        drive_temp_critical_c,
-        "Drive temperature",
+        drive_temp_warning_c, drive_temp_critical_c, "Drive temperature", 1, 150
+    )
+    warn_nvme, crit_nvme = validate_threshold_pair(
+        nvme_percentage_used_warning,
+        nvme_percentage_used_critical,
+        "NVMe percentage used",
         1,
-        150,
+        100,
     )
     scrub_days = bounded_int(scrub_age_warning_days, "Scrub age", 0, 3650)
     fail_threshold = bounded_int(
-        collection_failure_threshold,
-        "Collection failure threshold",
-        1,
-        100,
+        collection_failure_threshold, "Collection failure threshold", 1, 100
     )
     metric_days = bounded_int(metric_retention_days, "Metric retention", 1, 3650)
     snapshot_days = bounded_int(snapshot_retention_days, "Snapshot retention", 1, 3650)
     snapshot_interval = bounded_int(
-        full_snapshot_interval_minutes,
-        "Full snapshot interval",
-        1,
-        1440,
+        full_snapshot_interval_minutes, "Full snapshot interval", 1, 1440
     )
 
     values = {
@@ -971,6 +1103,8 @@ def save_settings(
         "pool_capacity_critical": str(crit_cap),
         "drive_temp_warning_c": str(warn_temp),
         "drive_temp_critical_c": str(crit_temp),
+        "nvme_percentage_used_warning": str(warn_nvme),
+        "nvme_percentage_used_critical": str(crit_nvme),
         "scrub_age_warning_days": str(scrub_days),
         "collection_failure_threshold": str(fail_threshold),
         "metric_retention_days": str(metric_days),

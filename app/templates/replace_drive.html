@@ -142,7 +142,7 @@
 
       <div class="field">
         <label>Command Preview</label>
-        <div class="command-box command-preview"><span class="cmd">sudo -n flock -n /run/lock/nasitron-zpool-replace.lock zpool replace</span> <span class="cmd-accent">{{ failed.pool }}</span> {{ failed.guid }} &lt;replacement-drive&gt;</div>
+        <div class="command-box command-preview"><span class="cmd">sudo -n /usr/local/sbin/nasitron-root-helper replace</span> <span class="cmd-accent">{{ failed.pool }}</span> {{ failed.guid }} &lt;replacement-by-id&gt; 0</div>
       </div>
 
       {% if failed.operation_active %}
@@ -216,10 +216,10 @@
       <div class="sidebar-meta" style="border:0;padding:0;margin:0;font-size:.77rem">
         <span>Only live failed/offline leaf vdevs are eligible</span>
         <span>Only blank whole disks are offered as candidates</span>
-        <span>Stable <code>/dev/disk/by-id</code> paths are preferred</span>
+        <span>Stable whole-disk <code>/dev/disk/by-id</code> paths are required</span>
         <span>Failed vdevs are targeted by immutable ZFS GUID</span>
-        <span><code>wipefs --no-act</code> and kernel-holder checks must prove the candidate is unused</span>
-        <span>Selection is revalidated immediately before execution</span>
+        <span>The root-owned helper validates signatures, holders, ZFS membership and size</span>
+        <span>The privileged helper holds a remote lock while revalidating and executing</span>
         <span>No force, wipe, repartition or arbitrary shell action</span>
       </div>
     </section>
@@ -237,9 +237,11 @@ document.addEventListener("DOMContentLoaded", () => {
     function updatePreview() {
       const next = select.value || "<replacement-drive>";
       const guid = form.querySelector('input[name="old_guid"]').value;
-      preview.textContent = "sudo -n flock -n /run/lock/nasitron-zpool-replace.lock zpool replace " + pool + " " + guid + " " + next;
+      const allow = form.querySelector('input[name="allow_conflicting_operation"]')?.checked ? "1" : "0";
+      preview.textContent = "sudo -n /usr/local/sbin/nasitron-root-helper replace " + pool + " " + guid + " " + next + " " + allow;
     }
     select.addEventListener("change", updatePreview);
+    form.querySelector('input[name="allow_conflicting_operation"]')?.addEventListener("change", updatePreview);
     updatePreview();
   });
 });

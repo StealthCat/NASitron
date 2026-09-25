@@ -1,8 +1,8 @@
-fastapi>=0.116,<1
-uvicorn[standard]>=0.35,<1
-SQLAlchemy>=2.0,<3
-paramiko>=3.5,<5
-cryptography>=45,<47
-Jinja2>=3.1,<4
-python-multipart>=0.0.20,<1
-APScheduler>=3.11,<4
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.1
+paramiko==4.0.0
+cryptography==46.0.7
+Jinja2==3.1.6
+python-multipart==0.0.32
+APScheduler==3.11.3

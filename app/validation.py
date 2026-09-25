@@ -13,6 +13,10 @@ def bad_request(message: str) -> None:
     raise HTTPException(status_code=400, detail=message)
 
 
+def _has_control(value: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+
+
 def bounded_text(
     value: str,
     field: str,
@@ -26,14 +30,29 @@ def bounded_text(
         bad_request(f"{field} is required.")
     if len(result) > maximum:
         bad_request(f"{field} must be at most {maximum} characters.")
-    if any(ord(ch) < 32 and ch not in {"\t", "\r", "\n"} for ch in result):
+    if _has_control(result):
         bad_request(f"{field} contains invalid control characters.")
     return result
+
+
+def bounded_multiline(
+    value: str,
+    field: str,
+    *,
+    maximum: int = 65536,
+) -> str:
+    if len(value) > maximum:
+        bad_request(f"{field} is too large.")
+    if any((ord(ch) < 32 and ch not in {"\t", "\r", "\n"}) or ord(ch) == 127 for ch in value):
+        bad_request(f"{field} contains invalid control characters.")
+    return value
 
 
 def bounded_secret(value: str, field: str, maximum: int = 65536) -> str:
     if len(value) > maximum:
         bad_request(f"{field} is too large.")
+    if "\x00" in value:
+        bad_request(f"{field} contains an invalid NUL character.")
     return value
 
 
@@ -53,11 +72,10 @@ def validate_host(value: str, field: str = "Host") -> str:
     except ValueError:
         pass
 
-    if "://" in host or "/" in host or host.endswith("."):
-        if host.endswith("."):
-            host = host[:-1]
-        else:
-            bad_request(f"{field} must be a hostname or IP address, not a URL.")
+    if "://" in host or "/" in host:
+        bad_request(f"{field} must be a hostname or IP address, not a URL.")
+    if host.endswith("."):
+        host = host[:-1]
     labels = host.split(".")
     if not labels or any(not _HOST_LABEL.fullmatch(label) for label in labels):
         bad_request(f"{field} is not a valid hostname or IP address.")

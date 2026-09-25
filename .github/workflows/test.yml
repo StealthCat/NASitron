@@ -12,13 +12,32 @@ jobs:
       NASITRON_SECRET_KEY: ci-secret-0123456789abcdef0123456789abcdef
       NASITRON_WEB_USERNAME: ci-admin
       NASITRON_WEB_PASSWORD: ci-password-strong
+      NASITRON_ALLOW_INSECURE_HTTP: "true"
       NASITRON_ALLOW_INSECURE_MAINTENANCE: "true"
+      WEB_CONCURRENCY: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt pytest httpx ruff
-      - run: python -m compileall -q app
-      - run: ruff check app tests --select E4,E7,E9,F
+      - run: pip install -r requirements-dev.txt
+      - run: pip check
+      - run: python -m compileall -q app tests remote
+      - run: ruff check app tests remote --select E4,E7,E9,F
       - run: python -m pytest -q
+      - name: Docker build
+        run: docker build -t nasitron-ci .
+      - name: Docker startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name nasitron-ci-run -p 127.0.0.1:18080:8080             -e NASITRON_SECRET_KEY=ci-secret-0123456789abcdef0123456789abcdef             -e NASITRON_WEB_USERNAME=ci-admin             -e NASITRON_WEB_PASSWORD=ci-password-strong             -e NASITRON_ALLOW_INSECURE_HTTP=true             nasitron-ci
+          trap 'docker logs nasitron-ci-run || true; docker rm -f nasitron-ci-run || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then
+              curl -fsS -u ci-admin:ci-password-strong http://127.0.0.1:18080/ >/dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1

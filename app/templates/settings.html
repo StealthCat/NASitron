@@ -31,16 +31,18 @@
   <section class="panel">
     <div class="panel-title"><h2>Health Thresholds</h2><span class="badge">Policy</span></div>
     <div class="grid two">
-      <div class="field"><label>Pool capacity warning %</label><input type="number" name="pool_capacity_warning" value="{{ values.pool_capacity_warning }}"></div>
-      <div class="field"><label>Pool capacity critical %</label><input type="number" name="pool_capacity_critical" value="{{ values.pool_capacity_critical }}"></div>
-      <div class="field"><label>Drive temp warning °C</label><input type="number" name="drive_temp_warning_c" value="{{ values.drive_temp_warning_c }}"></div>
-      <div class="field"><label>Drive temp critical °C</label><input type="number" name="drive_temp_critical_c" value="{{ values.drive_temp_critical_c }}"></div>
+      <div class="field"><label>Pool capacity warning %</label><input type="number" min="1" max="100" name="pool_capacity_warning" value="{{ values.pool_capacity_warning }}"></div>
+      <div class="field"><label>Pool capacity critical %</label><input type="number" min="1" max="100" name="pool_capacity_critical" value="{{ values.pool_capacity_critical }}"></div>
+      <div class="field"><label>Drive temp warning °C</label><input type="number" min="1" max="150" name="drive_temp_warning_c" value="{{ values.drive_temp_warning_c }}"></div>
+      <div class="field"><label>Drive temp critical °C</label><input type="number" min="1" max="150" name="drive_temp_critical_c" value="{{ values.drive_temp_critical_c }}"></div>
+      <div class="field"><label>NVMe endurance warning (% used)</label><input type="number" min="1" max="100" name="nvme_percentage_used_warning" value="{{ values.nvme_percentage_used_warning }}"></div>
+      <div class="field"><label>NVMe endurance critical (% used)</label><input type="number" min="1" max="100" name="nvme_percentage_used_critical" value="{{ values.nvme_percentage_used_critical }}"></div>
       <div class="field"><label>Scrub age warning (days, 0 disables)</label><input type="number" name="scrub_age_warning_days" value="{{ values.scrub_age_warning_days }}"></div>
       <div class="field"><label>Collection failures before alert</label><input type="number" name="collection_failure_threshold" value="{{ values.collection_failure_threshold }}"></div>
     </div>
     <div class="panel-title" style="margin-top:10px"><h2>Retention</h2><span class="badge">History</span></div>
     <div class="grid two">
-      <div class="field"><label>Time-series metrics (days)</label><input type="number" name="metric_retention_days" value="{{ values.metric_retention_days }}"></div>
+      <div class="field"><label>Time-series metrics (days)</label><input type="number" min="1" max="3650" name="metric_retention_days" value="{{ values.metric_retention_days }}"></div>
       <div class="field"><label>Full snapshots (days)</label><input type="number" min="1" max="3650" name="snapshot_retention_days" value="{{ values.snapshot_retention_days }}"></div>
       <div class="field"><label>Full snapshot interval (minutes)</label><input type="number" min="1" max="1440" name="full_snapshot_interval_minutes" value="{{ values.full_snapshot_interval_minutes }}"></div>
     </div>

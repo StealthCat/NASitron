@@ -28,6 +28,9 @@ class Server(Base):
     smart_interval_minutes: Mapped[int] = mapped_column(Integer, default=15)
     sudo_for_smart: Mapped[bool] = mapped_column(Boolean, default=True)
     strict_host_key: Mapped[bool] = mapped_column(Boolean, default=False)
+    host_key_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    zpool_status_json_supported: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    expected_pools_json: Mapped[str] = mapped_column(Text, default="[]")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_poll_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_ok_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -56,7 +59,7 @@ class CurrentState(Base):
     server_id: Mapped[int] = mapped_column(
         ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
     )
-    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     payload_json: Mapped[str] = mapped_column(Text)
 
     server: Mapped[Server] = relationship(back_populates="current_state")
@@ -64,11 +67,14 @@ class CurrentState(Base):
 
 class Snapshot(Base):
     __tablename__ = "snapshots"
-    __table_args__ = (Index("ix_snapshot_server_time", "server_id", "captured_at"),)
+    __table_args__ = (
+        Index("ix_snapshot_server_time", "server_id", "captured_at"),
+        Index("ix_snapshot_time", "captured_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
-    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     payload_json: Mapped[str] = mapped_column(Text)
 
     server: Mapped[Server] = relationship(back_populates="snapshots")
@@ -78,13 +84,14 @@ class Metric(Base):
     __tablename__ = "metrics"
     __table_args__ = (
         Index("ix_metric_lookup", "server_id", "name", "scope", "captured_at"),
+        Index("ix_metric_time", "captured_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
-    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
-    name: Mapped[str] = mapped_column(String(100), index=True)
-    scope: Mapped[str] = mapped_column(String(255), default="", index=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    name: Mapped[str] = mapped_column(String(100))
+    scope: Mapped[str] = mapped_column(String(255), default="")
     value: Mapped[float] = mapped_column(Float)
 
     server: Mapped[Server] = relationship(back_populates="metrics")
@@ -92,22 +99,26 @@ class Metric(Base):
 
 class Alert(Base):
     __tablename__ = "alerts"
-    __table_args__ = (UniqueConstraint("server_id", "key", name="uq_alert_server_key"),)
+    __table_args__ = (
+        UniqueConstraint("server_id", "key", name="uq_alert_server_key"),
+        Index("ix_alert_server_active_seen", "server_id", "active", "last_seen"),
+        Index("ix_alert_notification_due", "active", "last_notified_at", "next_notification_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
     key: Mapped[str] = mapped_column(String(255))
     severity: Mapped[str] = mapped_column(String(20), default="warning")
     title: Mapped[str] = mapped_column(String(255))
     message: Mapped[str] = mapped_column(Text)
-    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
     acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
     first_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     notification_attempts: Mapped[int] = mapped_column(Integer, default=0)
-    next_notification_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    next_notification_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     notification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     server: Mapped[Server] = relationship(back_populates="alerts")
@@ -127,7 +138,7 @@ class MaintenanceAction(Base):
     __table_args__ = (Index("ix_maintenance_server_time", "server_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
     action: Mapped[str] = mapped_column(String(80))
     pool: Mapped[str] = mapped_column(String(255), default="")
     old_device: Mapped[str] = mapped_column(Text, default="")
@@ -136,6 +147,6 @@ class MaintenanceAction(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     server: Mapped[Server] = relationship(back_populates="maintenance_actions")

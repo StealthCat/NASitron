@@ -4,10 +4,7 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-SENSITIVE_ZFS_PROPERTIES = {
-    "keylocation",
-    "keystatus",
-}
+SENSITIVE_ZFS_PROPERTIES = {"keylocation", "keystatus"}
 
 _lock_guard = threading.Lock()
 _bundle_locks: dict[int, threading.Lock] = {}
@@ -23,6 +20,9 @@ def support_bundle_lock(server_id: int) -> Iterator[None]:
         yield
     finally:
         lock.release()
+        with _lock_guard:
+            if _bundle_locks.get(server_id) is lock and not lock.locked():
+                _bundle_locks.pop(server_id, None)
 
 
 def _sanitize_property_output(text: str) -> str:
@@ -34,8 +34,6 @@ def _sanitize_property_output(text: str) -> str:
             if prop in SENSITIVE_ZFS_PROPERTIES:
                 parts[2] = "<redacted>"
             elif ":" in prop:
-                # ZFS user properties are administrator-defined and may contain
-                # internal URLs, tokens, paths, or other arbitrary values.
                 parts[2] = "<redacted:user-property>"
             line = "\t".join(parts)
         output.append(line)

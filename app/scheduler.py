@@ -41,7 +41,12 @@ def trigger_now(server_id: int) -> bool:
             return False
         _inflight.add(server_id)
         pool = _pool
-    pool.submit(_collect_worker, server_id)
+    try:
+        pool.submit(_collect_worker, server_id)
+    except RuntimeError:
+        with _lock:
+            _inflight.discard(server_id)
+        return False
     return True
 
 

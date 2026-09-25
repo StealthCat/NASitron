@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import base64
+import fcntl
+import hashlib
 import io
 import json
+import os
 import shlex
 import socket
+import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import paramiko
 
@@ -14,6 +20,7 @@ from .config import (
     KNOWN_HOSTS_PATH,
     MAX_DIAGNOSTIC_OUTPUT_BYTES,
     MAX_REMOTE_OUTPUT_BYTES,
+    REMOTE_HELPER_PATH,
 )
 from .crypto import decrypt
 from .models import Server
@@ -21,6 +28,58 @@ from .models import Server
 
 class CollectorError(RuntimeError):
     pass
+
+
+class _RecordHostKeyPolicy(paramiko.MissingHostKeyPolicy):
+    def missing_host_key(self, client, hostname, key):
+        client.get_host_keys().add(hostname, key.get_name(), key)
+
+
+@contextmanager
+def _known_hosts_lock() -> Iterator[None]:
+    lock_path = Path(str(KNOWN_HOSTS_PATH) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _host_token(host: str, port: int) -> str:
+    return host if port == 22 else f"[{host}]:{port}"
+
+
+def _load_host_keys(path: Path) -> paramiko.HostKeys:
+    keys = paramiko.HostKeys()
+    if path.exists() and path.stat().st_size:
+        try:
+            keys.load(str(path))
+        except Exception as exc:
+            raise CollectorError(f"Unable to load SSH known_hosts: {exc}") from exc
+    return keys
+
+
+def _save_host_keys_atomic(keys: paramiko.HostKeys, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        prefix=".nasitron-known-hosts-",
+        dir=str(path.parent),
+        delete=False,
+    )
+    temp_path = Path(handle.name)
+    handle.close()
+    try:
+        keys.save(str(temp_path))
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, path)
+    except Exception as exc:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise CollectorError(f"Unable to persist SSH host key: {exc}") from exc
 
 
 class SSHCollector:
@@ -48,18 +107,51 @@ class SSHCollector:
                 last_error = exc
         raise CollectorError(f"Unable to parse SSH private key: {last_error}")
 
+    @staticmethod
+    def fetch_host_key(server: Server) -> dict[str, str]:
+        sock = socket.create_connection((server.host, server.port), timeout=10)
+        transport = paramiko.Transport(sock)
+        try:
+            transport.start_client(timeout=10)
+            key = transport.get_remote_server_key()
+            digest = hashlib.sha256(key.asbytes()).digest()
+            fingerprint = "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+            return {
+                "algorithm": key.get_name(),
+                "key_base64": key.get_base64(),
+                "fingerprint": fingerprint,
+                "host_token": _host_token(server.host, server.port),
+            }
+        except Exception as exc:
+            raise CollectorError(f"Unable to fetch SSH host key: {exc}") from exc
+        finally:
+            transport.close()
+            sock.close()
+
+    @staticmethod
+    def enroll_host_key(server: Server, expected_fingerprint: str) -> dict[str, str]:
+        candidate = SSHCollector.fetch_host_key(server)
+        if candidate["fingerprint"] != expected_fingerprint:
+            raise CollectorError(
+                "The SSH host key changed between inspection and enrollment."
+            )
+        key = paramiko.PKey.from_type_string(
+            candidate["algorithm"],
+            base64.b64decode(candidate["key_base64"]),
+        )
+        with _known_hosts_lock():
+            keys = _load_host_keys(Path(KNOWN_HOSTS_PATH))
+            keys.add(candidate["host_token"], candidate["algorithm"], key)
+            _save_host_keys_atomic(keys, Path(KNOWN_HOSTS_PATH))
+        return candidate
+
     def connect(self) -> None:
         client = paramiko.SSHClient()
-        Path(KNOWN_HOSTS_PATH).parent.mkdir(parents=True, exist_ok=True)
-        if not Path(KNOWN_HOSTS_PATH).exists():
-            Path(KNOWN_HOSTS_PATH).touch(mode=0o600)
-        try:
-            client.load_host_keys(str(KNOWN_HOSTS_PATH))
-        except Exception:
-            pass
-
+        with _known_hosts_lock():
+            keys = _load_host_keys(Path(KNOWN_HOSTS_PATH))
+        client._host_keys = keys
         client.set_missing_host_key_policy(
-            paramiko.RejectPolicy() if self.server.strict_host_key else paramiko.AutoAddPolicy()
+            paramiko.RejectPolicy() if self.server.strict_host_key else _RecordHostKeyPolicy()
         )
 
         kwargs: dict[str, Any] = {
@@ -88,12 +180,16 @@ class SSHCollector:
         try:
             client.connect(**kwargs)
             if not self.server.strict_host_key:
-                try:
-                    client.save_host_keys(str(KNOWN_HOSTS_PATH))
-                except Exception:
-                    pass
-        except (paramiko.SSHException, socket.error, OSError) as exc:
+                with _known_hosts_lock():
+                    latest = _load_host_keys(Path(KNOWN_HOSTS_PATH))
+                    for hostname, entries in client.get_host_keys().items():
+                        for keytype, key in entries.items():
+                            latest.add(hostname, keytype, key)
+                    _save_host_keys_atomic(latest, Path(KNOWN_HOSTS_PATH))
+        except (paramiko.SSHException, socket.error, OSError, CollectorError) as exc:
             client.close()
+            if isinstance(exc, CollectorError):
+                raise
             raise CollectorError(f"SSH connection failed: {exc}") from exc
         self.client = client
 
@@ -197,8 +293,32 @@ class SSHCollector:
                 "stderr_truncated": False,
             }
 
+    @staticmethod
+    def _strict_pool_names(result: dict[str, Any]) -> list[str]:
+        if result.get("exit") != 0:
+            raise CollectorError(
+                "Unable to query zpool list: "
+                + (result.get("stderr") or result.get("stdout") or "").strip()
+            )
+        if result.get("stdout_truncated") or result.get("stderr_truncated"):
+            raise CollectorError("zpool list output exceeded the configured capture limit")
+        pools: list[str] = []
+        for line in result.get("stdout", "").splitlines():
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) != 8 or not parts[0]:
+                raise CollectorError("zpool list returned malformed output")
+            pools.append(parts[0])
+        if len(pools) != len(set(pools)):
+            raise CollectorError("zpool list returned duplicate pool names")
+        return pools
+
     def collect(self, include_smart: bool = False) -> dict[str, Any]:
-        raw: dict[str, Any] = {"smart_sampled": include_smart}
+        raw: dict[str, Any] = {
+            "smart_sampled": include_smart,
+            "capabilities": {},
+        }
         commands = {
             "hostname": "hostname -f 2>/dev/null || hostname",
             "os_release": "cat /etc/os-release 2>/dev/null",
@@ -217,44 +337,72 @@ class SSHCollector:
         for key, command in commands.items():
             raw[key] = self.run(command, timeout=45 if key == "zpool_iostat" else 20)
 
-        if raw["zpool_list"]["exit"] != 0:
-            raise CollectorError(
-                "Unable to query zpool list: "
-                + (raw["zpool_list"]["stderr"] or raw["zpool_list"]["stdout"]).strip()
-            )
-
-        pools = []
-        for line in raw["zpool_list"]["stdout"].splitlines():
-            if line.strip():
-                pools.append(line.split("\t", 1)[0].split()[0])
+        pools = self._strict_pool_names(raw["zpool_list"])
 
         raw["zpool_status"] = {}
         raw["zpool_status_json"] = {}
-        for pool in pools:
+        json_capability = self.server.zpool_status_json_supported
+        for index, pool in enumerate(pools):
             quoted = shlex.quote(pool)
             raw["zpool_status"][pool] = self.run(
                 f"zpool status -P -L {quoted}", timeout=20
             )
-            raw["zpool_status_json"][pool] = self.run(
+
+            if json_capability is False:
+                raw["zpool_status_json"][pool] = {
+                    "stdout": "",
+                    "stderr": "unsupported",
+                    "exit": 2,
+                    "stdout_truncated": False,
+                    "stderr_truncated": False,
+                }
+                continue
+
+            json_result = self.run(
                 f"zpool status -j --json-int -P -L {quoted}", timeout=20
             )
+            raw["zpool_status_json"][pool] = json_result
+            if json_capability is None and index == 0:
+                try:
+                    payload = json.loads(json_result.get("stdout", ""))
+                    valid_json = isinstance(payload.get("pools"), dict)
+                except (json.JSONDecodeError, AttributeError):
+                    valid_json = False
+                json_capability = bool(
+                    json_result.get("exit") == 0
+                    and not json_result.get("stdout_truncated")
+                    and valid_json
+                )
+
+        raw["capabilities"]["zpool_status_json"] = json_capability
 
         raw["smart"] = {}
-        if include_smart and raw["lsblk"]["exit"] == 0:
+        raw["smart_inventory_ok"] = raw["lsblk"]["exit"] == 0 and not raw["lsblk"].get(
+            "stdout_truncated"
+        )
+        if include_smart and raw["smart_inventory_ok"]:
             try:
                 block = json.loads(raw["lsblk"]["stdout"])
             except json.JSONDecodeError:
                 block = {}
-            for device in self._disk_paths(block.get("blockdevices", [])):
-                prefix = "sudo -n " if self.server.sudo_for_smart else ""
-                raw["smart"][device] = self.run(
-                    f"{prefix}smartctl -a -j {shlex.quote(device)} 2>/dev/null",
-                    timeout=30,
-                )
+                raw["smart_inventory_ok"] = False
+            if raw["smart_inventory_ok"]:
+                helper = shlex.quote(REMOTE_HELPER_PATH)
+                for device in self._disk_paths(block.get("blockdevices", [])):
+                    if self.server.sudo_for_smart:
+                        command = (
+                            f"sudo -n {helper} smartctl {shlex.quote(device)} 2>/dev/null"
+                        )
+                    else:
+                        command = f"smartctl -a -j {shlex.quote(device)} 2>/dev/null"
+                    raw["smart"][device] = self.run(command, timeout=45)
+
+        raw["smart_attempted_count"] = len(raw["smart"])
         return raw
 
     def deep_collect(self) -> dict[str, Any]:
         raw = self.collect(include_smart=True)
+        helper = shlex.quote(REMOTE_HELPER_PATH)
         commands = {
             "zpool_status_verbose": "zpool status -P -L -v",
             "zpool_get_all": "zpool get -Hp all",
@@ -273,7 +421,7 @@ class SSHCollector:
             "lsblk_full": "lsblk -J -b -O",
             "mounts": "findmnt -J -b 2>/dev/null || mount",
             "sysctl_relevant": "sysctl vm.dirty_background_bytes vm.dirty_background_ratio vm.dirty_bytes vm.dirty_ratio vm.swappiness vm.min_free_kbytes 2>/dev/null || true",
-            "dmesg_zfs": "(sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null || true) | grep -Ei 'zfs|spl|ata|nvme|scsi|I/O error' | tail -n 500",
+            "dmesg_zfs": f"(sudo -n {helper} dmesg 2>/dev/null || true) | grep -Ei 'zfs|spl|ata|nvme|scsi|I/O error' | tail -n 500",
         }
         for key, command in commands.items():
             raw[key] = self.run(

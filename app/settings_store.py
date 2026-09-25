@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import DEFAULT_SETTINGS, SECRET_SETTING_KEYS
@@ -50,3 +51,18 @@ def set_setting(db: Session, key: str, value: str, secret: bool | None = None) -
             row.value = encrypt(value) or ""
     else:
         row.value = value
+
+
+def get_many(db: Session, keys: list[str]) -> dict[str, str]:
+    rows = db.scalars(select(Setting).where(Setting.key.in_(keys))).all()
+    by_key = {row.key: row for row in rows}
+    values: dict[str, str] = {}
+    for key in keys:
+        row = by_key.get(key)
+        if row is None:
+            values[key] = DEFAULT_SETTINGS.get(key, "")
+        elif row.secret:
+            values[key] = decrypt(row.value) or ""
+        else:
+            values[key] = row.value or ""
+    return values

@@ -38,9 +38,9 @@
     <div class="field"><label>SMART/NVMe detail interval (minutes)</label><input type="number" min="1" name="smart_interval_minutes" max="1440" value="{{ server.smart_interval_minutes if server else 15 }}"></div>
   </div>
   <label class="checkbox"><input type="checkbox" name="sudo_for_smart" {{ 'checked' if not server or server.sudo_for_smart else '' }}> Use <code>sudo -n</code> for smartctl</label>
-  <label class="checkbox"><input type="checkbox" name="strict_host_key" {{ 'checked' if server and server.strict_host_key else '' }}> Require host key to already exist in NASitron known_hosts</label>
-  <label class="checkbox"><input type="checkbox" name="enabled" {{ 'checked' if not server or server.enabled else '' }}> Enable scheduled monitoring</label>
-  <p class="subtle">With strict mode off, NASitron uses trust-on-first-use and stores the observed host key in its persistent data volume.</p>
+  <label class="checkbox"><input type="checkbox" name="strict_host_key" {{ 'checked' if not server or server.strict_host_key else '' }}> Require an enrolled SSH host key</label>
+  <label class="checkbox"><input type="checkbox" name="enabled" {{ 'checked' if server and server.enabled else '' }}> Enable scheduled monitoring</label>
+  <p class="subtle">Recommended: save the server, open <strong>Enroll host key</strong>, verify the SHA256 fingerprint out of band, then enable strict host-key verification. TOFU remains available only when strict mode is off.</p>
   <div class="row" style="margin-top:18px">
     <button class="primary" type="submit">{{ "Save Changes" if server else "Add Server" }}</button>
     <a class="button" href="{{ '/servers/' ~ server.id if server else '/' }}">Cancel</a>

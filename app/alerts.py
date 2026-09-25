@@ -9,7 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import Alert, Server
-from .settings_store import get_bool, get_int, get_setting
+from .settings_store import get_bool, get_int, get_many, get_setting
 
 
 def _utcnow() -> datetime:
@@ -20,12 +20,28 @@ def send_email(db: Session, subject: str, body: str, force: bool = False) -> boo
     if not force and not get_bool(db, "smtp_enabled", False):
         return False
 
-    host = get_setting(db, "smtp_host")
-    port = get_int(db, "smtp_port", 587)
-    sender = get_setting(db, "smtp_from")
+    settings = get_many(
+        db,
+        [
+            "smtp_host",
+            "smtp_port",
+            "smtp_from",
+            "smtp_to",
+            "smtp_username",
+            "smtp_password",
+            "smtp_ssl",
+            "smtp_starttls",
+        ],
+    )
+    host = settings["smtp_host"]
+    try:
+        port = int(settings["smtp_port"])
+    except ValueError:
+        port = 587
+    sender = settings["smtp_from"]
     recipients = [
         x.strip()
-        for x in get_setting(db, "smtp_to").replace(";", ",").split(",")
+        for x in settings["smtp_to"].replace(";", ",").split(",")
         if x.strip()
     ]
     if not host or not sender or not recipients:
@@ -39,10 +55,8 @@ def send_email(db: Session, subject: str, body: str, force: bool = False) -> boo
     msg["To"] = ", ".join(recipients)
     msg.set_content(body)
 
-    username = get_setting(db, "smtp_username")
-    password = get_setting(db, "smtp_password")
-    use_ssl = get_bool(db, "smtp_ssl", False)
-    starttls = get_bool(db, "smtp_starttls", True)
+    use_ssl = settings["smtp_ssl"].strip().lower() in {"1", "true", "yes", "on"}
+    starttls = settings["smtp_starttls"].strip().lower() in {"1", "true", "yes", "on"}
     if use_ssl and starttls:
         raise RuntimeError("SMTP implicit TLS and STARTTLS cannot both be enabled")
 
@@ -50,8 +64,8 @@ def send_email(db: Session, subject: str, body: str, force: bool = False) -> boo
     with smtp_cls(host, port, timeout=15) as smtp:
         if not use_ssl and starttls:
             smtp.starttls()
-        if username:
-            smtp.login(username, password)
+        if settings["smtp_username"]:
+            smtp.login(settings["smtp_username"], settings["smtp_password"])
         smtp.send_message(msg)
     return True
 
@@ -65,6 +79,7 @@ def _queue_notification(alert: Alert, now: datetime) -> None:
 
 def _upsert_alert(
     db: Session,
+    existing: dict[str, Alert],
     server: Server,
     key: str,
     severity: str,
@@ -72,9 +87,7 @@ def _upsert_alert(
     message: str,
 ) -> Alert:
     now = _utcnow()
-    alert = db.scalar(
-        select(Alert).where(Alert.server_id == server.id, Alert.key == key)
-    )
+    alert = existing.get(key)
     changed = False
 
     if alert is None:
@@ -89,6 +102,7 @@ def _upsert_alert(
             last_seen=now,
         )
         db.add(alert)
+        existing[key] = alert
         changed = True
     elif not alert.active:
         alert.active = True
@@ -114,23 +128,16 @@ def _upsert_alert(
 
 
 def _resolve_keys_not_seen(
-    db: Session,
-    server: Server,
+    existing: dict[str, Alert],
     active_keys: set[str],
     resolvable_prefixes: set[str],
     resolvable_exact: set[str],
 ) -> None:
-    if not resolvable_prefixes:
+    if not resolvable_prefixes and not resolvable_exact:
         return
     now = _utcnow()
-    existing = db.scalars(
-        select(Alert).where(
-            Alert.server_id == server.id,
-            Alert.active.is_(True),
-        )
-    ).all()
-    for alert in existing:
-        if alert.key in active_keys:
+    for alert in existing.values():
+        if not alert.active or alert.key in active_keys:
             continue
         if alert.key in resolvable_exact or any(
             alert.key.startswith(prefix) for prefix in resolvable_prefixes
@@ -141,18 +148,46 @@ def _resolve_keys_not_seen(
             alert.next_notification_at = None
 
 
-def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> None:
-    active_keys: set[str] = set()
-    resolvable_prefixes: set[str] = {"pool.health:", "pool.capacity:"}
-    resolvable_exact: set[str] = {"collector.partial"}
-    warn_cap = get_int(db, "pool_capacity_warning", 80)
-    crit_cap = get_int(db, "pool_capacity_critical", 90)
-    warn_temp = get_int(db, "drive_temp_warning_c", 45)
-    crit_temp = get_int(db, "drive_temp_critical_c", 55)
-    scrub_days = get_int(db, "scrub_age_warning_days", 35)
+def _number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
+
+def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> None:
+    existing = {
+        alert.key: alert
+        for alert in db.scalars(
+            select(Alert).where(Alert.server_id == server.id)
+        ).all()
+    }
+    settings = get_many(
+        db,
+        [
+            "pool_capacity_warning",
+            "pool_capacity_critical",
+            "drive_temp_warning_c",
+            "drive_temp_critical_c",
+            "nvme_percentage_used_warning",
+            "nvme_percentage_used_critical",
+            "scrub_age_warning_days",
+        ],
+    )
+    warn_cap = int(settings["pool_capacity_warning"] or 80)
+    crit_cap = int(settings["pool_capacity_critical"] or 90)
+    warn_temp = int(settings["drive_temp_warning_c"] or 45)
+    crit_temp = int(settings["drive_temp_critical_c"] or 55)
+    warn_nvme = int(settings["nvme_percentage_used_warning"] or 80)
+    crit_nvme = int(settings["nvme_percentage_used_critical"] or 95)
+    scrub_days = int(settings["scrub_age_warning_days"] or 35)
+
+    active_keys: set[str] = set()
+    resolvable_prefixes: set[str] = set()
+    resolvable_exact: set[str] = {"collector.partial"}
     collection = snapshot.get("collection", {})
     errors = collection.get("errors", [])
+
     if errors:
         key = "collector.partial"
         active_keys.add(key)
@@ -164,6 +199,7 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
             detail += f"; plus {len(errors) - 8} additional collection errors"
         _upsert_alert(
             db,
+            existing,
             server,
             key,
             "warning",
@@ -171,15 +207,41 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
             detail,
         )
 
+    missing_pools = set(collection.get("missing_pools", []))
+    for name in missing_pools:
+        key = f"pool.missing:{name}"
+        active_keys.add(key)
+        _upsert_alert(
+            db,
+            existing,
+            server,
+            key,
+            "critical",
+            f"Expected pool {name} is missing",
+            (
+                f"Pool {name} was previously discovered on this server but is no longer "
+                "present in the current imported-pool inventory."
+            ),
+        )
+
     pool_status_ok = set(collection.get("pool_status_ok", []))
     for pool in snapshot.get("pools", []):
-        name = pool.get("name", "unknown")
+        name = str(pool.get("name") or "unknown")
+        resolvable_exact.update(
+            {
+                f"pool.health:{name}",
+                f"pool.capacity:{name}",
+                f"pool.missing:{name}",
+            }
+        )
+
         health = str(pool.get("health", "")).upper()
         if health != "ONLINE":
             key = f"pool.health:{name}"
             active_keys.add(key)
             _upsert_alert(
                 db,
+                existing,
                 server,
                 key,
                 "critical",
@@ -194,6 +256,7 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
             active_keys.add(key)
             _upsert_alert(
                 db,
+                existing,
                 server,
                 key,
                 severity,
@@ -207,21 +270,28 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
         if name not in pool_status_ok:
             continue
 
-        resolvable_prefixes.add(f"vdev.errors:{name}:")
+        resolvable_prefixes.update(
+            {
+                f"vdev.errors:{name}:",
+                f"vdev.state:{name}:",
+            }
+        )
         resolvable_exact.add(f"pool.scrub_age:{name}")
         status = pool.get("status") or {}
         for vdev in status.get("vdevs", []):
+            ident = str(vdev.get("guid") or vdev.get("name") or "unknown")
+            device = str(vdev.get("name") or ident)
             errs = (
                 int(vdev.get("read_errors", 0))
                 + int(vdev.get("write_errors", 0))
                 + int(vdev.get("checksum_errors", 0))
             )
             if errs > 0:
-                device = vdev.get("name", "unknown")
-                key = f"vdev.errors:{name}:{device}"
+                key = f"vdev.errors:{name}:{ident}"
                 active_keys.add(key)
                 _upsert_alert(
                     db,
+                    existing,
                     server,
                     key,
                     "warning",
@@ -233,6 +303,22 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
                     ),
                 )
 
+            state = str(vdev.get("state") or "").upper()
+            if vdev.get("leaf") and state not in {"ONLINE", "HEALTHY", "AVAIL"}:
+                role = str(vdev.get("role") or "data")
+                severity = "warning" if role in {"cache", "spare"} else "critical"
+                key = f"vdev.state:{name}:{ident}"
+                active_keys.add(key)
+                _upsert_alert(
+                    db,
+                    existing,
+                    server,
+                    key,
+                    severity,
+                    f"Vdev {device} is {state}",
+                    f"{device} in pool {name} ({role}) reports state {state}.",
+                )
+
         scrub_finished = status.get("scrub_finished_at")
         if scrub_finished and scrub_days > 0:
             try:
@@ -242,6 +328,7 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
                     active_keys.add(key)
                     _upsert_alert(
                         db,
+                        existing,
                         server,
                         key,
                         "warning",
@@ -256,17 +343,30 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
 
     for disk in snapshot.get("drives", []):
         smart = disk.get("smart") or {}
-        if smart.get("stale"):
+        ident = str(disk.get("serial") or disk.get("path") or "unknown")
+        display = str(disk.get("model") or disk.get("path") or ident)
+        alert_keys = {
+            "overall": f"drive.smart:{ident}",
+            "unavailable": f"drive.smart_unavailable:{ident}",
+            "findings": f"drive.smart_findings:{ident}",
+            "temp": f"drive.temp:{ident}",
+            "reallocated": f"drive.reallocated_sectors:{ident}",
+            "pending": f"drive.pending_sectors:{ident}",
+            "uncorrectable": f"drive.offline_uncorrectable:{ident}",
+            "media": f"drive.media_errors:{ident}",
+            "endurance": f"drive.nvme_endurance:{ident}",
+        }
+
+        if smart.get("stale") and smart.get("data_available", True):
             continue
 
-        ident = disk.get("serial") or disk.get("path") or "unknown"
-        display = disk.get("model") or disk.get("path") or ident
         if not smart.get("data_available"):
-            key = f"drive.smart_unavailable:{ident}"
+            key = alert_keys["unavailable"]
             active_keys.add(key)
             findings = ", ".join(smart.get("exit_findings") or []) or "unknown error"
             _upsert_alert(
                 db,
+                existing,
                 server,
                 key,
                 "warning",
@@ -278,20 +378,14 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
             )
             continue
 
-        for prefix in (
-            "drive.smart:",
-            "drive.smart_unavailable:",
-            "drive.temp:",
-            "drive.pending_sectors:",
-            "drive.offline_uncorrectable:",
-        ):
-            resolvable_exact.add(f"{prefix}{ident}")
+        resolvable_exact.update(alert_keys.values())
 
         if smart.get("smart_passed") is False:
-            key = f"drive.smart:{ident}"
+            key = alert_keys["overall"]
             active_keys.add(key)
             _upsert_alert(
                 db,
+                existing,
                 server,
                 key,
                 "critical",
@@ -299,43 +393,93 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
                 f"SMART overall health reports failure for {display} ({ident}).",
             )
 
-        temp = smart.get("temperature_c")
-        if temp is not None and float(temp) >= warn_temp:
-            severity = "critical" if float(temp) >= crit_temp else "warning"
-            key = f"drive.temp:{ident}"
+        important_findings = [
+            value
+            for value in (smart.get("exit_findings") or [])
+            if value
+            in {
+                "prefail_attribute",
+                "past_threshold_attribute",
+                "error_log_records",
+                "self_test_errors",
+            }
+        ]
+        if important_findings:
+            key = alert_keys["findings"]
+            active_keys.add(key)
+            severity = (
+                "critical"
+                if {"prefail_attribute", "past_threshold_attribute"} & set(important_findings)
+                else "warning"
+            )
+            _upsert_alert(
+                db,
+                existing,
+                server,
+                key,
+                severity,
+                f"SMART health findings on {display}",
+                "smartctl reports: " + ", ".join(important_findings),
+            )
+
+        temp = _number(smart.get("temperature_c"))
+        if temp is not None and temp >= warn_temp:
+            severity = "critical" if temp >= crit_temp else "warning"
+            key = alert_keys["temp"]
             active_keys.add(key)
             _upsert_alert(
                 db,
+                existing,
                 server,
                 key,
                 severity,
                 f"High drive temperature on {display}",
                 (
-                    f"Drive temperature is {temp} C. Warning threshold is "
+                    f"Drive temperature is {temp:g} C. Warning threshold is "
                     f"{warn_temp} C; critical threshold is {crit_temp} C."
                 ),
             )
 
-        for attr, label in (
-            ("pending_sectors", "pending sectors"),
-            ("offline_uncorrectable", "offline uncorrectable sectors"),
+        for attr, key_name, label, severity in (
+            ("reallocated_sectors", "reallocated", "reallocated sectors", "warning"),
+            ("pending_sectors", "pending", "pending sectors", "warning"),
+            ("offline_uncorrectable", "uncorrectable", "offline uncorrectable sectors", "critical"),
+            ("media_errors", "media", "NVMe media errors", "critical"),
         ):
-            value = smart.get(attr)
-            if value not in (None, 0, "0"):
-                key = f"drive.{attr}:{ident}"
+            value = _number(smart.get(attr))
+            if value is not None and value > 0:
+                key = alert_keys[key_name]
                 active_keys.add(key)
                 _upsert_alert(
                     db,
+                    existing,
                     server,
                     key,
-                    "warning",
+                    severity,
                     f"{display} has {label}",
-                    f"SMART reports {value} {label} on {display} ({ident}).",
+                    f"SMART reports {value:g} {label} on {display} ({ident}).",
                 )
 
+        used = _number(smart.get("percentage_used"))
+        if used is not None and used >= warn_nvme:
+            severity = "critical" if used >= crit_nvme else "warning"
+            key = alert_keys["endurance"]
+            active_keys.add(key)
+            _upsert_alert(
+                db,
+                existing,
+                server,
+                key,
+                severity,
+                f"NVMe endurance threshold on {display}",
+                (
+                    f"NVMe percentage used is {used:g}%. Warning threshold is "
+                    f"{warn_nvme}% and critical threshold is {crit_nvme}%."
+                ),
+            )
+
     _resolve_keys_not_seen(
-        db,
-        server,
+        existing,
         active_keys,
         resolvable_prefixes,
         resolvable_exact,
@@ -344,18 +488,29 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
 
 def collection_failed(db: Session, server: Server, message: str) -> None:
     threshold = max(1, get_int(db, "collection_failure_threshold", 2))
-    if server.consecutive_failures >= threshold:
-        _upsert_alert(
-            db,
-            server,
-            "collector.offline",
-            "critical",
-            "SSH collection is failing",
-            (
-                f"Collection has failed {server.consecutive_failures} consecutive times. "
-                f"Last error: {message}"
-            ),
-        )
+    if server.consecutive_failures < threshold:
+        return
+    existing = {
+        alert.key: alert
+        for alert in db.scalars(
+            select(Alert).where(
+                Alert.server_id == server.id,
+                Alert.key == "collector.offline",
+            )
+        ).all()
+    }
+    _upsert_alert(
+        db,
+        existing,
+        server,
+        "collector.offline",
+        "critical",
+        "SSH collection is failing",
+        (
+            f"Collection has failed {server.consecutive_failures} consecutive times. "
+            f"Last error: {message}"
+        ),
+    )
 
 
 def collection_recovered(db: Session, server: Server) -> None:
@@ -400,10 +555,7 @@ def deliver_pending_notifications(db: Session) -> int:
     sent_groups = 0
     for alerts in grouped.values():
         server = alerts[0].server
-        lines = [
-            f"NASitron active alerts for {server.name} ({server.host})",
-            "",
-        ]
+        lines = [f"NASitron active alerts for {server.name} ({server.host})", ""]
         for alert in alerts:
             lines.extend(
                 [

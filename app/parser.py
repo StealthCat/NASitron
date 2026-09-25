@@ -434,10 +434,6 @@ def _device_matches_disk(vdev_name: str, disk_path: str) -> bool:
     return bool(suffix) and (suffix[0].isdigit() or suffix.startswith("p"))
 
 
-def _result_ok(raw: dict[str, Any], key: str) -> bool:
-    return raw.get(key, {}).get("exit") == 0
-
-
 def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> dict[str, Any]:
     captured_at = captured_at or datetime.utcnow()
     sampled_at = captured_at.isoformat() + "Z"
@@ -448,75 +444,8 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
     pool_names = {p["name"] for p in pools}
     iostat = parse_iostat(raw.get("zpool_iostat", {}).get("stdout", ""), pool_names)
 
-    text_statuses = raw.get("zpool_status", {})
-    json_statuses = raw.get("zpool_status_json", {})
-    pool_status_ok: list[str] = []
-    for pool in pools:
-        name = pool["name"]
-        text_result = text_statuses.get(name, {})
-        json_result = json_statuses.get(name, {})
-        text = text_result.get("stdout", "")
-        parsed = None
-        if json_result.get("exit") == 0:
-            parsed = parse_pool_status_json(json_result.get("stdout", ""), name, text)
-        if parsed is None:
-            parsed = parse_pool_status(text)
-        pool["io"] = iostat.get(name, {})
-        pool["status"] = parsed
-        if text_result.get("exit") == 0 or json_result.get("exit") == 0:
-            pool_status_ok.append(name)
-
-    try:
-        block = json.loads(raw.get("lsblk", {}).get("stdout", "{}"))
-    except json.JSONDecodeError:
-        block = {}
-    disks = _flatten_disks(block.get("blockdevices", []))
-    smart_map = raw.get("smart", {})
-    smart_sampled = bool(raw.get("smart_sampled"))
-    smart_refreshed: list[str] = []
-
-    for disk in disks:
-        smart_result = smart_map.get(disk["path"])
-        if smart_sampled:
-            if smart_result:
-                smart = parse_smart(
-                    smart_result.get("stdout", ""),
-                    smart_result.get("exit"),
-                )
-            else:
-                smart = {
-                    "data_available": False,
-                    "command_exit": 255,
-                    "exit_findings": ["not_sampled"],
-                }
-            smart["sampled_at"] = sampled_at
-            smart["stale"] = False
-            smart_refreshed.append(disk.get("serial") or disk["path"])
-        else:
-            smart = {}
-        disk["smart"] = smart
-
-        memberships = []
-        for pool in pools:
-            for vdev in pool.get("status", {}).get("vdevs", []):
-                if _device_matches_disk(str(vdev.get("name", "")), str(disk.get("path", ""))):
-                    memberships.append(
-                        {
-                            "pool": pool["name"],
-                            "role": vdev.get("role", "data"),
-                            "vdev": vdev.get("name"),
-                            "guid": vdev.get("guid"),
-                        }
-                    )
-        disk["zfs_memberships"] = memberships
-
-    load_parts = raw.get("loadavg", {}).get("stdout", "").split()
-    try:
-        uptime_seconds = float(raw.get("uptime", {}).get("stdout", "0").split()[0])
-    except (ValueError, IndexError):
-        uptime_seconds = 0.0
-
     errors: list[dict[str, str]] = []
+    freshness: dict[str, str] = {}
     checked_commands = {
         "hostname": "system.hostname",
         "os_release": "system.os",
@@ -531,38 +460,167 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         "lsblk": "drives.inventory",
         "services": "zfs.services",
     }
+    failed_subsystems: set[str] = set()
     for key, subsystem in checked_commands.items():
         result = raw.get(key, {})
-        if result.get("exit") != 0 or result.get("stdout_truncated") or result.get("stderr_truncated"):
+        failed = (
+            result.get("exit") != 0
+            or result.get("stdout_truncated")
+            or result.get("stderr_truncated")
+        )
+        if failed:
+            failed_subsystems.add(subsystem)
             reason = result.get("stderr") or result.get("stdout") or f"{key} failed"
             if result.get("stdout_truncated") or result.get("stderr_truncated"):
                 reason = f"{key} output exceeded NASitron's configured capture limit"
+            errors.append({"subsystem": subsystem, "message": reason[:1000]})
+        else:
+            freshness[subsystem] = sampled_at
+
+    text_statuses = raw.get("zpool_status", {})
+    json_statuses = raw.get("zpool_status_json", {})
+    pool_status_ok: list[str] = []
+    for pool in pools:
+        name = pool["name"]
+        text_result = text_statuses.get(name, {})
+        json_result = json_statuses.get(name, {})
+        text = text_result.get("stdout", "")
+
+        parsed_json = None
+        json_valid = (
+            json_result.get("exit") == 0
+            and not json_result.get("stdout_truncated")
+            and not json_result.get("stderr_truncated")
+        )
+        if json_valid:
+            parsed_json = parse_pool_status_json(
+                json_result.get("stdout", ""), name, text
+            )
+            json_valid = bool(
+                parsed_json
+                and parsed_json.get("state")
+                and parsed_json.get("vdevs")
+            )
+
+        parsed_text = None
+        text_valid = (
+            text_result.get("exit") == 0
+            and not text_result.get("stdout_truncated")
+            and not text_result.get("stderr_truncated")
+        )
+        if text_valid:
+            parsed_text = parse_pool_status(text)
+            text_valid = bool(
+                parsed_text.get("state")
+                and parsed_text.get("vdevs")
+            )
+
+        if json_valid:
+            parsed = parsed_json
+        elif text_valid:
+            parsed = parsed_text
+        else:
+            parsed = parsed_json or parsed_text or parse_pool_status(text)
+            subsystem = f"pool.status:{name}"
+            failed_subsystems.add(subsystem)
             errors.append(
                 {
                     "subsystem": subsystem,
-                    "message": reason[:1000],
+                    "message": "Detailed pool status was missing, truncated, or malformed.",
                 }
             )
 
-    for pool in pools:
-        if pool["name"] not in pool_status_ok:
+        pool["io"] = iostat.get(name, {})
+        pool["status"] = parsed
+        if json_valid or text_valid:
+            pool_status_ok.append(name)
+            freshness[f"pool.status:{name}"] = sampled_at
+
+    try:
+        block = json.loads(raw.get("lsblk", {}).get("stdout", "{}"))
+    except json.JSONDecodeError:
+        block = {}
+        if "drives.inventory" not in failed_subsystems:
+            failed_subsystems.add("drives.inventory")
             errors.append(
                 {
-                    "subsystem": f"pool.status:{pool['name']}",
-                    "message": "Unable to refresh detailed pool status.",
+                    "subsystem": "drives.inventory",
+                    "message": "lsblk returned malformed JSON.",
                 }
             )
+    disks = _flatten_disks(block.get("blockdevices", []))
+
+    smart_map = raw.get("smart", {})
+    smart_sampled = bool(raw.get("smart_sampled"))
+    smart_inventory_ok = bool(raw.get("smart_inventory_ok"))
+    smart_attempted_count = int(raw.get("smart_attempted_count") or 0)
+    smart_refreshed: list[str] = []
+
+    for disk in disks:
+        smart_result = smart_map.get(disk["path"])
+        if smart_sampled:
+            if smart_result:
+                smart = parse_smart(
+                    smart_result.get("stdout", ""),
+                    smart_result.get("exit"),
+                )
+                smart_refreshed.append(disk.get("serial") or disk["path"])
+            else:
+                smart = {
+                    "data_available": False,
+                    "command_exit": 255,
+                    "exit_findings": ["not_attempted"],
+                }
+            smart["sampled_at"] = sampled_at
+            smart["stale"] = False
+        else:
+            smart = {}
+        disk["smart"] = smart
+
+        memberships = []
+        for pool in pools:
+            for vdev in pool.get("status", {}).get("vdevs", []):
+                if _device_matches_disk(
+                    str(vdev.get("name", "")), str(disk.get("path", ""))
+                ):
+                    memberships.append(
+                        {
+                            "pool": pool["name"],
+                            "role": vdev.get("role", "data"),
+                            "vdev": vdev.get("name"),
+                            "guid": vdev.get("guid"),
+                        }
+                    )
+        disk["zfs_memberships"] = memberships
 
     if smart_sampled:
+        if not smart_inventory_ok:
+            errors.append(
+                {
+                    "subsystem": "smart.inventory",
+                    "message": "SMART sampling was requested but disk inventory was unavailable.",
+                }
+            )
+            failed_subsystems.add("smart.inventory")
         for disk in disks:
             smart = disk.get("smart") or {}
-            if not smart.get("data_available") and int(smart.get("command_exit") or 0) & 0b111:
+            if not smart.get("data_available"):
+                subsystem = f"smart:{disk.get('serial') or disk.get('path')}"
                 errors.append(
                     {
-                        "subsystem": f"smart:{disk.get('serial') or disk.get('path')}",
+                        "subsystem": subsystem,
                         "message": "SMART data could not be read for this drive.",
                     }
                 )
+                failed_subsystems.add(subsystem)
+            else:
+                freshness[f"smart:{disk.get('serial') or disk.get('path')}"] = sampled_at
+
+    load_parts = raw.get("loadavg", {}).get("stdout", "").split()
+    try:
+        uptime_seconds = float(raw.get("uptime", {}).get("stdout", "0").split()[0])
+    except (ValueError, IndexError):
+        uptime_seconds = 0.0
 
     return {
         "system": {
@@ -582,10 +640,16 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         "datasets": parse_zfs_list(raw.get("zfs_list", {}).get("stdout", "")),
         "drives": disks,
         "collection": {
+            "captured_at": sampled_at,
             "smart_sampled": smart_sampled,
+            "smart_inventory_ok": smart_inventory_ok,
+            "smart_attempted_count": smart_attempted_count,
             "smart_refreshed": smart_refreshed,
             "pool_status_ok": pool_status_ok,
+            "freshness": freshness,
+            "stale_subsystems": [],
             "errors": errors,
             "partial": bool(errors),
         },
+        "capabilities": raw.get("capabilities", {}),
     }

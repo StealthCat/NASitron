@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}SSH host key · {{ server.name }} · NASitron{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-title-wrap">
+    <div class="hero-kicker">SSH Identity</div>
+    <h1>Enroll Host Key</h1>
+    <p class="muted">Verify the fingerprint through a trusted out-of-band source before enrolling it.</p>
+  </div>
+  <a class="button" href="/servers/{{ server.id }}">← Back to server</a>
+</div>
+
+{% if error %}
+<section class="panel accent-panel">
+  <div class="panel-title"><h2>Unable to read host key</h2><span class="badge critical">Failed</span></div>
+  <pre>{{ error }}</pre>
+</section>
+{% elif candidate %}
+<section class="panel accent-panel" style="max-width:900px">
+  <div class="panel-title"><h2>{{ server.host }}:{{ server.port }}</h2><span class="badge warning">Verify first</span></div>
+  <dl class="statlist">
+    <dt>Algorithm</dt><dd>{{ candidate.algorithm }}</dd>
+    <dt>Fingerprint</dt><dd><code>{{ candidate.fingerprint }}</code></dd>
+    <dt>Currently enrolled</dt><dd>{{ server.host_key_fingerprint or "No" }}</dd>
+  </dl>
+  <p class="muted">Compare this SHA256 fingerprint with <code>ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub</code> on the server console or another trusted channel.</p>
+  <form method="post" action="/servers/{{ server.id }}/host-key">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="fingerprint" value="{{ candidate.fingerprint }}">
+    <div class="field">
+      <label>Type the fingerprint exactly to confirm</label>
+      <input name="confirm_text" autocomplete="off" maxlength="128" required>
+    </div>
+    <button class="primary" type="submit">Enroll and enable strict verification</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

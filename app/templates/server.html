@@ -20,15 +20,38 @@
   <div class="row">
     <form method="post" action="/servers/{{ server.id }}/poll" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">↻ Poll now</button></form>
     <a class="button primary" href="/servers/{{ server.id }}/replace-drive">Maintenance</a>
-    <a class="button" href="/servers/{{ server.id }}/support-bundle">Tuning bundle</a>
+    <form method="post" action="/servers/{{ server.id }}/support-bundle" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit">Tuning bundle</button>
+    </form>
+    <a class="button" href="/servers/{{ server.id }}/host-key">{{ "Host key ✓" if server.host_key_fingerprint else "Enroll host key" }}</a>
     <a class="button" href="/servers/{{ server.id }}/edit">Edit</a>
   </div>
 </div>
 
 {% if server.last_collection_state == 'partial' and snapshot %}
-<div class="message"><strong>Partial collection:</strong> some telemetry sources did not refresh. Existing alerts from failed subsystems are preserved until a successful refresh.</div>
+<div class="message"><strong>Partial collection:</strong> some telemetry sources did not refresh. Stale values are retained and marked until a successful refresh.</div>
+{% if snapshot.collection.stale_subsystems %}
+<div class="subtle" style="margin:8px 0">Stale telemetry: {{ snapshot.collection.stale_subsystems|join(", ") }}</div>
+{% endif %}
 {% elif server.last_error %}
 <div class="message"><strong>Last collection error:</strong> {{ server.last_error }}</div>
+{% endif %}
+
+{% if snapshot and snapshot.collection.missing_pools %}
+<section class="panel accent-panel">
+  <div class="panel-title"><h2>Missing Expected Pools</h2><span class="badge critical">{{ snapshot.collection.missing_pools|length }}</span></div>
+  {% for pool in snapshot.collection.missing_pools %}
+  <div class="row between" style="margin:8px 0">
+    <div><strong>{{ pool }}</strong><div class="subtle">Previously discovered but absent from the current imported-pool inventory.</div></div>
+    <form method="post" action="/servers/{{ server.id }}/expected-pools/forget" onsubmit="return confirm('Stop monitoring {{ pool }} as an expected pool?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="pool_name" value="{{ pool }}">
+      <button type="submit">Forget pool</button>
+    </form>
+  </div>
+  {% endfor %}
+</section>
 {% endif %}
 
 {% if not snapshot %}
@@ -134,7 +157,7 @@
         <td>{{ disk.model or "—" }}<div class="subtle">{{ disk.serial or "No serial" }}</div></td>
         <td>{{ disk.size_bytes|human_bytes }}</td>
         <td>{{ disk.transport or "—" }}</td>
-        <td>{% if smart.get('smart_passed') is sameas true %}<span class="badge good">Passed</span>{% elif smart.get('smart_passed') is sameas false %}<span class="badge critical">Failed</span>{% else %}<span class="badge offline">Unknown</span>{% endif %}</td>
+        <td>{% if smart.get('smart_passed') is sameas true %}<span class="badge good">Passed</span>{% elif smart.get('smart_passed') is sameas false %}<span class="badge critical">Failed</span>{% else %}<span class="badge offline">Unknown</span>{% endif %}{% if smart.get('stale') %} <span class="badge warning">Stale</span>{% endif %}</td>
         <td>{{ (smart.get('temperature_c') ~ "°C") if smart.get('temperature_c') is not none else "—" }}</td>
         <td>{{ (smart.get('power_on_hours') ~ " h") if smart.get('power_on_hours') is not none else "—" }}</td>
         <td class="subtle">R {{ smart.get('reallocated_sectors', "—") }} · P {{ smart.get('pending_sectors', "—") }} · U {{ smart.get('offline_uncorrectable', "—") }}{% if smart.get('percentage_used') is not none %}<br>NVMe used {{ smart.get('percentage_used') }}% · media {{ smart.get('media_errors', 0) }}{% endif %}</td>
