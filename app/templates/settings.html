@@ -52,6 +52,22 @@
 </form>
 <form method="post" action="/settings/test-email" style="margin-top:12px"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Send SMTP Test Message</button></form>
 
+<section class="section-block panel">
+  <div class="panel-title">
+    <div>
+      <div class="hero-kicker">Remote Host Setup</div>
+      <h2>NAS Installer</h2>
+    </div>
+    <a class="button" href="/install-remote.sh">Download installer</a>
+  </div>
+  <p class="muted">The running NASitron instance serves the self-contained remote-NAS installer directly. No GitHub access is required from the NAS being configured.</p>
+  <div class="field">
+    <label>Curl from the remote NAS</label>
+    <code style="display:block;white-space:pre-wrap;word-break:break-all">curl -fsSL {{ request.base_url }}install-remote.sh | sudo bash -s -- --public-key 'ssh-ed25519 AAAA...'</code>
+  </div>
+  <p class="subtle">If this NASitron instance uses its internal CA, the remote NAS must trust that CA before using curl without certificate overrides. A publicly or privately trusted certificate is recommended for unattended installs.</p>
+</section>
+
 <section class="section-block panel accent-panel">
   <div class="panel-title">
     <div>
