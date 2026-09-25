@@ -20,10 +20,11 @@ from sqlalchemy.orm import Session
 
 from .alerts import send_email
 from .collector import SSHCollector
-from .config import APP_NAME, APP_VERSION, TIMEZONE, WEB_PASSWORD, WEB_USERNAME
+from .config import APP_NAME, APP_VERSION, SECRET_KEY, TIMEZONE, WEB_PASSWORD, WEB_USERNAME
 from .crypto import encrypt
 from .db import SessionLocal, init_db
-from .models import Alert, Metric, Server, Snapshot
+from .maintenance import ReplacementRequest, discover_replacement_options, replace_drive
+from .models import Alert, MaintenanceAction, Metric, Server, Snapshot
 from .scheduler import start_scheduler, stop_scheduler, trigger_now
 from .service import latest_snapshot
 from .settings_store import ensure_defaults, get_bool, get_int, get_setting, set_setting
@@ -268,6 +269,142 @@ def server_detail(server_id: int, request: Request, db: Session = Depends(get_db
     return templates.TemplateResponse(
         "server.html",
         {"request": request, "server": server, "snapshot": snapshot, "alerts": alerts},
+    )
+
+
+
+def _maintenance_token(server_id: int, offset_hours: int = 0) -> str:
+    if not SECRET_KEY:
+        raise HTTPException(
+            503,
+            detail="NASITRON_SECRET_KEY must be configured before remote maintenance is enabled.",
+        )
+    stamp = (datetime.utcnow() + timedelta(hours=offset_hours)).strftime("%Y%m%d%H")
+    payload = f"replace-drive:{server_id}:{stamp}".encode("utf-8")
+    return hmac.new(SECRET_KEY.encode("utf-8"), payload, "sha256").hexdigest()
+
+
+def _valid_maintenance_token(server_id: int, token: str) -> bool:
+    if not token:
+        return False
+    return any(
+        hmac.compare_digest(token, _maintenance_token(server_id, offset))
+        for offset in (0, -1)
+    )
+
+
+@app.get("/servers/{server_id}/replace-drive", response_class=HTMLResponse)
+def replace_drive_page(server_id: int, request: Request, db: Session = Depends(get_db)):
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(404)
+
+    inventory = {"failed": [], "candidates": [], "statuses": {}}
+    inventory_error = None
+    try:
+        inventory = discover_replacement_options(server)
+    except Exception as exc:
+        inventory_error = str(exc)
+
+    actions = db.scalars(
+        select(MaintenanceAction)
+        .where(MaintenanceAction.server_id == server_id)
+        .order_by(MaintenanceAction.created_at.desc())
+        .limit(30)
+    ).all()
+    return templates.TemplateResponse(
+        "replace_drive.html",
+        {
+            "request": request,
+            "server": server,
+            "inventory": inventory,
+            "inventory_error": inventory_error,
+            "actions": actions,
+            "csrf_token": _maintenance_token(server_id),
+        },
+    )
+
+
+@app.post("/servers/{server_id}/replace-drive")
+def perform_drive_replacement(
+    server_id: int,
+    pool: str = Form(...),
+    old_device: str = Form(...),
+    new_device: str = Form(...),
+    confirm_text: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    server = db.get(Server, server_id)
+    if not server:
+        raise HTTPException(404)
+    if not _valid_maintenance_token(server_id, csrf_token):
+        raise HTTPException(403, detail="Maintenance confirmation token expired or invalid.")
+
+    expected = f"REPLACE {pool}"
+    if confirm_text.strip() != expected:
+        message = f"Confirmation text did not match. Type exactly: {expected}"
+        return RedirectResponse(
+            f"/servers/{server_id}/replace-drive?message=" + quote(message),
+            status_code=303,
+        )
+
+    request_data = ReplacementRequest(
+        pool=pool.strip(),
+        old_device=old_device.strip(),
+        new_device=new_device.strip(),
+    )
+
+    try:
+        result = replace_drive(server, request_data)
+        output = "\n".join(
+            part for part in [result.get("stdout", ""), result.get("stderr", ""), result.get("pool_status", "")]
+            if part
+        )
+        db.add(
+            MaintenanceAction(
+                server_id=server.id,
+                action="zpool_replace",
+                pool=request_data.pool,
+                old_device=request_data.old_device,
+                new_device=request_data.new_device,
+                command=result.get("command", ""),
+                success=bool(result.get("ok")),
+                exit_code=result.get("exit"),
+                output=output[-20000:],
+            )
+        )
+        db.commit()
+
+        if result.get("ok"):
+            trigger_now(server.id)
+            message = (
+                f"Replacement command accepted for {request_data.old_device} -> "
+                f"{request_data.new_device}. ZFS should now resilver; monitor pool status."
+            )
+        else:
+            detail = (result.get("stderr") or result.get("stdout") or "zpool replace failed").strip()
+            message = f"Replacement failed: {detail[:1500]}"
+    except Exception as exc:
+        db.add(
+            MaintenanceAction(
+                server_id=server.id,
+                action="zpool_replace",
+                pool=request_data.pool,
+                old_device=request_data.old_device,
+                new_device=request_data.new_device,
+                command="",
+                success=False,
+                exit_code=None,
+                output=str(exc)[:20000],
+            )
+        )
+        db.commit()
+        message = f"Replacement was not started: {exc}"
+
+    return RedirectResponse(
+        f"/servers/{server_id}/replace-drive?message=" + quote(message),
+        status_code=303,
     )
 
 
