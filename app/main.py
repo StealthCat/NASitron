@@ -397,6 +397,185 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     )
 
 
+def _inventory_rows(db: Session) -> dict:
+    servers = db.scalars(select(Server).order_by(Server.name)).all()
+    server_ids = [server.id for server in servers]
+    state_rows = (
+        db.scalars(select(CurrentState).where(CurrentState.server_id.in_(server_ids))).all()
+        if server_ids
+        else []
+    )
+    states = {row.server_id: _decode_state(row) for row in state_rows}
+    alert_rows = (
+        db.scalars(
+            select(Alert)
+            .where(Alert.server_id.in_(server_ids), Alert.active.is_(True))
+            .order_by(Alert.last_seen.desc())
+        ).all()
+        if server_ids
+        else []
+    )
+    alerts_by_server: dict[int, list[Alert]] = {}
+    for alert in alert_rows:
+        alerts_by_server.setdefault(alert.server_id, []).append(alert)
+
+    cards = []
+    pool_rows = []
+    drive_rows = []
+    inventory_warnings = []
+    for server in servers:
+        snapshot = states.get(server.id)
+        cards.append(
+            {
+                "server": server,
+                "snapshot": snapshot,
+                "alerts": alerts_by_server.get(server.id, []),
+            }
+        )
+        if not snapshot:
+            continue
+
+        collection = snapshot.get("collection", {})
+        stale = set(collection.get("stale_subsystems", []))
+        errors = collection.get("errors", [])
+        if "drives.inventory" in stale or any(
+            error.get("subsystem") == "drives.inventory"
+            for error in errors
+            if isinstance(error, dict)
+        ):
+            inventory_warnings.append(server)
+
+        for pool in snapshot.get("pools", []):
+            pool_rows.append({"server": server, "pool": pool})
+        for drive in snapshot.get("drives", []):
+            drive_rows.append({"server": server, "drive": drive})
+
+    pool_rows.sort(
+        key=lambda row: (
+            row["server"].name.lower(),
+            str(row["pool"].get("name", "")).lower(),
+        )
+    )
+    drive_rows.sort(
+        key=lambda row: (
+            row["server"].name.lower(),
+            str(row["drive"].get("path", "")).lower(),
+        )
+    )
+    return {
+        "servers": servers,
+        "cards": cards,
+        "pool_rows": pool_rows,
+        "drive_rows": drive_rows,
+        "inventory_warnings": inventory_warnings,
+    }
+
+
+@app.get("/servers", response_class=HTMLResponse)
+def servers_index(request: Request, db: Session = Depends(get_db)):
+    data = _inventory_rows(db)
+    return templates.TemplateResponse(
+        request=request,
+        name="servers.html",
+        context={"request": request, **data},
+    )
+
+
+@app.get("/pools", response_class=HTMLResponse)
+def pools_index(request: Request, db: Session = Depends(get_db)):
+    data = _inventory_rows(db)
+    degraded = sum(
+        1
+        for row in data["pool_rows"]
+        if str(row["pool"].get("health", "")).upper() != "ONLINE"
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="pools.html",
+        context={
+            "request": request,
+            **data,
+            "degraded_pools": degraded,
+            "healthy_pools": max(0, len(data["pool_rows"]) - degraded),
+        },
+    )
+
+
+@app.get("/drives", response_class=HTMLResponse)
+def drives_index(request: Request, db: Session = Depends(get_db)):
+    data = _inventory_rows(db)
+    failed = 0
+    unknown = 0
+    assigned = 0
+    for row in data["drive_rows"]:
+        drive = row["drive"]
+        smart = drive.get("smart") or {}
+        if smart.get("smart_passed") is False:
+            failed += 1
+        elif smart.get("smart_passed") is not True:
+            unknown += 1
+        if drive.get("zfs_memberships"):
+            assigned += 1
+
+    return templates.TemplateResponse(
+        request=request,
+        name="drives.html",
+        context={
+            "request": request,
+            **data,
+            "failed_drives": failed,
+            "unknown_smart": unknown,
+            "assigned_drives": assigned,
+            "unassigned_drives": max(0, len(data["drive_rows"]) - assigned),
+        },
+    )
+
+
+@app.get("/maintenance", response_class=HTMLResponse)
+def maintenance_index(request: Request, db: Session = Depends(get_db)):
+    data = _inventory_rows(db)
+    maintenance_rows = []
+    for card in data["cards"]:
+        snapshot = card["snapshot"]
+        unhealthy_pools = []
+        failed_drives = []
+        if snapshot:
+            unhealthy_pools = [
+                pool
+                for pool in snapshot.get("pools", [])
+                if str(pool.get("health", "")).upper() != "ONLINE"
+            ]
+            failed_drives = [
+                drive
+                for drive in snapshot.get("drives", [])
+                if (drive.get("smart") or {}).get("smart_passed") is False
+            ]
+        maintenance_rows.append(
+            {
+                **card,
+                "unhealthy_pools": unhealthy_pools,
+                "failed_drives": failed_drives,
+            }
+        )
+
+    actions = db.scalars(
+        select(MaintenanceAction)
+        .options(selectinload(MaintenanceAction.server))
+        .order_by(MaintenanceAction.created_at.desc())
+        .limit(50)
+    ).all()
+    return templates.TemplateResponse(
+        request=request,
+        name="maintenance.html",
+        context={
+            "request": request,
+            **data,
+            "maintenance_rows": maintenance_rows,
+            "actions": actions,
+        },
+    )
+
+
 @app.get("/servers/new", response_class=HTMLResponse)
 def new_server(request: Request):
     return templates.TemplateResponse(
