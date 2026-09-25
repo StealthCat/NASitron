@@ -290,6 +290,25 @@ def download_remote_installer():
     )
 
 
+def _build_enrollment_installer(
+    enrollment: RemoteEnrollment,
+    callback_url: str,
+    secret: str,
+    *,
+    internal_tls: bool,
+) -> str:
+    preamble = (
+        "#!/usr/bin/env bash\n"
+        "# One-time NASitron enrollment bootstrap.\n"
+        f"export NASITRON_SSH_PUBLIC_KEY={shlex.quote(enrollment.public_key)}\n"
+        f"export NASITRON_ENROLL_URL={shlex.quote(callback_url)}\n"
+        f"export NASITRON_ENROLL_SECRET={shlex.quote(secret)}\n"
+    )
+    if internal_tls:
+        preamble += "set -- --enroll-insecure \"$@\"\n"
+    return preamble + "\n" + INSTALLER_PATH.read_text(encoding="utf-8")
+
+
 @app.get("/api/enroll/{enrollment_id}/install.sh")
 def download_enrollment_installer(
     enrollment_id: str,
@@ -326,18 +345,15 @@ def download_enrollment_installer(
             enrollment_id=enrollment_id,
         )
     )
-    base_installer = INSTALLER_PATH.read_text(encoding="utf-8")
-    preamble = (
-        "#!/usr/bin/env bash\n"
-        "# One-time NASitron enrollment bootstrap.\n"
-        f"export NASITRON_SSH_PUBLIC_KEY={shlex.quote(enrollment.public_key)}\n"
-        f"export NASITRON_ENROLL_URL={shlex.quote(callback_url)}\n"
-        f"export NASITRON_ENROLL_SECRET={shlex.quote(secret)}\n"
+    body = _build_enrollment_installer(
+        enrollment,
+        callback_url,
+        secret,
+        internal_tls=(
+            (get_setting(db, "tls_mode") or "internal").strip().lower()
+            == "internal"
+        ),
     )
-    if (get_setting(db, "tls_mode") or "internal").strip().lower() == "internal":
-        preamble += "set -- --enroll-insecure \"$@\"\n"
-
-    body = preamble + "\n" + base_installer
     return Response(
         content=body,
         media_type="text/x-shellscript",
@@ -802,9 +818,6 @@ def maintenance_index(request: Request, db: Session = Depends(get_db)):
 def new_server(request: Request, db: Session = Depends(get_db)):
     tls_mode = (get_setting(db, "tls_mode") or "internal").strip().lower()
     tls_domain = (get_setting(db, "tls_domain") or "").strip()
-    installer_url = str(request.url_for("download_remote_installer"))
-    installer_sha256 = hashlib.sha256(INSTALLER_PATH.read_bytes()).hexdigest()
-
     enrollment_id = secrets.token_urlsafe(18)
     enrollment_secret = secrets.token_urlsafe(32)
     private_key_obj = Ed25519PrivateKey.generate()
@@ -842,19 +855,23 @@ def new_server(request: Request, db: Session = Depends(get_db)):
     ) + "?token=" + download_token
     installer_url_shell = shlex.quote(enrollment_installer_url)
 
-    if tls_mode == "internal":
-        enrollment_script = (
-            "#!/usr/bin/env bash\n"
-            "# One-time NASitron enrollment bootstrap.\n"
-            f"export NASITRON_SSH_PUBLIC_KEY={shlex.quote(public_key)}\n"
-            f"export NASITRON_ENROLL_URL={shlex.quote(str(request.url_for('complete_remote_enrollment', enrollment_id=enrollment_id)))}\n"
-            f"export NASITRON_ENROLL_SECRET={shlex.quote(enrollment_secret)}\n"
-            "set -- --enroll-insecure \"$@\"\n\n"
-            + INSTALLER_PATH.read_text(encoding="utf-8")
+    callback_url = str(
+        request.url_for(
+            "complete_remote_enrollment",
+            enrollment_id=enrollment_id,
         )
-        enrollment_script_sha256 = hashlib.sha256(
-            enrollment_script.encode("utf-8")
-        ).hexdigest()
+    )
+    enrollment_script = _build_enrollment_installer(
+        enrollment,
+        callback_url,
+        enrollment_secret,
+        internal_tls=(tls_mode == "internal"),
+    )
+    enrollment_script_sha256 = hashlib.sha256(
+        enrollment_script.encode("utf-8")
+    ).hexdigest()
+
+    if tls_mode == "internal":
         installer_command = (
             '(tmp="$(mktemp)" && '
             f'curl -kfsSL {installer_url_shell} -o "$tmp" && '
@@ -863,7 +880,6 @@ def new_server(request: Request, db: Session = Depends(get_db)):
             'rc=$?; rm -f "$tmp"; exit "$rc")'
         )
     else:
-        enrollment_script_sha256 = ""
         installer_command = f"curl -fsSL {installer_url_shell} | sudo bash"
     return templates.TemplateResponse(
         request=request,
@@ -873,11 +889,7 @@ def new_server(request: Request, db: Session = Depends(get_db)):
             "server": None,
             "installer_url": enrollment_installer_url,
             "installer_url_shell": installer_url_shell,
-            "installer_sha256": (
-                enrollment_script_sha256
-                if enrollment_script_sha256
-                else installer_sha256
-            ),
+            "installer_sha256": enrollment_script_sha256,
             "enrollment_script_sha256": enrollment_script_sha256,
             "installer_command": installer_command,
             "installer_tls_mode": tls_mode,
