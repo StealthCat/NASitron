@@ -328,7 +328,6 @@ class SSHCollector:
             "meminfo": "cat /proc/meminfo",
             "zfs_version": "zfs --version 2>&1",
             "zpool_list": "zpool list -Hp -o name,size,alloc,free,frag,cap,dedup,health",
-            "zpool_get": "zpool get -H -p -o name,property,value,source all",
             "zfs_list": "zfs list -Hp -t filesystem,volume -o name,type,used,avail,refer,mountpoint,compressratio,logicalused,usedbysnapshots",
             "zfs_get": "zfs get -H -p -o name,property,value,source -s local,received all",
             "arcstats": "cat /proc/spl/kstat/zfs/arcstats 2>/dev/null",
@@ -341,11 +340,16 @@ class SSHCollector:
 
         pools = self._strict_pool_names(raw["zpool_list"])
 
+        raw["zpool_get"] = {}
         raw["zpool_status"] = {}
         raw["zpool_status_json"] = {}
         json_capability = self.server.zpool_status_json_supported
         for index, pool in enumerate(pools):
             quoted = shlex.quote(pool)
+            raw["zpool_get"][pool] = self.run(
+                f"zpool get -H -p -o name,property,value,source all {quoted}",
+                timeout=20,
+            )
             raw["zpool_status"][pool] = self.run(
                 f"zpool status -P -L {quoted}", timeout=20
             )
