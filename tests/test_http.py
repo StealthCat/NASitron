@@ -5,8 +5,6 @@ import json
 import re
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
-
 from app.crypto import decrypt
 from app.db import SessionLocal
 from app.main import app
