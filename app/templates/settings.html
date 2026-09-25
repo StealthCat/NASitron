@@ -17,7 +17,7 @@
   <div class="settings-tab-list" role="tablist" aria-label="Settings sections">
     <button type="button" class="settings-tab {{ 'active' if active_tab == 'smtp' else '' }}" role="tab" id="tab-smtp" aria-controls="panel-smtp" aria-selected="{{ 'true' if active_tab == 'smtp' else 'false' }}" data-settings-tab="smtp">
       <span class="settings-tab-label">Email</span>
-      <span class="settings-tab-sub">SMTP alerts</span>
+      <span class="settings-tab-sub">SMTP / Mailjet</span>
     </button>
     <button type="button" class="settings-tab {{ 'active' if active_tab == 'health' else '' }}" role="tab" id="tab-health" aria-controls="panel-health" aria-selected="{{ 'true' if active_tab == 'health' else 'false' }}" data-settings-tab="health">
       <span class="settings-tab-label">Health</span>
@@ -41,40 +41,75 @@
     <form method="post" class="panel accent-panel settings-panel-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="section" value="smtp">
+
       <div class="panel-title">
         <div>
           <div class="hero-kicker">Notifications</div>
-          <h2>SMTP Alerts</h2>
+          <h2>Email Alerts</h2>
         </div>
         <span class="badge {{ 'good' if values.smtp_enabled == 'true' else 'offline' }}">{{ "Enabled" if values.smtp_enabled == 'true' else "Disabled" }}</span>
       </div>
-      <p class="muted">Send NASitron health and collection alerts through your SMTP relay.</p>
-
-      <label class="checkbox"><input type="checkbox" name="smtp_enabled" {{ 'checked' if values.smtp_enabled == 'true' else '' }}> Enable email alerts</label>
+      <p class="muted">Send NASitron health and collection alerts through a conventional SMTP relay or a Mailjet-compatible HTTPS Send API.</p>
 
       <div class="grid two settings-field-grid">
-        <div class="field"><label>SMTP host</label><input name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.example.net"></div>
-        <div class="field"><label>Port</label><input type="number" min="1" max="65535" name="smtp_port" value="{{ values.smtp_port }}"></div>
-        <div class="field"><label>Username</label><input name="smtp_username" value="{{ values.smtp_username }}"></div>
-        <div class="field"><label>Password {% if values.smtp_password_configured %}(configured; leave blank to preserve){% endif %}</label><input type="password" name="smtp_password"></div>
-        <div class="field"><label>From address</label><input name="smtp_from" value="{{ values.smtp_from }}" placeholder="nasitron@example.net"></div>
-        <div class="field"><label>Recipients (comma separated)</label><input name="smtp_to" value="{{ values.smtp_to }}"></div>
+        <div class="field">
+          <label>Email transport</label>
+          <select name="email_transport" id="email_transport">
+            <option value="smtp" {{ 'selected' if values.email_transport == 'smtp' else '' }}>SMTP relay</option>
+            <option value="mailjet" {{ 'selected' if values.email_transport == 'mailjet' else '' }}>Mailjet-compatible API</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Delivery</label>
+          <label class="checkbox"><input type="checkbox" name="smtp_enabled" {{ 'checked' if values.smtp_enabled == 'true' else '' }}> Enable email alerts</label>
+        </div>
+        <div class="field"><label>From address</label><input type="email" name="smtp_from" value="{{ values.smtp_from }}" placeholder="nasitron@example.net"></div>
+        <div class="field"><label>Recipients (comma separated)</label><input name="smtp_to" value="{{ values.smtp_to }}" placeholder="admin@example.net"></div>
       </div>
 
-      <div class="row settings-inline-options">
-        <label class="checkbox"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls == 'true' else '' }}> STARTTLS</label>
-        <label class="checkbox"><input type="checkbox" name="smtp_ssl" {{ 'checked' if values.smtp_ssl == 'true' else '' }}> Implicit TLS</label>
-      </div>
+      <section class="email-transport-panel" data-email-transport-panel="smtp">
+        <div class="panel-title email-provider-title"><h3>SMTP Relay</h3><span class="badge">SMTP</span></div>
+        <div class="grid two">
+          <div class="field"><label>SMTP host</label><input name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.example.net"></div>
+          <div class="field"><label>Port</label><input type="number" min="1" max="65535" name="smtp_port" value="{{ values.smtp_port }}"></div>
+          <div class="field"><label>Username</label><input name="smtp_username" value="{{ values.smtp_username }}" autocomplete="off"></div>
+          <div class="field"><label>Password {% if values.smtp_password_configured %}(configured; leave blank to preserve){% endif %}</label><input type="password" name="smtp_password" autocomplete="new-password"></div>
+        </div>
+        <div class="row settings-inline-options">
+          <label class="checkbox"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls == 'true' else '' }}> STARTTLS</label>
+          <label class="checkbox"><input type="checkbox" name="smtp_ssl" {{ 'checked' if values.smtp_ssl == 'true' else '' }}> Implicit TLS</label>
+        </div>
+      </section>
+
+      <section class="email-transport-panel" data-email-transport-panel="mailjet">
+        <div class="panel-title email-provider-title"><h3>Mailjet-Compatible Relay</h3><span class="badge">HTTPS API</span></div>
+        <div class="field">
+          <label>Send API URL</label>
+          <input type="url" name="mailjet_api_url" value="{{ values.mailjet_api_url }}" placeholder="https://api.mailjet.com/v3.1/send">
+          <div class="subtle">Defaults to Mailjet Send API v3.1. You can point this at another HTTPS relay that implements the same request format.</div>
+        </div>
+        <div class="grid two">
+          <div class="field">
+            <label>API key {% if values.mailjet_api_key_configured %}(configured; leave blank to preserve){% endif %}</label>
+            <input type="password" name="mailjet_api_key" autocomplete="new-password">
+          </div>
+          <div class="field">
+            <label>Secret key {% if values.mailjet_secret_key_configured %}(configured; leave blank to preserve){% endif %}</label>
+            <input type="password" name="mailjet_secret_key" autocomplete="new-password">
+          </div>
+        </div>
+        <p class="subtle">Mailjet-compatible delivery uses HTTPS Basic Authentication with the API key as the username and secret key as the password. Each configured recipient is sent as a separate message object.</p>
+      </section>
 
       <div class="row between settings-form-footer">
-        <p class="subtle">SMTP passwords are encrypted at rest using key material derived from <code>NASITRON_SECRET_KEY</code>.</p>
+        <p class="subtle">SMTP passwords and Mailjet credentials are encrypted at rest using key material derived from <code>NASITRON_SECRET_KEY</code>.</p>
         <button class="primary" type="submit">Save Email Settings</button>
       </div>
     </form>
 
     <form method="post" action="/settings/test-email" class="settings-secondary-action">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit">Send SMTP Test Message</button>
+      <button type="submit">Send Email Test Message</button>
     </form>
   </section>
 
@@ -283,6 +318,22 @@
       activate(tabs[targetIndex].dataset.settingsTab, true);
     });
   });
+
+  const emailTransport = document.getElementById("email_transport");
+  const emailPanels = Array.from(document.querySelectorAll("[data-email-transport-panel]"));
+
+  function updateEmailTransport() {
+    if (!emailTransport) return;
+    const selected = emailTransport.value;
+    emailPanels.forEach((panel) => {
+      panel.hidden = panel.dataset.emailTransportPanel !== selected;
+    });
+  }
+
+  if (emailTransport) {
+    emailTransport.addEventListener("change", updateEmailTransport);
+    updateEmailTransport();
+  }
 
   activate(root.dataset.activeTab || "smtp", false);
 })();
