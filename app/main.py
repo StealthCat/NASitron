@@ -132,15 +132,77 @@ def healthz():
 def dashboard(request: Request, db: Session = Depends(get_db)):
     servers = db.scalars(select(Server).order_by(Server.name)).all()
     cards = []
+    pool_rows = []
+    drive_rows = []
+    arc_rates = []
+    online_servers = 0
+    failed_drives = 0
+    degraded_pools = 0
+
     for server in servers:
         snapshot = latest_snapshot(db, server.id)
         active_alerts = db.scalars(
             select(Alert).where(Alert.server_id == server.id, Alert.active.is_(True))
         ).all()
         cards.append({"server": server, "snapshot": snapshot, "alerts": active_alerts})
+
+        if snapshot and not (server.last_error and server.consecutive_failures):
+            online_servers += 1
+            arc_rates.append(float(snapshot.get("arc", {}).get("hit_rate_pct") or 0))
+
+        if not snapshot:
+            continue
+
+        for pool in snapshot.get("pools", []):
+            pool_rows.append({"server": server, "pool": pool})
+            if str(pool.get("health", "")).upper() != "ONLINE":
+                degraded_pools += 1
+
+        for drive in snapshot.get("drives", []):
+            drive_rows.append({"server": server, "drive": drive})
+            smart = drive.get("smart") or {}
+            if smart.get("smart_passed") is False:
+                failed_drives += 1
+
+    recent_alerts = db.scalars(
+        select(Alert).order_by(Alert.last_seen.desc()).limit(8)
+    ).all()
+    active_alerts = [a for card in cards for a in card["alerts"]]
+    critical_alerts = sum(1 for alert in active_alerts if alert.severity == "critical")
+    collection_failures = sum(
+        1 for card in cards if card["server"].last_error and card["server"].consecutive_failures
+    )
+    if critical_alerts or collection_failures or failed_drives:
+        overall_status = "critical"
+    elif active_alerts or degraded_pools:
+        overall_status = "warning"
+    else:
+        overall_status = "good"
+
+    summary = {
+        "server_count": len(servers),
+        "online_servers": online_servers,
+        "pool_count": len(pool_rows),
+        "healthy_pools": max(0, len(pool_rows) - degraded_pools),
+        "drive_count": len(drive_rows),
+        "failed_drives": failed_drives,
+        "active_alerts": len(active_alerts),
+        "critical_alerts": critical_alerts,
+        "arc_hit_rate": (sum(arc_rates) / len(arc_rates)) if arc_rates else 0,
+        "overall_status": overall_status,
+    }
+
     return templates.TemplateResponse(
         "dashboard.html",
-        {"request": request, "cards": cards, "app_version": APP_VERSION},
+        {
+            "request": request,
+            "cards": cards,
+            "summary": summary,
+            "pool_rows": pool_rows,
+            "drive_rows": drive_rows,
+            "recent_alerts": recent_alerts,
+            "app_version": APP_VERSION,
+        },
     )
 
 
