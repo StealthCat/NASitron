@@ -776,3 +776,19 @@ pre {
 .property-row .subtle {
   white-space: nowrap;
 }
+
+
+/* Email transport settings */
+.email-transport-panel {
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: rgba(6,10,16,.28);
+}
+.email-transport-panel[hidden] {
+  display: none !important;
+}
+.email-provider-title {
+  margin-bottom: 12px;
+}
