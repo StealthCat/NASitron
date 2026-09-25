@@ -14,7 +14,8 @@
       <img class="login-logo" src="/static/nasitron-logo.svg" alt="NASitron">
       <div class="hero-kicker">Secure Console</div>
       <h1>Sign in to NASitron</h1>
-      <p class="muted">Use the administrator credentials configured for this NASitron instance.</p>
+      <p class="muted">Sign in with your local NASitron account.</p>
+      {% if request.query_params.get('message') %}<div class="message login-error">{{ request.query_params.get('message') }}</div>{% endif %}
       {% if error %}<div class="message login-error">{{ error }}</div>{% endif %}
       <form method="post" action="/login" class="login-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
