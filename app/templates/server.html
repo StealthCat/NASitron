@@ -103,6 +103,22 @@
         <div class="mini-stat"><span>Write IOPS</span><strong>{{ pool.io.write_iops or 0 }}</strong></div>
       </div>
       {% if pool.status.scan %}<div class="subtle" style="margin:10px 0"><strong>Scan:</strong> {{ pool.status.scan }}</div>{% endif %}
+      {% set configured_pool_props = pool.properties|selectattr('is_set')|list %}
+      {% if pool.properties %}
+      <details class="property-drawer">
+        <summary><strong>Pool properties</strong><span class="badge">{{ configured_pool_props|length }} configured</span><span class="subtle">{{ pool.properties|length }} total</span></summary>
+        <div class="scroll property-table-wrap">
+          <table>
+            <thead><tr><th>Property</th><th>Value</th><th>Source</th></tr></thead>
+            <tbody>
+            {% for prop in pool.properties %}
+              <tr class="{{ 'property-configured' if prop.is_set else '' }}"><td><code>{{ prop.property }}</code></td><td>{{ prop.value }}</td><td><span class="badge {{ 'good' if prop.is_set else 'offline' }}">{{ prop.source }}</span></td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% endif %}
       {% if pool.status.vdevs %}
       <div class="scroll">
         <table>
@@ -190,10 +206,24 @@
   <div class="section-heading"><h2>Datasets / zvols</h2><span class="subtle">{{ snapshot.datasets|length }} entries</span></div>
   <div class="panel flush scroll">
     <table>
-      <thead><tr><th>Name</th><th>Type</th><th>Used</th><th>Available</th><th>Referenced</th><th>Logical Used</th><th>Compression</th><th>Mountpoint</th></tr></thead>
+      <thead><tr><th>Name</th><th>Type</th><th>Used</th><th>Available</th><th>Referenced</th><th>Logical Used</th><th>Compression</th><th>Mountpoint</th><th>Set properties</th></tr></thead>
       <tbody>
       {% for ds in snapshot.datasets %}
-      <tr><td><strong>{{ ds.name }}</strong></td><td>{{ ds.type }}</td><td>{{ ds.used_bytes|human_bytes }}</td><td>{{ ds.available_bytes|human_bytes }}</td><td>{{ ds.referenced_bytes|human_bytes }}</td><td>{{ ds.logical_used_bytes|human_bytes }}</td><td><span class="badge">{{ "%.2f"|format(ds.compression_ratio) }}x</span></td><td>{{ ds.mountpoint }}</td></tr>
+      <tr>
+        <td><strong>{{ ds.name }}</strong></td><td>{{ ds.type }}</td><td>{{ ds.used_bytes|human_bytes }}</td><td>{{ ds.available_bytes|human_bytes }}</td><td>{{ ds.referenced_bytes|human_bytes }}</td><td>{{ ds.logical_used_bytes|human_bytes }}</td><td><span class="badge">{{ "%.2f"|format(ds.compression_ratio) }}x</span></td><td>{{ ds.mountpoint }}</td>
+        <td>
+          {% if ds.properties %}
+          <details class="property-popover">
+            <summary><span class="badge good">{{ ds.properties|length }} set</span></summary>
+            <div class="property-popover-body">
+              {% for prop in ds.properties %}
+              <div class="property-row"><code>{{ prop.property }}</code><strong>{{ prop.value }}</strong><span class="subtle">{{ prop.source }}</span></div>
+              {% endfor %}
+            </div>
+          </details>
+          {% else %}<span class="subtle">Defaults / inherited</span>{% endif %}
+        </td>
+      </tr>
       {% endfor %}
       </tbody>
     </table>
