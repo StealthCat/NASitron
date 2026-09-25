@@ -36,6 +36,10 @@ services:
     command:
       - |
         if [ -s /nasitron-data/tls/Caddyfile ]; then
+          if grep -Eq '^[[:space:]]*tls internal[[:space:]]*$' /nasitron-data/tls/Caddyfile              && ! grep -q 'on_demand' /nasitron-data/tls/Caddyfile; then
+            echo "NASitron: legacy host-restricted internal TLS config detected; using bootstrap catch-all"
+            exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+          fi
           exec caddy run --config /nasitron-data/tls/Caddyfile --adapter caddyfile
         fi
         exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
