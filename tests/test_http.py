@@ -217,6 +217,7 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
         with SessionLocal() as db:
             set_setting(db, "tls_mode", "internal")
             set_setting(db, "tls_domain", "nasitron.internal")
+            db.commit()
 
         response = client.get("/servers/new")
         assert response.status_code == 200
@@ -230,6 +231,7 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
         with SessionLocal() as db:
             set_setting(db, "tls_mode", "acme")
             set_setting(db, "tls_domain", "nas.example.com")
+            db.commit()
 
         response = client.get("/servers/new")
         assert response.status_code == 200
@@ -241,3 +243,4 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
         with SessionLocal() as db:
             set_setting(db, "tls_mode", "internal")
             set_setting(db, "tls_domain", "localhost")
+            db.commit()
