@@ -42,9 +42,9 @@ services:
     environment:
       NASITRON_TLS_HOST: "${NASITRON_TLS_HOST:-localhost}"
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "${NASITRON_LISTEN_IP:-0.0.0.0}:${NASITRON_HTTP_PORT:-80}:80"
+      - "${NASITRON_LISTEN_IP:-0.0.0.0}:${NASITRON_HTTPS_PORT:-443}:443"
+      - "${NASITRON_LISTEN_IP:-0.0.0.0}:${NASITRON_HTTPS_PORT:-443}:443/udp"
     volumes:
       - ./deploy/Caddyfile.bootstrap:/etc/caddy/Caddyfile:ro
       - nasitron_data:/nasitron-data:ro
