@@ -39,6 +39,8 @@ def test_healthz_is_public_and_dashboard_uses_form_login():
         assert "__NASITRON_ROOT_HELPER__" in installer.text
         assert "Generating a dedicated Ed25519 SSH keypair for NASitron" in installer.text
         assert "NASITRON GENERATED PRIVATE KEY" in installer.text
+        assert installer.text.index("Registering this NAS with NASitron") < installer.text.index("Validating NASitron account permissions")
+        assert "--retry 4" in installer.text
 
         response = client.get("/", follow_redirects=False)
         assert response.status_code == 303
