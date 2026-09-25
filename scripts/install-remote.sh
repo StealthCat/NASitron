@@ -37,6 +37,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+on_error() {
+  local rc=$?
+  local line="${BASH_LINENO[0]:-${LINENO:-unknown}}"
+  local command="${BASH_COMMAND:-unknown}"
+  printf '[NASitron] ERROR: installer command failed at line %s (exit %s): %s\n' "$line" "$rc" "$command" >&2
+  exit "$rc"
+}
+trap on_error ERR
+
 usage() {
   cat <<'EOF'
 NASitron remote NAS installer
@@ -583,10 +592,13 @@ if __name__ == "__main__":
         raise SystemExit(124)
 __NASITRON_ROOT_HELPER__
 
+log "Validating embedded root helper"
 python3 -m py_compile "$TMP_DIR/nasitron-root-helper"
+log "Installing root helper at $HELPER_PATH"
 install -d -o root -g root -m 0755 "$(dirname "$HELPER_PATH")"
 install -o root -g root -m 0755 "$TMP_DIR/nasitron-root-helper" "$HELPER_PATH"
 
+log "Installing restricted sudo policy"
 SUDOERS_PATH="/etc/sudoers.d/nasitron"
 cat > "$TMP_DIR/nasitron.sudoers" <<EOF
 # Managed by the NASitron remote installer.
@@ -599,31 +611,37 @@ install -o root -g root -m 0440 "$TMP_DIR/nasitron.sudoers" "$SUDOERS_PATH"
 visudo -cf "$SUDOERS_PATH" >/dev/null || die "Installed sudoers policy failed validation"
 
 if command -v systemctl >/dev/null 2>&1; then
+  log "Ensuring SSH service is running"
   systemctl enable --now ssh >/dev/null 2>&1 || true
   if [[ "$SKIP_SSH_HARDENING" -eq 0 ]]; then
     systemctl reload ssh >/dev/null 2>&1 || systemctl restart ssh >/dev/null 2>&1 || true
   fi
 fi
 
-SSH_PORT="$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }')"
+log "Detecting SSH endpoint and host identity"
+SSH_PORT="$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2; exit }' || true)"
 SSH_PORT="${SSH_PORT:-22}"
-HOST_FQDN="$(hostname -f 2>/dev/null || hostname)"
-HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+HOST_FQDN="$(hostname -f 2>/dev/null || hostname || true)"
+HOST_FQDN="${HOST_FQDN:-$(hostname 2>/dev/null || printf 'nas-server')}"
+HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 HOST_IP="${HOST_IP:-unknown}"
 
 FINGERPRINTS=""
 for hostkey in /etc/ssh/ssh_host_*_key.pub; do
   [[ -r "$hostkey" ]] || continue
-  FINGERPRINTS+="$(ssh-keygen -lf "$hostkey")"$'\n'
+  fingerprint_line="$(ssh-keygen -lf "$hostkey" 2>/dev/null || true)"
+  if [[ -n "$fingerprint_line" ]]; then
+    FINGERPRINTS+="$fingerprint_line"$'\n'
+  fi
 done
 
 HOST_KEY_FINGERPRINT=""
 if [[ -r /etc/ssh/ssh_host_ed25519_key.pub ]]; then
-  HOST_KEY_FINGERPRINT="$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 | awk '{print $2}')"
+  HOST_KEY_FINGERPRINT="$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 2>/dev/null | awk '{print $2}' || true)"
 else
-  first_host_key="$(find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key.pub' | sort | head -n1 || true)"
+  first_host_key="$(find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key.pub' 2>/dev/null | sort | head -n1 || true)"
   if [[ -n "$first_host_key" ]]; then
-    HOST_KEY_FINGERPRINT="$(ssh-keygen -lf "$first_host_key" -E sha256 | awk '{print $2}')"
+    HOST_KEY_FINGERPRINT="$(ssh-keygen -lf "$first_host_key" -E sha256 2>/dev/null | awk '{print $2}' || true)"
   fi
 fi
 
