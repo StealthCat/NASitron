@@ -20,5 +20,5 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest httpx ruff
       - run: python -m compileall -q app
-      - run: ruff check app tests
+      - run: ruff check app tests --select E4,E7,E9,F
       - run: python -m pytest -q

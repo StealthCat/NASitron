@@ -137,7 +137,7 @@ def test_smart_nonzero_health_exit_still_parses_json():
 def test_smart_invalid_json_is_unavailable_not_healthy():
     smart = parse_smart("permission denied", command_exit=2)
     assert smart["data_available"] is False
-    assert smart["smart_passed"] if "smart_passed" in smart else True
+    assert "smart_passed" not in smart
     assert "device_open_or_identity_error" in smart["exit_findings"]
 
 
