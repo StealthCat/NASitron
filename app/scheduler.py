@@ -123,10 +123,14 @@ def start_scheduler() -> None:
 
 def stop_scheduler() -> None:
     global _pool
+    # Lifespan releases the data-directory instance lock immediately after
+    # this returns, so all scheduled work and collector threads must be fully
+    # stopped before returning. Otherwise an old worker can overlap a new
+    # NASitron process during restart and write the same SQLite database.
     if _scheduler.running:
-        _scheduler.shutdown(wait=False)
+        _scheduler.shutdown(wait=True)
     if _pool is not None:
-        _pool.shutdown(wait=False, cancel_futures=True)
+        _pool.shutdown(wait=True, cancel_futures=True)
         _pool = None
     with _lock:
         _inflight.clear()

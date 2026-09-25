@@ -266,3 +266,37 @@ def test_root_helper_requires_real_by_id_symlink():
             "/dev/disk/by-id/nasitron-definitely-not-a-real-device",
             require_by_id=True,
         )
+
+
+def test_scheduler_shutdown_waits_for_active_work(monkeypatch):
+    import app.scheduler as scheduler
+
+    class FakeScheduler:
+        running = True
+
+        def __init__(self):
+            self.wait = None
+
+        def shutdown(self, *, wait):
+            self.wait = wait
+
+    class FakePool:
+        def __init__(self):
+            self.wait = None
+            self.cancel_futures = None
+
+        def shutdown(self, *, wait, cancel_futures):
+            self.wait = wait
+            self.cancel_futures = cancel_futures
+
+    fake_scheduler = FakeScheduler()
+    fake_pool = FakePool()
+    monkeypatch.setattr(scheduler, "_scheduler", fake_scheduler)
+    monkeypatch.setattr(scheduler, "_pool", fake_pool)
+
+    scheduler.stop_scheduler()
+
+    assert fake_scheduler.wait is True
+    assert fake_pool.wait is True
+    assert fake_pool.cancel_futures is True
+    assert scheduler._pool is None
