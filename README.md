@@ -40,7 +40,7 @@ NASitron is a Dockerized, agentless monitoring dashboard for Ubuntu servers runn
 
 ## History and alerts
 
-NASitron stores frequent numeric samples separately from recent full snapshots. Defaults are 90 days of time-series metrics and 7 days of full snapshots; both are configurable. SQLite runs in WAL mode and is persisted in the Docker volume.
+NASitron stores frequent numeric samples separately from recent full snapshots. Defaults are 90 days of time-series metrics and 30 days of full snapshots; both are configurable. SQLite runs in WAL mode and is persisted in the Docker volume.
 
 Built-in alert conditions include:
 
@@ -63,19 +63,19 @@ Each server page includes **Replace failed drive**, which performs a fresh live 
 - whole physical disks that currently have no filesystem, mountpoint, child partitions/mappings, or ZFS membership
 - stable `/dev/disk/by-id/` paths for replacement candidates when available
 
-Before a replacement can run, NASitron shows the exact `zpool replace` command, requires typed confirmation, validates a short-lived maintenance token, and then **re-runs the live disk inventory immediately before execution**. If the selected replacement disk has become mounted, partitioned, assigned to ZFS, or otherwise ineligible, the operation is refused.
+Before a replacement can run, NASitron shows the exact guarded replacement command, requires typed confirmation and CSRF validation, and then **re-runs the live disk inventory immediately before execution**. If the selected replacement disk has become mounted, partitioned, assigned to ZFS, or otherwise ineligible, the operation is refused.
 
 NASitron runs only:
 
 ```bash
-sudo -n zpool replace <pool> <failed-device> <replacement-device>
+sudo -n /usr/local/sbin/nasitron-root-helper replace <pool> <failed-guid> <replacement-by-id> <allow-conflict:0|1>
 ```
 
 It deliberately does **not** add `-f`, wipe filesystem signatures, repartition disks, or otherwise force a disk into service. OpenZFS still performs its own compatibility and size checks. Successful commands normally begin a resilver, which can be monitored on the normal server dashboard.
 
 Every attempted replacement is written to the local maintenance history with the selected devices, command, exit status, and returned pool status/output.
 
-This feature requires a narrowly scoped passwordless sudo rule for `zpool replace`; see [examples/nasitron.sudoers](examples/nasitron.sudoers).
+This feature requires the root-owned NASitron helper plus the exact helper-only sudo rule in [examples/nasitron.sudoers](examples/nasitron.sudoers). The helper revalidates the failed GUID and replacement disk and invokes `zpool replace` without a shell.
 
 ## Tuning/support bundle
 
@@ -157,7 +157,7 @@ Start the application:
 docker compose up -d --build
 ```
 
-Open `http://<docker-host>:8080`, choose **Add server**, and paste the dedicated SSH private key (recommended) or configure a password.
+The supplied Compose file binds NASitron to `127.0.0.1:8080` and the UI requires HTTPS by default. Put an HTTPS reverse proxy in front of that loopback listener, then open the proxy URL and choose **Add server**. For deliberate local testing only, set `NASITRON_ALLOW_INSECURE_HTTP=true` (and `NASITRON_ALLOW_INSECURE_MAINTENANCE=true` if you need the replacement page).
 
 ### 3. Host-key behavior
 
@@ -171,8 +171,8 @@ By default NASitron uses trust-on-first-use (TOFU) and stores observed host keys
 | `NASITRON_DATA_DIR` | Database/known_hosts directory | `/data` |
 | `NASITRON_DATABASE_URL` | SQLAlchemy database URL | SQLite in `/data/nasitron.db` |
 | `NASITRON_TIMEZONE` | Display timezone | `UTC` |
-| `NASITRON_WEB_USERNAME` | Optional HTTP Basic username | empty/disabled |
-| `NASITRON_WEB_PASSWORD` | Optional HTTP Basic password | empty |
+| `NASITRON_WEB_USERNAME` | Required HTTP Basic username | none |
+| `NASITRON_WEB_PASSWORD` | Required HTTP Basic password (minimum 12 characters) | none |
 
 The supplied Compose file persists `/data` in the `nasitron_data` named volume.
 
@@ -199,10 +199,10 @@ The scheduler can monitor multiple servers concurrently. Each host's collection 
 - Use a dedicated, minimally privileged SSH account.
 - Prefer SSH keys over passwords.
 - Keep `NASITRON_SECRET_KEY` outside source control and back it up with the persistent database.
-- Enable dashboard authentication or place NASitron behind an authenticated reverse proxy before exposing it beyond a trusted network.
+- Dashboard HTTP Basic authentication is mandatory; protect those credentials with HTTPS before exposing NASitron beyond a trusted management network.
 - Do not grant unrestricted passwordless sudo to the monitoring account.
 - The optional drive-replacement page is intentionally the only current feature that mutates ZFS state; it is limited to `zpool replace` and records every attempt.
-- Protect the web UI with HTTP Basic authentication or an authenticated reverse proxy before granting the remote account `zpool replace` capability.
+- Install the root helper as `root:root` and grant sudo only to that helper path; do not grant the monitoring account direct passwordless access to `zpool`, `wipefs`, `flock`, or arbitrary `smartctl` arguments.
 - TOFU is convenient for initial setup; strict host-key verification is preferable once keys are known.
 - Monitoring, tuning-bundle collection, and all other current NASitron functions remain read-only.
 
@@ -213,7 +213,11 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt pytest
 export NASITRON_DATA_DIR="$PWD/data"
-export NASITRON_SECRET_KEY="development-only-secret"
+export NASITRON_SECRET_KEY="development-only-secret-0123456789abcdef"
+export NASITRON_WEB_USERNAME="admin"
+export NASITRON_WEB_PASSWORD="development-password"
+export NASITRON_ALLOW_INSECURE_HTTP="true"
+export NASITRON_ALLOW_INSECURE_MAINTENANCE="true"
 uvicorn app.main:app --reload --port 8080
 ```
 
@@ -245,7 +249,7 @@ The replacement workflow now prefers structured OpenZFS status JSON when availab
 
 Support bundles have bounded per-command output, one concurrent generator per server, temporary-file streaming, and redaction of `keylocation`, `keystatus`, and administrator-defined ZFS user-property values.
 
-For replacement support, the dedicated SSH account additionally needs narrowly scoped read-only `wipefs --no-act` access and the exact `flock ... zpool replace` command shown in `examples/nasitron.sudoers`. Do not grant unrestricted passwordless sudo.
+For replacement support, install the root-owned NASitron helper and grant passwordless sudo only to that helper path as shown in `examples/nasitron.sudoers`. Do not grant direct wildcard sudo access to `wipefs`, `flock`, `zpool`, or `smartctl`.
 
 
 SQLite persistence is serialized across collector threads while SSH collection remains concurrent, reducing writer contention without sacrificing multi-server polling concurrency.

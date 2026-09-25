@@ -9,10 +9,12 @@ from app.alerts import evaluate_snapshot
 from app.collector import CollectorError, _load_host_keys, _save_host_keys_atomic
 from app.db import SessionLocal, init_db
 from app.instance_lock import InstanceLock
+from app.maintenance import _server_locks, maintenance_lock
 from app.models import Alert, Server
 from app.service import _merge_previous_subsystems, _update_expected_pools
+from app.support import _bundle_locks, support_bundle_lock
 from app.validation import bounded_text
-from remote.nasitron_root_helper import _find_guid_size
+from remote.nasitron_root_helper import HelperError, _device, _find_guid_size
 
 
 def test_scalar_text_rejects_control_characters():
@@ -227,3 +229,40 @@ def test_root_helper_guid_size_search():
         }
     }
     assert _find_guid_size(payload, "12345") == 999999
+
+
+def test_per_server_maintenance_lock_identity_survives_release():
+    server_id = 987654321
+    _server_locks.pop(server_id, None)
+    try:
+        with maintenance_lock(server_id):
+            first = _server_locks[server_id]
+        with maintenance_lock(server_id):
+            assert _server_locks[server_id] is first
+    finally:
+        _server_locks.pop(server_id, None)
+
+
+def test_per_server_support_lock_identity_survives_release():
+    server_id = 987654322
+    _bundle_locks.pop(server_id, None)
+    try:
+        with support_bundle_lock(server_id):
+            first = _bundle_locks[server_id]
+        with support_bundle_lock(server_id):
+            assert _bundle_locks[server_id] is first
+    finally:
+        _bundle_locks.pop(server_id, None)
+
+
+def test_root_helper_rejects_lexical_by_id_escape():
+    with pytest.raises(HelperError, match="direct /dev/disk/by-id entry"):
+        _device("/dev/disk/by-id/../../sda", require_by_id=True)
+
+
+def test_root_helper_requires_real_by_id_symlink():
+    with pytest.raises(HelperError, match="existing /dev/disk/by-id symlink"):
+        _device(
+            "/dev/disk/by-id/nasitron-definitely-not-a-real-device",
+            require_by_id=True,
+        )

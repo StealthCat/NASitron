@@ -13,6 +13,7 @@ from typing import Any
 
 FAILED_STATES = {"DEGRADED", "FAULTED", "OFFLINE", "UNAVAIL", "REMOVED"}
 LOCK_PATH = "/run/lock/nasitron-zpool-replace.lock"
+BY_ID_DIR = Path("/dev/disk/by-id")
 POOL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$")
 
 
@@ -69,10 +70,15 @@ def _device(value: str, *, require_by_id: bool = False) -> tuple[str, str]:
     if not value.startswith("/dev/") or len(value) > 1024 or any(ord(ch) < 32 for ch in value):
         raise HelperError("Invalid block-device path")
     if require_by_id:
-        if not value.startswith("/dev/disk/by-id/"):
-            raise HelperError("Replacement device must use /dev/disk/by-id")
-        if "-part" in Path(value).name:
+        submitted = Path(value)
+        if submitted.parent != BY_ID_DIR or submitted.name in {"", ".", ".."}:
+            raise HelperError(
+                "Replacement device must be a direct /dev/disk/by-id entry"
+            )
+        if "-part" in submitted.name:
             raise HelperError("Replacement device must be a whole-disk by-id path")
+        if not submitted.is_symlink():
+            raise HelperError("Replacement device must be an existing /dev/disk/by-id symlink")
     real = os.path.realpath(value)
     if not real.startswith("/dev/"):
         raise HelperError("Block-device path resolves outside /dev")
@@ -239,7 +245,7 @@ def cmd_dmesg(args: list[str]) -> int:
 def cmd_wipefs_check(args: list[str]) -> int:
     if len(args) != 1:
         raise HelperError("Usage: wipefs-check <device>")
-    _submitted, real = _device(args[0])
+    _submitted, real = _device(args[0], require_by_id=True)
     return _forward(
         _run(
             [WIPEFS(), "--no-act", "--noheadings", "--output", "TYPE,UUID,LABEL", real],

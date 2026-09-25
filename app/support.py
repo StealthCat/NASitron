@@ -19,10 +19,10 @@ def support_bundle_lock(server_id: int) -> Iterator[None]:
     try:
         yield
     finally:
+        # Retain the per-server lock object. Deleting it after release can
+        # race with a thread that already fetched the old lock and allow a
+        # second lock object for the same server to be acquired concurrently.
         lock.release()
-        with _lock_guard:
-            if _bundle_locks.get(server_id) is lock and not lock.locked():
-                _bundle_locks.pop(server_id, None)
 
 
 def _sanitize_property_output(text: str) -> str:

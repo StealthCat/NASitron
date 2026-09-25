@@ -41,10 +41,11 @@ def maintenance_lock(server_id: int) -> Iterator[None]:
     try:
         yield
     finally:
+        # Keep the lock object registered for the lifetime of the process.
+        # Removing it after release creates an ABA race: another thread can
+        # fetch the old lock just before removal while a third thread creates
+        # a new lock for the same server.
         lock.release()
-        with _lock_guard:
-            if _server_locks.get(server_id) is lock and not lock.locked():
-                _server_locks.pop(server_id, None)
 
 
 def _node_has_usage(node: dict[str, Any]) -> bool:
