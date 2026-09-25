@@ -33,14 +33,14 @@
 {% else %}
 
 <section class="grid four" aria-label="Storage summary">
-  <a class="metric-card card-link" href="#servers">
+  <a class="metric-card card-link" href="/servers">
     <div class="metric-icon">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><circle cx="7" cy="7" r="1"/><circle cx="7" cy="17" r="1"/></svg>
     </div>
     <div><div class="metric-label">Servers</div><div class="metric-value">{{ summary.server_count }}</div><div class="metric-sub">{{ summary.online_servers }} online · {{ summary.server_count - summary.online_servers }} unavailable</div></div>
     <div class="metric-chevron">›</div>
   </a>
-  <a class="metric-card card-link" href="#pools">
+  <a class="metric-card card-link" href="/pools">
     <div class="metric-icon good">
       <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
     </div>
@@ -86,7 +86,7 @@
   <div class="panel" id="pools">
     <div class="panel-title">
       <h2><svg class="section-icon" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Pool Capacity</h2>
-      <span class="subtle">{{ summary.pool_count }} pools</span>
+      <a class="subtle" href="/pools">View all {{ summary.pool_count }} pools ›</a>
     </div>
     {% for row in pool_rows[:6] %}
       {% set pool = row.pool %}
@@ -175,8 +175,8 @@
 
   <div class="panel flush" id="drives">
     <div class="panel-title" style="padding:16px 16px 0">
-      <h2>Drive Health</h2>
-      <span class="subtle">{{ summary.drive_count }} drives</span>
+      <h2>Drive Health Preview</h2>
+      <a class="subtle" href="/drives">View all {{ summary.drive_count }} drives ›</a>
     </div>
     <div class="scroll">
       <table>
@@ -228,7 +228,7 @@
 
   <div class="panel accent-panel" id="maintenance">
     <div class="panel-title">
-      <h2><svg class="section-icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5-5L7.9 3.1l3 3 1.8-1.8a2 2 0 0 1 2.5 2.5l-7.7 7.7a3.5 3.5 0 1 0 2 2L17.2 8.8a4 4 0 0 0-2.5-2.5Z"/></svg>Maintenance</h2>
+      <h2><svg class="section-icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5-5L7.9 3.1l3 3 1.8-1.8a2 2 0 0 1 2.5 2.5l-7.7 7.7a3.5 3.5 0 1 0 2 2L17.2 8.8a4 4 0 0 0-2.5-2.5Z"/></svg><a href="/maintenance">Maintenance</a></h2>
       {% if summary.failed_drives or summary.pool_count - summary.healthy_pools %}<span class="badge critical">Action required</span>{% else %}<span class="badge good">No action required</span>{% endif %}
     </div>
     {% if maintenance_server %}
