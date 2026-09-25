@@ -5,9 +5,77 @@
   <div class="page-title-wrap">
     <div class="hero-kicker">SSH Monitoring</div>
     <h1>{{ "Edit Server" if server else "Add ZFS Server" }}</h1>
-    <p class="muted">NASitron connects outbound over SSH; no agent is installed on the storage server.</p>
+    <p class="muted">NASitron connects outbound over SSH. No resident agent/service runs on the storage server; the optional installer creates a restricted account and privileged helper.</p>
   </div>
 </div>
+
+{% if not server %}
+<section class="panel accent-panel" style="max-width:1180px;margin-bottom:18px">
+  <div class="panel-title">
+    <div>
+      <div class="hero-kicker">Remote Host Preparation</div>
+      <h2>Install NASitron access on this server</h2>
+    </div>
+    <span class="badge {{ 'warning' if installer_tls_mode == 'internal' else 'good' }}">
+      {{ "Internal CA" if installer_tls_mode == "internal" else ("ACME" if installer_tls_mode == "acme" else "Uploaded TLS") }}
+    </span>
+  </div>
+
+  <p class="muted">These commands are generated for this NASitron installation. The installer supports apt-based Ubuntu/Debian OpenZFS hosts, creates the <code>nasitron</code> SSH account, installs the restricted root helper, and validates access without changing pool or dataset configuration.</p>
+
+  <div class="grid two">
+    <div>
+      <div class="mini-stat">
+        <span>Installer endpoint</span>
+        <strong style="font-size:.82rem;word-break:break-all">{{ installer_url }}</strong>
+      </div>
+    </div>
+    <div>
+      <div class="mini-stat">
+        <span>Detected TLS environment</span>
+        <strong>{{ installer_tls_mode|upper }}{% if installer_tls_domain %} · {{ installer_tls_domain }}{% endif %}</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-block">
+    <div class="panel-title"><h3>1. Generate a dedicated SSH keypair</h3><span class="badge">Administration workstation</span></div>
+    <p class="subtle">Keep the private key. You will paste it into the Connection form below. Only the public key is passed to the installer.</p>
+    <div class="command-box"><span class="cmd">ssh-keygen -t ed25519 -f ./nasitron-monitoring -C "NASitron monitoring"</span></div>
+  </div>
+
+  {% if installer_tls_mode == "internal" %}
+  <div class="section-block">
+    <div class="panel-title"><h3>2. Trust this NASitron instance's internal CA</h3><span class="badge warning">Required for curl</span></div>
+    <p class="subtle">This instance uses Caddy's internal CA. Export its root certificate from the NASitron Docker host and transfer that certificate to the remote NAS through a trusted channel. Do not use <code>curl -k</code> when piping a script to root.</p>
+    <div class="command-box"><span class="cmd">docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./nasitron-caddy-root.crt</span></div>
+    <div class="command-box" style="margin-top:8px"><span class="cmd">scp ./nasitron-caddy-root.crt root@REMOTE_NAS:/tmp/nasitron-caddy-root.crt</span></div>
+  </div>
+
+  <div class="section-block">
+    <div class="panel-title"><h3>3. Run the installer on the remote NAS</h3><span class="badge">Remote NAS</span></div>
+    <div class="command-box"><span class="cmd">curl --cacert /tmp/nasitron-caddy-root.crt -fsSL {{ installer_url_shell }} | sudo bash -s -- --public-key 'ssh-ed25519 AAAA...'</span></div>
+  </div>
+  {% else %}
+  <div class="section-block">
+    <div class="panel-title"><h3>2. Run the installer on the remote NAS</h3><span class="badge good">Trusted HTTPS</span></div>
+    <p class="subtle">The current {{ installer_tls_mode|upper }} certificate path is expected to be trusted by the remote NAS.</p>
+    <div class="command-box"><span class="cmd">curl -fsSL {{ installer_url_shell }} | sudo bash -s -- --public-key 'ssh-ed25519 AAAA...'</span></div>
+  </div>
+  {% endif %}
+
+  <div class="section-block">
+    <div class="panel-title"><h3>{{ "4" if installer_tls_mode == "internal" else "3" }}. Add the connection below</h3><span class="badge">NASitron UI</span></div>
+    <div class="grid three">
+      <div class="mini-stat"><span>SSH username</span><strong>nasitron</strong></div>
+      <div class="mini-stat"><span>Authentication</span><strong>Private key</strong></div>
+      <div class="mini-stat"><span>SMART/NVMe</span><strong>Use sudo -n</strong></div>
+    </div>
+    <p class="subtle" style="margin-bottom:0">After saving, use <strong>Enroll host key</strong> and compare the SHA256 fingerprint with the fingerprint printed by the installer before enabling strict host-key verification.</p>
+  </div>
+</section>
+{% endif %}
+
 <form method="post" class="panel accent-panel" style="max-width:980px">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="panel-title"><h2>Connection</h2><span class="badge">Agentless</span></div>
