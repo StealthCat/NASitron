@@ -160,7 +160,7 @@ Start the application:
 docker compose up -d --build
 ```
 
-The supplied Compose stack includes Caddy. Only ports 80/443 are published; the NASitron application port stays private on the Compose network. On first start Caddy uses its internal CA for `NASITRON_TLS_HOST`, so a browser may require you to trust or accept the bootstrap certificate. After signing in, open **Settings → TLS Certificate Management** to upload a certificate/key or switch to ACME.
+The supplied Compose stack includes Caddy. By default it publishes HTTP/HTTPS on `0.0.0.0:80` and `0.0.0.0:443`, while the NASitron application port stays private on the Compose network. Change `NASITRON_LISTEN_IP`, `NASITRON_HTTP_PORT`, and `NASITRON_HTTPS_PORT` in `.env` to choose the Docker host bind address and ports. On first start Caddy uses its internal CA for `NASITRON_TLS_HOST`, so a browser may require you to trust or accept the bootstrap certificate. After signing in, open **Settings → TLS Certificate Management** to upload a certificate/key or switch to ACME.
 
 ### 3. Host-key behavior
 
@@ -177,6 +177,9 @@ By default NASitron uses trust-on-first-use (TOFU) and stores observed host keys
 | `NASITRON_WEB_USERNAME` | Required web sign-in username | none |
 | `NASITRON_WEB_PASSWORD` | Required web sign-in password (minimum 12 characters) | none |
 | `NASITRON_TLS_HOST` | Hostname/IP for the bootstrap internal-CA HTTPS certificate | `localhost` |
+| `NASITRON_LISTEN_IP` | Docker host IP Caddy binds to | `0.0.0.0` |
+| `NASITRON_HTTP_PORT` | Docker host HTTP port mapped to Caddy port 80 | `80` |
+| `NASITRON_HTTPS_PORT` | Docker host HTTPS/HTTP3 port mapped to Caddy port 443 | `443` |
 | `NASITRON_SESSION_TTL_SECONDS` | Signed web-session lifetime | `43200` |
 
 The supplied Compose file persists NASitron state in `nasitron_data` and Caddy certificate/account state in dedicated `caddy_data` and `caddy_config` volumes.
