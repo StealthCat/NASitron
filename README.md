@@ -432,3 +432,12 @@ The enrollment callback now retries transient failures and has explicit connect/
 The Settings page is organized into independent tabs for **Email**, **Health**, **History**, **Enrollment**, and **HTTPS**. Email, health-threshold, and history-retention forms save only their own settings so changing one category cannot overwrite values in another. TLS keeps its dedicated apply workflow, and Enrollment links to the one-time automatic Add Server flow.
 
 The active tab is reflected in the URL and preserved after Email/Health/History saves, SMTP tests, and TLS changes.
+
+
+## NASitron 0.6.14 ZFS property visibility
+
+NASitron now collects and displays OpenZFS configuration properties alongside normal pool and dataset telemetry. Pool views show pool properties with their effective value and source, highlighting values that are explicitly configured instead of defaults.
+
+Dataset and zvol views collect explicitly set properties only, so settings such as compression, recordsize, atime, sync, quota, reservation, dedup and related options are visible without storing every inherited/default property on every dataset.
+
+Property collection participates in partial-collection handling: if a property query fails, NASitron retains the previous property values and marks that property subsystem stale instead of erasing the last known configuration.
