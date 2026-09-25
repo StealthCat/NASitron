@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}NASitron Dashboard{% endblock %}
+{% block content %}
+<div class="hero row between">
+  <div>
+    <h1>Storage health</h1>
+    <div class="muted">ZFS pools, disks, cache efficiency, capacity, and alerts across all monitored servers.</div>
+  </div>
+  <a class="button primary" href="/servers/new">+ Add server</a>
+</div>
+
+{% if not cards %}
+<div class="panel">
+  <h2>No servers configured</h2>
+  <p class="muted">Add an Ubuntu/ZFS host to start collecting pool, ARC, disk, and system telemetry.</p>
+  <a class="button primary" href="/servers/new">Add your first server</a>
+</div>
+{% endif %}
+
+<div class="grid cards">
+{% for card in cards %}
+  {% set server = card.server %}
+  {% set snap = card.snapshot %}
+  <a class="panel card-link" href="/servers/{{ server.id }}">
+    <div class="row between">
+      <div>
+        <h2 style="margin-bottom:4px">{{ server.name }}</h2>
+        <div class="muted">{{ server.host }}:{{ server.port }}</div>
+      </div>
+      {% if server.last_error and server.consecutive_failures %}
+        <span class="badge critical"><span class="dot"></span>Collection error</span>
+      {% elif not snap %}
+        <span class="badge offline"><span class="dot"></span>Waiting for data</span>
+      {% elif card.alerts %}
+        <span class="badge warning"><span class="dot"></span>{{ card.alerts|length }} active alert{{ '' if card.alerts|length == 1 else 's' }}</span>
+      {% else %}
+        <span class="badge good"><span class="dot"></span>Healthy</span>
+      {% endif %}
+    </div>
+
+    {% if snap %}
+      <div class="grid three" style="margin-top:18px">
+        <div><div class="subtle">Pools</div><div class="kpi">{{ snap.pools|length }}</div></div>
+        <div><div class="subtle">ARC hit rate</div><div class="kpi">{{ "%.1f"|format(snap.arc.hit_rate_pct or 0) }}<small>%</small></div></div>
+        <div><div class="subtle">Memory used</div><div class="kpi">{{ "%.1f"|format(snap.system.memory.used_pct or 0) }}<small>%</small></div></div>
+      </div>
+      {% for pool in snap.pools %}
+        <div style="margin-top:16px">
+          <div class="row between">
+            <strong>{{ pool.name }}</strong>
+            <span class="badge {{ 'good' if pool.health == 'ONLINE' else 'critical' }}">{{ pool.health }}</span>
+          </div>
+          {% set cap = pool.capacity_pct or 0 %}
+          <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else '') }}" style="margin-top:8px">
+            <span style="width:{{ [cap,100]|min }}%"></span>
+          </div>
+          <div class="subtle" style="margin-top:5px">{{ "%.1f"|format(cap) }}% used · {{ pool.alloc_bytes|human_bytes }} / {{ pool.size_bytes|human_bytes }}</div>
+        </div>
+      {% endfor %}
+      <div class="subtle" style="margin-top:16px">Last successful poll: {{ server.last_ok_at|fmt_dt }}</div>
+    {% else %}
+      <p class="muted" style="margin-top:18px">No successful collection has completed yet.</p>
+      {% if server.last_error %}<div class="badge critical">{{ server.last_error }}</div>{% endif %}
+    {% endif %}
+  </a>
+{% endfor %}
+</div>
+{% endblock %}

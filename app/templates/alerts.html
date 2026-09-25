@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Alerts · NASitron{% endblock %}
+{% block content %}
+<div class="hero"><h1>Alerts</h1><div class="muted">Current and recently resolved storage-health conditions.</div></div>
+<div class="panel flush scroll">
+<table>
+<thead><tr><th>State</th><th>Severity</th><th>Server</th><th>Condition</th><th>First seen</th><th>Last seen</th><th></th></tr></thead>
+<tbody>
+{% for alert in alerts %}
+<tr>
+  <td><span class="badge {{ alert.severity if alert.active else 'offline' }}">{{ "ACTIVE" if alert.active else "RESOLVED" }}</span></td>
+  <td>{{ alert.severity }}</td>
+  <td><a href="/servers/{{ alert.server_id }}">{{ alert.server.name }}</a></td>
+  <td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message }}</div></td>
+  <td>{{ alert.first_seen|fmt_dt }}</td>
+  <td>{{ alert.last_seen|fmt_dt }}</td>
+  <td>{% if alert.active and not alert.acknowledged %}<form method="post" action="/alerts/{{ alert.id }}/ack"><button type="submit">Acknowledge</button></form>{% elif alert.acknowledged %}<span class="subtle">Acknowledged</span>{% endif %}</td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="muted">No alerts have been recorded.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,11 @@
+# Example /etc/sudoers.d/nasitron
+#
+# Verify command paths on the monitored Ubuntu host with:
+#   command -v smartctl
+#   command -v dmesg
+#
+# smartctl is needed for drive/NVMe health collection.
+# dmesg is only used by the on-demand tuning/support bundle.
+#
+# Adjust paths to match the target host before installing this file.
+nasitron ALL=(root) NOPASSWD: /usr/sbin/smartctl -a -j *, /usr/bin/smartctl -a -j *, /usr/bin/dmesg, /bin/dmesg

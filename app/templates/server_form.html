@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit " ~ server.name if server else "Add server" }} · NASitron{% endblock %}
+{% block content %}
+<div class="hero">
+  <h1>{{ "Edit server" if server else "Add ZFS server" }}</h1>
+  <div class="muted">NASitron connects outbound over SSH; no agent is installed on the storage server.</div>
+</div>
+<form method="post" class="panel" style="max-width:900px">
+  <div class="grid two">
+    <div class="field"><label>Name</label><input name="name" required value="{{ server.name if server else '' }}" placeholder="Primary NAS"></div>
+    <div class="field"><label>Host / IP</label><input name="host" required value="{{ server.host if server else '' }}" placeholder="nas.example.net"></div>
+    <div class="field"><label>SSH port</label><input type="number" name="port" min="1" max="65535" value="{{ server.port if server else 22 }}"></div>
+    <div class="field"><label>SSH username</label><input name="username" required value="{{ server.username if server else 'nasitron' }}"></div>
+  </div>
+
+  <div class="field">
+    <label>Authentication</label>
+    <select name="auth_type" id="auth_type" onchange="toggleAuth()">
+      <option value="key" {{ 'selected' if not server or server.auth_type == 'key' else '' }}>Private key</option>
+      <option value="password" {{ 'selected' if server and server.auth_type == 'password' else '' }}>Password</option>
+    </select>
+  </div>
+  <div id="key_fields">
+    <div class="field"><label>Private key {% if server %}(leave blank to keep existing){% endif %}</label><textarea name="private_key" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></div>
+    <div class="field"><label>Private-key passphrase {% if server %}(leave blank to keep existing){% endif %}</label><input type="password" name="private_key_passphrase"></div>
+  </div>
+  <div id="password_field" class="field">
+    <label>SSH password {% if server %}(leave blank to keep existing){% endif %}</label><input type="password" name="password">
+  </div>
+
+  <div class="grid two">
+    <div class="field"><label>Poll interval (seconds, minimum 15)</label><input type="number" min="15" name="poll_interval_seconds" value="{{ server.poll_interval_seconds if server else 60 }}"></div>
+    <div class="field"><label>SMART/NVMe detail interval (minutes)</label><input type="number" min="1" name="smart_interval_minutes" value="{{ server.smart_interval_minutes if server else 15 }}"></div>
+  </div>
+  <label class="checkbox"><input type="checkbox" name="sudo_for_smart" {{ 'checked' if not server or server.sudo_for_smart else '' }}> Use <code>sudo -n</code> for smartctl (recommended)</label>
+  <label class="checkbox"><input type="checkbox" name="strict_host_key" {{ 'checked' if server and server.strict_host_key else '' }}> Require host key to already exist in NASitron known_hosts (strict mode)</label>
+  <label class="checkbox"><input type="checkbox" name="enabled" {{ 'checked' if not server or server.enabled else '' }}> Enable scheduled monitoring</label>
+  <p class="subtle">With strict mode off, NASitron uses trust-on-first-use and stores the host key in its persistent data volume.</p>
+  <div class="row" style="margin-top:18px">
+    <button class="primary" type="submit">{{ "Save changes" if server else "Add server" }}</button>
+    <a class="button" href="{{ '/servers/' ~ server.id if server else '/' }}">Cancel</a>
+  </div>
+</form>
+<script>
+function toggleAuth() {
+  const key = document.getElementById("auth_type").value === "key";
+  document.getElementById("key_fields").style.display = key ? "block" : "none";
+  document.getElementById("password_field").style.display = key ? "none" : "block";
+}
+toggleAuth();
+</script>
+{% endblock %}

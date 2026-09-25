@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Settings · NASitron{% endblock %}
+{% block content %}
+<div class="hero"><h1>Settings</h1><div class="muted">Alert thresholds, history retention, and SMTP relay configuration.</div></div>
+{% if request.query_params.get('message') %}<div class="message">{{ request.query_params.get('message') }}</div>{% endif %}
+<form method="post" class="grid two">
+  <section class="panel">
+    <h2>SMTP alerts</h2>
+    <label class="checkbox"><input type="checkbox" name="smtp_enabled" {{ 'checked' if values.smtp_enabled == 'true' else '' }}> Enable email alerts</label>
+    <div class="grid two">
+      <div class="field"><label>SMTP host</label><input name="smtp_host" value="{{ values.smtp_host }}"></div>
+      <div class="field"><label>Port</label><input type="number" name="smtp_port" value="{{ values.smtp_port }}"></div>
+    </div>
+    <div class="field"><label>Username</label><input name="smtp_username" value="{{ values.smtp_username }}"></div>
+    <div class="field"><label>Password {% if values.smtp_password_configured %}(configured; leave blank to preserve){% endif %}</label><input type="password" name="smtp_password"></div>
+    <div class="field"><label>From address</label><input name="smtp_from" value="{{ values.smtp_from }}" placeholder="nasitron@example.net"></div>
+    <div class="field"><label>Recipients (comma separated)</label><input name="smtp_to" value="{{ values.smtp_to }}"></div>
+    <label class="checkbox"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls == 'true' else '' }}> STARTTLS</label>
+    <label class="checkbox"><input type="checkbox" name="smtp_ssl" {{ 'checked' if values.smtp_ssl == 'true' else '' }}> Implicit TLS / SMTP_SSL</label>
+    <p class="subtle">SMTP passwords are encrypted at rest with the key derived from <code>NASITRON_SECRET_KEY</code>.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Health thresholds</h2>
+    <div class="grid two">
+      <div class="field"><label>Pool capacity warning %</label><input type="number" name="pool_capacity_warning" value="{{ values.pool_capacity_warning }}"></div>
+      <div class="field"><label>Pool capacity critical %</label><input type="number" name="pool_capacity_critical" value="{{ values.pool_capacity_critical }}"></div>
+      <div class="field"><label>Drive temp warning °C</label><input type="number" name="drive_temp_warning_c" value="{{ values.drive_temp_warning_c }}"></div>
+      <div class="field"><label>Drive temp critical °C</label><input type="number" name="drive_temp_critical_c" value="{{ values.drive_temp_critical_c }}"></div>
+      <div class="field"><label>Scrub age warning (days, 0 disables)</label><input type="number" name="scrub_age_warning_days" value="{{ values.scrub_age_warning_days }}"></div>
+      <div class="field"><label>Consecutive collection failures before alert</label><input type="number" name="collection_failure_threshold" value="{{ values.collection_failure_threshold }}"></div>
+    </div>
+    <h2 style="margin-top:12px">Retention</h2>
+    <div class="grid two">
+      <div class="field"><label>Time-series metrics (days)</label><input type="number" name="metric_retention_days" value="{{ values.metric_retention_days }}"></div>
+      <div class="field"><label>Full snapshots (days)</label><input type="number" name="snapshot_retention_days" value="{{ values.snapshot_retention_days }}"></div>
+    </div>
+  </section>
+  <div class="row">
+    <button class="primary" type="submit">Save settings</button>
+  </div>
+</form>
+<form method="post" action="/settings/test-email" style="margin-top:12px"><button type="submit">Send SMTP test message</button></form>
+{% endblock %}

@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}{{ server.name }} · NASitron{% endblock %}
+{% block content %}
+<div class="hero row between">
+  <div>
+    <div class="row">
+      <h1 style="margin-bottom:0">{{ server.name }}</h1>
+      {% if server.last_error and server.consecutive_failures %}
+        <span class="badge critical"><span class="dot"></span>Collection failing</span>
+      {% elif snapshot %}
+        {% set unhealthy = snapshot.pools|selectattr('health','ne','ONLINE')|list %}
+        <span class="badge {{ 'critical' if unhealthy else 'good' }}"><span class="dot"></span>{{ 'Attention required' if unhealthy else 'Online' }}</span>
+      {% else %}
+        <span class="badge offline">No data</span>
+      {% endif %}
+    </div>
+    <div class="muted">{{ server.username }}@{{ server.host }}:{{ server.port }} · poll every {{ server.poll_interval_seconds }}s · last OK {{ server.last_ok_at|fmt_dt }}</div>
+  </div>
+  <div class="row">
+    <form method="post" action="/servers/{{ server.id }}/poll" class="inline"><button type="submit">Poll now</button></form>
+    <a class="button" href="/servers/{{ server.id }}/support-bundle">Download tuning bundle</a>
+    <a class="button" href="/servers/{{ server.id }}/edit">Edit</a>
+  </div>
+</div>
+
+{% if server.last_error %}
+<div class="message"><strong>Last collection error:</strong> {{ server.last_error }}</div>
+{% endif %}
+
+{% if not snapshot %}
+<div class="panel"><h2>Waiting for first successful poll</h2><p class="muted">Use “Poll now” after verifying SSH connectivity and remote permissions.</p></div>
+{% else %}
+<div class="grid three">
+  <div class="panel"><div class="subtle">Host</div><div class="kpi">{{ snapshot.system.hostname or server.host }}</div><div class="muted">{{ snapshot.system.os }} · {{ snapshot.system.kernel }}</div></div>
+  <div class="panel"><div class="subtle">Memory</div><div class="kpi">{{ snapshot.system.memory.used_bytes|human_bytes }}</div><div class="muted">{{ "%.1f"|format(snapshot.system.memory.used_pct) }}% of {{ snapshot.system.memory.total_bytes|human_bytes }}</div></div>
+  <div class="panel"><div class="subtle">Uptime / load</div><div class="kpi">{{ snapshot.system.uptime_seconds|human_duration }}</div><div class="muted">load {{ snapshot.system.load1 }} / {{ snapshot.system.load5 }} / {{ snapshot.system.load15 }}</div></div>
+</div>
+
+<h2 style="margin-top:26px">ZFS pools and topology</h2>
+<div class="grid cards">
+{% for pool in snapshot.pools %}
+  <div class="panel">
+    <div class="row between"><h2>{{ pool.name }}</h2><span class="badge {{ 'good' if pool.health == 'ONLINE' else 'critical' }}">{{ pool.health }}</span></div>
+    {% set cap = pool.capacity_pct or 0 %}
+    <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else '') }}"><span style="width:{{ [cap,100]|min }}%"></span></div>
+    <div class="grid three" style="margin-top:14px">
+      <div><div class="subtle">Used</div><strong>{{ pool.alloc_bytes|human_bytes }}</strong></div>
+      <div><div class="subtle">Free</div><strong>{{ pool.free_bytes|human_bytes }}</strong></div>
+      <div><div class="subtle">Fragmentation</div><strong>{{ "%.1f"|format(pool.fragmentation_pct) }}%</strong></div>
+      <div><div class="subtle">Read IOPS</div><strong>{{ pool.io.read_iops or 0 }}</strong></div>
+      <div><div class="subtle">Write IOPS</div><strong>{{ pool.io.write_iops or 0 }}</strong></div>
+      <div><div class="subtle">R/W bandwidth</div><strong>{{ (pool.io.read_bps or 0)|human_bytes }}/s · {{ (pool.io.write_bps or 0)|human_bytes }}/s</strong></div>
+    </div>
+    {% if pool.status.scan %}<p class="subtle"><strong>Scan:</strong> {{ pool.status.scan }}</p>{% endif %}
+    {% if pool.status.vdevs %}
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Role</th><th>Vdev / device</th><th>State</th><th>R / W / CKSUM</th></tr></thead>
+        <tbody>
+        {% for vdev in pool.status.vdevs %}
+          <tr>
+            <td>{{ vdev.role }}</td>
+            <td style="padding-left:{{ 12 + ([vdev.indent,36]|min) }}px">{{ vdev.name }}</td>
+            <td><span class="badge {{ 'good' if vdev.state in ['ONLINE','AVAIL'] else 'critical' }}">{{ vdev.state }}</span></td>
+            <td>{{ vdev.read_errors }} / {{ vdev.write_errors }} / {{ vdev.checksum_errors }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+
+<div class="grid two" style="margin-top:22px">
+  <div class="panel">
+    <h2>ARC / L2ARC</h2>
+    <dl class="statlist">
+      <dt>ARC size</dt><dd>{{ snapshot.arc.size_bytes|human_bytes }} / target {{ snapshot.arc.target_bytes|human_bytes }}</dd>
+      <dt>ARC bounds</dt><dd>{{ snapshot.arc.min_bytes|human_bytes }} – {{ snapshot.arc.max_bytes|human_bytes }}</dd>
+      <dt>ARC hit rate</dt><dd>{{ "%.2f"|format(snapshot.arc.hit_rate_pct) }}%</dd>
+      <dt>Hits / misses</dt><dd>{{ snapshot.arc.hits }} / {{ snapshot.arc.misses }}</dd>
+      <dt>L2ARC size</dt><dd>{{ snapshot.arc.l2_size_bytes|human_bytes }}</dd>
+      <dt>L2ARC hit rate</dt><dd>{{ "%.2f"|format(snapshot.arc.l2_hit_rate_pct) }}%</dd>
+    </dl>
+  </div>
+  <div class="panel">
+    <h2>Current service state</h2>
+    <pre>{{ snapshot.system.services or "No systemd service status returned." }}</pre>
+    <div class="subtle">{{ snapshot.system.zfs_version }}</div>
+  </div>
+</div>
+
+<h2 style="margin-top:26px">History (24 hours)</h2>
+<div class="grid two">
+  <div class="panel"><h3>ARC hit rate</h3><canvas class="chart" id="arc_hit"></canvas></div>
+  <div class="panel"><h3>Memory used</h3><canvas class="chart" id="mem_used"></canvas></div>
+  {% for pool in snapshot.pools %}
+  <div class="panel"><h3>{{ pool.name }} capacity</h3><canvas class="chart pool-capacity" data-pool="{{ pool.name }}"></canvas></div>
+  <div class="panel"><h3>{{ pool.name }} read bandwidth</h3><canvas class="chart pool-read" data-pool="{{ pool.name }}"></canvas></div>
+  {% endfor %}
+</div>
+
+<h2 style="margin-top:26px">Drives</h2>
+<div class="panel flush scroll">
+<table>
+<thead><tr><th>Device</th><th>ZFS role</th><th>Model / serial</th><th>Size</th><th>Transport</th><th>SMART</th><th>Temp</th><th>Power-on</th><th>Media / sector indicators</th></tr></thead>
+<tbody>
+{% for disk in snapshot.drives %}
+{% set smart = disk.smart or {} %}
+<tr>
+  <td><strong>{{ disk.path }}</strong><div class="subtle">{{ "HDD" if disk.rotational else "SSD/NVMe" }}</div></td>
+  <td>
+    {% for member in disk.zfs_memberships %}
+      <span class="badge">{{ member.pool }} · {{ member.role }}</span>
+    {% else %}<span class="subtle">Not matched to a pool</span>{% endfor %}
+  </td>
+  <td>{{ disk.model or "—" }}<div class="subtle">{{ disk.serial or "No serial" }}</div></td>
+  <td>{{ disk.size_bytes|human_bytes }}</td>
+  <td>{{ disk.transport or "—" }}</td>
+  <td>
+    {% if smart.get('smart_passed') is sameas true %}<span class="badge good">PASS</span>
+    {% elif smart.get('smart_passed') is sameas false %}<span class="badge critical">FAIL</span>
+    {% else %}<span class="badge offline">not available</span>{% endif %}
+  </td>
+  <td>{{ (smart.get('temperature_c') ~ " °C") if smart.get('temperature_c') is not none else "—" }}</td>
+  <td>{{ (smart.get('power_on_hours') ~ " h") if smart.get('power_on_hours') is not none else "—" }}</td>
+  <td class="subtle">
+    reallocated {{ smart.get('reallocated_sectors', "—") }},
+    pending {{ smart.get('pending_sectors', "—") }},
+    uncorrectable {{ smart.get('offline_uncorrectable', "—") }}
+    {% if smart.get('percentage_used') is not none %}<br>NVMe used {{ smart.get('percentage_used') }}% · media errors {{ smart.get('media_errors', 0) }}{% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+<h2 style="margin-top:26px">Datasets / zvols</h2>
+<div class="panel flush scroll">
+<table>
+<thead><tr><th>Name</th><th>Type</th><th>Used</th><th>Available</th><th>Referenced</th><th>Logical used</th><th>Compression</th><th>Mountpoint</th></tr></thead>
+<tbody>
+{% for ds in snapshot.datasets %}
+<tr><td><strong>{{ ds.name }}</strong></td><td>{{ ds.type }}</td><td>{{ ds.used_bytes|human_bytes }}</td><td>{{ ds.available_bytes|human_bytes }}</td><td>{{ ds.referenced_bytes|human_bytes }}</td><td>{{ ds.logical_used_bytes|human_bytes }}</td><td>{{ "%.2f"|format(ds.compression_ratio) }}x</td><td>{{ ds.mountpoint }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+{% if alerts %}
+<h2 style="margin-top:26px">Recent alerts</h2>
+<div class="panel flush scroll">
+<table><thead><tr><th>Status</th><th>Severity</th><th>Alert</th><th>Last seen</th></tr></thead><tbody>
+{% for alert in alerts %}
+<tr><td>{{ "Active" if alert.active else "Resolved" }}</td><td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td><td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message }}</div></td><td>{{ alert.last_seen|fmt_dt }}</td></tr>
+{% endfor %}
+</tbody></table>
+</div>
+{% endif %}
+
+<script>
+NASitronChart(document.getElementById("arc_hit"), "/api/servers/{{ server.id }}/metrics?name=arc.hit_rate_pct&hours=24", {suffix:"%", minZero:true});
+NASitronChart(document.getElementById("mem_used"), "/api/servers/{{ server.id }}/metrics?name=system.memory_used_pct&hours=24", {suffix:"%", minZero:true});
+document.querySelectorAll(".pool-capacity").forEach(el => NASitronChart(el, "/api/servers/{{ server.id }}/metrics?name=pool.capacity_pct&scope=" + encodeURIComponent(el.dataset.pool) + "&hours=24", {suffix:"%", minZero:true}));
+document.querySelectorAll(".pool-read").forEach(el => NASitronChart(el, "/api/servers/{{ server.id }}/metrics?name=pool.read_bps&scope=" + encodeURIComponent(el.dataset.pool) + "&hours=24", {bytes:true, minZero:true}));
+</script>
+{% endif %}
+
+<div style="margin-top:26px">
+  <form method="post" action="/servers/{{ server.id }}/delete" onsubmit="return confirm('Delete this server and all stored history?')">
+    <button class="danger" type="submit">Delete server and history</button>
+  </form>
+</div>
+{% endblock %}
