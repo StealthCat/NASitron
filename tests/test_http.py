@@ -33,6 +33,8 @@ def test_healthz_is_public_and_dashboard_uses_form_login():
         assert "attachment;" in installer.headers["content-disposition"]
         assert installer.text.startswith("#!/usr/bin/env bash")
         assert "__NASITRON_ROOT_HELPER__" in installer.text
+        assert "Generating a dedicated Ed25519 SSH keypair for NASitron" in installer.text
+        assert "NASITRON GENERATED PRIVATE KEY" in installer.text
 
         response = client.get("/", follow_redirects=False)
         assert response.status_code == 303
@@ -221,12 +223,15 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
 
         response = client.get("/servers/new")
         assert response.status_code == 200
-        assert "Install NASitron access on this server" in response.text
+        assert "Prepare the NAS with one command" in response.text
+        assert "<details" in response.text
         assert "/install-remote.sh" in response.text
-        assert "curl --cacert /tmp/nasitron-caddy-root.crt" in response.text
-        assert "docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt" in response.text
-        assert "Do not use" in response.text
-        assert "curl -k" in response.text
+        assert "curl -kfsSL" in response.text
+        assert "sha256sum -c -" in response.text
+        assert "sudo bash" in response.text
+        assert "--public-key" not in response.text
+        assert "Copy the generated private key" in response.text
+        assert "Installer SHA-256" in response.text
 
         with SessionLocal() as db:
             set_setting(db, "tls_mode", "acme")
@@ -235,10 +240,10 @@ def test_add_server_page_shows_environment_specific_curl_instructions():
 
         response = client.get("/servers/new")
         assert response.status_code == 200
-        assert "Trusted HTTPS" in response.text
         assert "curl -fsSL" in response.text
-        assert "/install-remote.sh" in response.text
-        assert "--cacert /tmp/nasitron-caddy-root.crt" not in response.text
+        assert "| sudo bash" in response.text
+        assert "curl -kfsSL" not in response.text
+        assert "--public-key" not in response.text
 
         with SessionLocal() as db:
             set_setting(db, "tls_mode", "internal")
