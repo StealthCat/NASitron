@@ -6,6 +6,7 @@ from app.parser import (
     parse_pool_list,
     parse_pool_status,
     parse_pool_status_json,
+    parse_property_rows,
     parse_smart,
     parse_zfs_list,
 )
@@ -232,3 +233,73 @@ def test_build_snapshot_keeps_all_25_physical_disks():
     assert len(snapshot["drives"]) == 25
     assert snapshot["drives"][0]["path"] == "/dev/sda"
     assert snapshot["drives"][-1]["path"] == "/dev/sdy"
+
+
+
+def test_parse_property_rows_marks_configured_sources():
+    rows = parse_property_rows(
+        "tank\tautotrim\ton\tlocal\n"
+        "tank\tashift\t12\tlocal\n"
+        "tank\tcomment\t-\tdefault\n"
+        "tank/data\tcompression\tzstd\tlocal\n"
+    )
+    assert {row["property"] for row in rows["tank"] if row["is_set"]} == {
+        "ashift",
+        "autotrim",
+    }
+    default = next(row for row in rows["tank"] if row["property"] == "comment")
+    assert default["is_set"] is False
+    assert rows["tank/data"][0]["value"] == "zstd"
+
+
+def test_build_snapshot_attaches_pool_and_dataset_properties():
+    def ok(stdout=""):
+        return {
+            "stdout": stdout,
+            "stderr": "",
+            "exit": 0,
+            "stdout_truncated": False,
+            "stderr_truncated": False,
+        }
+
+    raw = {
+        "smart_sampled": False,
+        "hostname": ok("nas\n"),
+        "os_release": ok('PRETTY_NAME="Ubuntu"\n'),
+        "kernel": ok("6.8\n"),
+        "uptime": ok("1000 0\n"),
+        "loadavg": ok("1 2 3 1/1 1\n"),
+        "meminfo": ok("MemTotal: 1000 kB\nMemAvailable: 500 kB\n"),
+        "zfs_version": ok("zfs-2.2\n"),
+        "zpool_list": ok("tank\t1000\t400\t600\t12\t40\t1.00x\tONLINE\n"),
+        "zpool_get": ok("tank\tautotrim\ton\tlocal\ntank\tcomment\t-\tdefault\n"),
+        "zfs_list": ok("tank/data\tfilesystem\t100\t900\t80\t/tank/data\t1.25x\t125\t10\n"),
+        "zfs_get": ok("tank/data\tcompression\tzstd\tlocal\n"),
+        "arcstats": ok(""),
+        "zpool_iostat": ok(""),
+        "lsblk": ok('{"blockdevices":[]}'),
+        "services": ok("zfs.target=active\n"),
+        "zpool_status": {
+            "tank": ok(
+                "  pool: tank\n state: ONLINE\nconfig:\n\n"
+                " NAME STATE READ WRITE CKSUM\n tank ONLINE 0 0 0\n"
+                "errors: No known data errors\n"
+            )
+        },
+        "zpool_status_json": {"tank": {**ok(""), "exit": 1}},
+        "smart": {},
+        "smart_inventory_ok": True,
+        "smart_attempted_count": 0,
+    }
+    snapshot = build_snapshot(raw, datetime(2026, 9, 25, 12, 0, 0))
+    pool_props = snapshot["pools"][0]["properties"]
+    assert next(p for p in pool_props if p["property"] == "autotrim")["value"] == "on"
+    assert next(p for p in pool_props if p["property"] == "comment")["is_set"] is False
+    assert snapshot["datasets"][0]["properties"] == [
+        {
+            "property": "compression",
+            "value": "zstd",
+            "source": "local",
+            "is_set": True,
+        }
+    ]
