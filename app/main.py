@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -598,6 +599,18 @@ def new_server(request: Request, db: Session = Depends(get_db)):
     tls_mode = (get_setting(db, "tls_mode") or "internal").strip().lower()
     tls_domain = (get_setting(db, "tls_domain") or "").strip()
     installer_url = str(request.url_for("download_remote_installer"))
+    installer_sha256 = hashlib.sha256(INSTALLER_PATH.read_bytes()).hexdigest()
+    installer_url_shell = shlex.quote(installer_url)
+    if tls_mode == "internal":
+        installer_command = (
+            '(tmp="$(mktemp)" && '
+            f'curl -kfsSL {installer_url_shell} -o "$tmp" && '
+            f"printf '%s  %s\\n' {shlex.quote(installer_sha256)} \"$tmp\" "
+            '| sha256sum -c - && sudo bash "$tmp"; '
+            'rc=$?; rm -f "$tmp"; exit "$rc")'
+        )
+    else:
+        installer_command = f"curl -fsSL {installer_url_shell} | sudo bash"
     return templates.TemplateResponse(
         request=request,
         name="server_form.html",
@@ -605,7 +618,9 @@ def new_server(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "server": None,
             "installer_url": installer_url,
-            "installer_url_shell": shlex.quote(installer_url),
+            "installer_url_shell": installer_url_shell,
+            "installer_sha256": installer_sha256,
+            "installer_command": installer_command,
             "installer_tls_mode": tls_mode,
             "installer_tls_domain": tls_domain,
         },
