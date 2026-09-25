@@ -51,7 +51,7 @@ from .middleware import (
     RequireHTTPSMiddleware,
     SecurityHeadersMiddleware,
 )
-from .models import Alert, CurrentState, MaintenanceAction, Metric, RemoteEnrollment, Server
+from .models import Alert, CurrentState, MaintenanceAction, Metric, RemoteEnrollment, Server, WebUser
 from .scheduler import start_scheduler, stop_scheduler, trigger_now
 from .security import (
     SESSION_COOKIE_NAME,
@@ -59,9 +59,12 @@ from .security import (
     clear_login_failures,
     create_session_token,
     csrf_token,
+    ensure_bootstrap_admin,
+    hash_password,
     login_is_rate_limited,
     record_login_failure,
     request_is_authenticated,
+    request_user,
     require_csrf,
     require_secure_maintenance,
     safe_next_url,
@@ -163,6 +166,7 @@ async def lifespan(app: FastAPI):
         init_db()
         with SessionLocal() as db:
             ensure_defaults(db)
+            ensure_bootstrap_admin(db)
         start_scheduler()
         yield
     finally:
@@ -180,13 +184,20 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 @app.middleware("http")
 async def require_web_session(request: Request, call_next):
     path = request.url.path
-    if (
+    public_path = (
         path in {"/healthz", "/login", "/install-remote.sh"}
         or path.startswith("/static/")
         or path.startswith("/api/enroll/")
-    ):
+    )
+
+    with SessionLocal() as db:
+        user = request_user(request, db)
+        if user is not None:
+            request.state.current_user = user
+
+    if public_path:
         return await call_next(request)
-    if request_is_authenticated(request):
+    if user is not None:
         return await call_next(request)
 
     if path.startswith("/api/"):
@@ -204,8 +215,12 @@ async def require_web_session(request: Request, call_next):
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = Query("/")):
-    if request_is_authenticated(request):
+def login_page(
+    request: Request,
+    next: str = Query("/"),
+    db: Session = Depends(get_db),
+):
+    if request_is_authenticated(request, db):
         return RedirectResponse(safe_next_url(next), status_code=303)
     return templates.TemplateResponse(
         request=request,
@@ -225,6 +240,7 @@ def login(
     password: str = Form(...),
     next: str = Form("/"),
     _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
 ):
     next_url = safe_next_url(next)
     if login_is_rate_limited(request):
@@ -239,7 +255,8 @@ def login(
             },
         )
 
-    if not authenticate_web_credentials(username, password):
+    user = authenticate_web_credentials(db, username, password)
+    if user is None:
         record_login_failure(request)
         return templates.TemplateResponse(
             request=request,
@@ -253,10 +270,12 @@ def login(
         )
 
     clear_login_failures(request)
+    user.last_login_at = datetime.utcnow()
+    db.commit()
     response = RedirectResponse(next_url, status_code=303)
     response.set_cookie(
         SESSION_COOKIE_NAME,
-        create_session_token(),
+        create_session_token(user),
         max_age=SESSION_TTL_SECONDS,
         httponly=True,
         secure=request.url.scheme.lower() == "https" or not ALLOW_INSECURE_HTTP,
@@ -271,6 +290,37 @@ def logout(_: None = Depends(require_csrf)):
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return response
+
+
+def _current_user(request: Request) -> WebUser:
+    user = getattr(request.state, "current_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return user
+
+
+def _require_admin(request: Request) -> WebUser:
+    user = _current_user(request)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Administrator access required.")
+    return user
+
+
+def _clean_web_username(value: str) -> str:
+    username = bounded_text(value, "Username", maximum=120)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,119}", username):
+        bad_request(
+            "Username must start with a letter or number and contain only letters, "
+            "numbers, dot, underscore, @, or hyphen."
+        )
+    return username
+
+
+def _validate_web_password(value: str, field: str = "Password") -> str:
+    password = bounded_secret(value, field, maximum=4096)
+    if len(password) < 12:
+        bad_request(f"{field} must contain at least 12 characters.")
+    return password
 
 
 @app.get("/healthz")
