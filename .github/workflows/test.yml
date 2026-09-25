@@ -76,3 +76,4 @@ jobs:
           curl -fsS -b /tmp/nasitron-cookies -c /tmp/nasitron-cookies             -X POST             --data-urlencode "username=ci-admin"             --data-urlencode "password=ci-password-strong"             --data-urlencode "csrf_token=$csrf"             --data-urlencode "next=/"             http://127.0.0.1:18080/login >/dev/null
 
           curl -fsS -b /tmp/nasitron-cookies http://127.0.0.1:18080/ >/dev/null
+          curl -fsS http://127.0.0.1:18080/install-remote.sh | bash -s -- --help >/dev/null
