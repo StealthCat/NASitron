@@ -249,3 +249,59 @@ For replacement support, the dedicated SSH account additionally needs narrowly s
 
 
 SQLite persistence is serialized across collector threads while SSH collection remains concurrent, reducing writer contention without sacrificing multi-server polling concurrency.
+
+
+## NASitron 0.5 hardening
+
+Version 0.5 tightens the monitoring model and the administrative security boundary.
+
+### Monitoring correctness
+
+- Pools discovered on a server are retained as an expected-pool inventory. If a previously discovered pool disappears from the imported-pool list, NASitron raises a critical missing-pool alert instead of resolving its old alerts. An intentionally retired pool can be removed from the expected inventory on the server page.
+- Partial collection is tracked per subsystem. ARC, dataset, pool-topology, I/O, drive-inventory, and SMART failures retain last-known-good values with a stale marker instead of replacing them with zeros or empty tables.
+- Truncated or malformed pool inventory is a failed collection. Pool topology is considered fresh only after a non-truncated status response parses successfully.
+- OpenZFS JSON-status capability is detected once per server and cached, avoiding a known-to-fail JSON probe for every pool on older OpenZFS hosts.
+- Vdev state is alerted independently from overall pool health.
+- SMART alerts now include prefail/past-threshold findings, self-test/error-log findings, reallocated/pending/uncorrectable sectors, NVMe media errors, and configurable NVMe endurance thresholds.
+- SMART cadence advances only after a valid disk inventory and an actual SMART attempt (or a valid zero-disk inventory).
+
+### Privileged remote helper
+
+Do not grant the SSH account wildcard sudo access to zpool, smartctl, wipefs, or flock. Install the root-owned helper instead:
+
+~~~bash
+sudo install -o root -g root -m 0755 remote/nasitron_root_helper.py /usr/local/sbin/nasitron-root-helper
+sudo install -o root -g root -m 0440 examples/nasitron.sudoers /etc/sudoers.d/nasitron
+sudo visudo -cf /etc/sudoers.d/nasitron
+~~~
+
+The helper accepts only four operations: SMART collection, dmesg collection, read-only wipefs inspection, and guarded drive replacement. Replacement requires a whole-disk /dev/disk/by-id path and is revalidated under a remote lock before zpool replace is executed. The helper invokes tools with argv arrays rather than a shell and never adds -f.
+
+### SSH identity
+
+NASitron now has an SSH host-key enrollment page. Verify the displayed SHA256 fingerprint through a trusted channel, type it back into NASitron, and enrollment atomically updates known_hosts and enables strict verification. Known-hosts load/save failures now fail closed.
+
+### Web security and deployment
+
+The authenticated UI requires HTTPS by default. Docker Compose binds only to 127.0.0.1:8080 for a reverse proxy. Set NASITRON_FORWARDED_ALLOW_IPS to only the trusted proxy address/network.
+
+For deliberate testing on a trusted private network only:
+
+~~~dotenv
+NASITRON_ALLOW_INSECURE_HTTP=true
+NASITRON_ALLOW_INSECURE_MAINTENANCE=true
+~~~
+
+All mutating forms use CSRF protection. Request bodies are bounded. NASitron emits CSP, frame-denial, MIME-sniffing, referrer, permissions, cache, and HSTS headers.
+
+NASitron 0.5 intentionally supports one application process/replica per data directory. WEB_CONCURRENCY must be 1 and a filesystem instance lock rejects a second process using the same SQLite data directory.
+
+### Efficiency and reproducibility
+
+- Metric inserts use bulk SQL inserts.
+- Alert state and threshold settings are loaded once per server evaluation rather than queried once per condition.
+- Historical chart queries use indexed timestamp buckets and preserve the exact newest sample.
+- Redundant SQLite indexes were removed.
+- Replacement inventory is cached briefly while destructive execution always revalidates.
+- Support-bundle generation is POST + CSRF protected.
+- Production and development dependencies are exact-pinned, the Docker image uses an exact Python patch/bookworm tag, and CI builds and starts the actual Docker image.
