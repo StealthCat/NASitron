@@ -272,7 +272,9 @@ def test_build_snapshot_attaches_pool_and_dataset_properties():
         "meminfo": ok("MemTotal: 1000 kB\nMemAvailable: 500 kB\n"),
         "zfs_version": ok("zfs-2.2\n"),
         "zpool_list": ok("tank\t1000\t400\t600\t12\t40\t1.00x\tONLINE\n"),
-        "zpool_get": ok("tank\tautotrim\ton\tlocal\ntank\tcomment\t-\tdefault\n"),
+        "zpool_get": {
+            "tank": ok("tank\tautotrim\ton\tlocal\ntank\tcomment\t-\tdefault\n")
+        },
         "zfs_list": ok("tank/data\tfilesystem\t100\t900\t80\t/tank/data\t1.25x\t125\t10\n"),
         "zfs_get": ok("tank/data\tcompression\tzstd\tlocal\n"),
         "arcstats": ok(""),
