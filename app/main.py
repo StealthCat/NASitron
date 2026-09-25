@@ -4,6 +4,7 @@ import gzip
 import json
 import os
 import re
+import shlex
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -593,11 +594,21 @@ def maintenance_index(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/servers/new", response_class=HTMLResponse)
-def new_server(request: Request):
+def new_server(request: Request, db: Session = Depends(get_db)):
+    tls_mode = (get_setting(db, "tls_mode") or "internal").strip().lower()
+    tls_domain = (get_setting(db, "tls_domain") or "").strip()
+    installer_url = str(request.url_for("download_remote_installer"))
     return templates.TemplateResponse(
         request=request,
         name="server_form.html",
-        context={"request": request, "server": None},
+        context={
+            "request": request,
+            "server": None,
+            "installer_url": installer_url,
+            "installer_url_shell": shlex.quote(installer_url),
+            "installer_tls_mode": tls_mode,
+            "installer_tls_domain": tls_domain,
+        },
     )
 
 
