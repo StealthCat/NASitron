@@ -321,6 +321,35 @@ def parse_zfs_list(text: str) -> list[dict[str, Any]]:
     return datasets
 
 
+def parse_property_rows(text: str) -> dict[str, list[dict[str, Any]]]:
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) < 4:
+            parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        name, prop, value, source = parts[0], parts[1], parts[2], parts[3]
+        row = {
+            "property": prop,
+            "value": value,
+            "source": source,
+            "is_set": source.lower() not in {"default", "-", "none"},
+        }
+        by_name.setdefault(name, []).append(row)
+
+    for rows in by_name.values():
+        rows.sort(
+            key=lambda row: (
+                not bool(row["is_set"]),
+                str(row["property"]).lower(),
+            )
+        )
+    return by_name
+
+
 def parse_iostat(text: str, pool_names: set[str]) -> dict[str, dict[str, int]]:
     latest: dict[str, dict[str, int]] = {}
     for line in text.splitlines():
@@ -443,6 +472,12 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
     pools = parse_pool_list(raw.get("zpool_list", {}).get("stdout", ""))
     pool_names = {p["name"] for p in pools}
     iostat = parse_iostat(raw.get("zpool_iostat", {}).get("stdout", ""), pool_names)
+    pool_properties = parse_property_rows(
+        raw.get("zpool_get", {}).get("stdout", "")
+    )
+    dataset_properties = parse_property_rows(
+        raw.get("zfs_get", {}).get("stdout", "")
+    )
 
     errors: list[dict[str, str]] = []
     freshness: dict[str, str] = {}
@@ -454,7 +489,9 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         "loadavg": "system.load",
         "meminfo": "system.memory",
         "zfs_version": "zfs.version",
+        "zpool_get": "zfs.pool_properties",
         "zfs_list": "zfs.datasets",
+        "zfs_get": "zfs.dataset_properties",
         "arcstats": "zfs.arc",
         "zpool_iostat": "zfs.iostat",
         "lsblk": "drives.inventory",
@@ -532,6 +569,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
 
         pool["io"] = iostat.get(name, {})
         pool["status"] = parsed
+        pool["properties"] = pool_properties.get(name, [])
         if json_valid or text_valid:
             pool_status_ok.append(name)
             freshness[f"pool.status:{name}"] = sampled_at
@@ -616,6 +654,10 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
             else:
                 freshness[f"smart:{disk.get('serial') or disk.get('path')}"] = sampled_at
 
+    datasets = parse_zfs_list(raw.get("zfs_list", {}).get("stdout", ""))
+    for dataset in datasets:
+        dataset["properties"] = dataset_properties.get(dataset["name"], [])
+
     load_parts = raw.get("loadavg", {}).get("stdout", "").split()
     try:
         uptime_seconds = float(raw.get("uptime", {}).get("stdout", "0").split()[0])
@@ -637,7 +679,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         },
         "arc": parse_arcstats(raw.get("arcstats", {}).get("stdout", "")),
         "pools": pools,
-        "datasets": parse_zfs_list(raw.get("zfs_list", {}).get("stdout", "")),
+        "datasets": datasets,
         "drives": disks,
         "collection": {
             "captured_at": sampled_at,
