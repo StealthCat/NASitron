@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.crypto import decrypt
 from app.db import SessionLocal
 from app.main import app
-from app.models import CurrentState, Metric, RemoteEnrollment, Server
+from app.models import CurrentState, Metric, RemoteEnrollment, Server, WebUser
 from app.security import csrf_token
 from app.settings_store import get_setting, set_setting
 
@@ -542,3 +542,165 @@ def test_server_and_pool_pages_show_zfs_properties():
             if server:
                 db.delete(server)
                 db.commit()
+
+
+
+def test_admin_can_manage_users_and_change_passwords():
+    created_user_id = None
+    username = "operator-test"
+    old_password = "operator-password-old"
+    new_password = "operator-password-new"
+
+    try:
+        with TestClient(app) as client:
+            _login(client)
+
+            users_page = client.get("/users")
+            assert users_page.status_code == 200
+            assert "ci-admin" in users_page.text
+            assert "Add User" in users_page.text
+
+            create = client.post(
+                "/users/new",
+                data={
+                    "csrf_token": csrf_token(),
+                    "username": username,
+                    "password": old_password,
+                    "password_confirm": old_password,
+                    "enabled": "on",
+                },
+                follow_redirects=False,
+            )
+            assert create.status_code == 303
+
+            with SessionLocal() as db:
+                user = db.scalar(
+                    __import__("sqlalchemy").select(WebUser).where(
+                        WebUser.username == username
+                    )
+                )
+                assert user is not None
+                assert user.enabled is True
+                assert user.is_admin is False
+                created_user_id = user.id
+
+            client.post(
+                "/logout",
+                data={"csrf_token": csrf_token()},
+                follow_redirects=False,
+            )
+
+            login_user = client.post(
+                "/login",
+                data={
+                    "username": username,
+                    "password": old_password,
+                    "csrf_token": csrf_token(),
+                    "next": "/",
+                },
+                follow_redirects=False,
+            )
+            assert login_user.status_code == 303
+            assert client.get("/").status_code == 200
+            assert client.get("/users").status_code == 403
+
+            client.post(
+                "/logout",
+                data={"csrf_token": csrf_token()},
+                follow_redirects=False,
+            )
+            _login(client)
+
+            update = client.post(
+                f"/users/{created_user_id}/edit",
+                data={
+                    "csrf_token": csrf_token(),
+                    "username": username,
+                    "password": new_password,
+                    "password_confirm": new_password,
+                    "enabled": "on",
+                },
+                follow_redirects=False,
+            )
+            assert update.status_code == 303
+
+            client.post(
+                "/logout",
+                data={"csrf_token": csrf_token()},
+                follow_redirects=False,
+            )
+
+            old_login = client.post(
+                "/login",
+                data={
+                    "username": username,
+                    "password": old_password,
+                    "csrf_token": csrf_token(),
+                    "next": "/",
+                },
+                follow_redirects=False,
+            )
+            assert old_login.status_code == 401
+
+            new_login = client.post(
+                "/login",
+                data={
+                    "username": username,
+                    "password": new_password,
+                    "csrf_token": csrf_token(),
+                    "next": "/",
+                },
+                follow_redirects=False,
+            )
+            assert new_login.status_code == 303
+            assert client.get("/").status_code == 200
+    finally:
+        with SessionLocal() as db:
+            if created_user_id:
+                user = db.get(WebUser, created_user_id)
+                if user:
+                    db.delete(user)
+                    db.commit()
+
+
+def test_last_admin_and_self_lockout_are_blocked():
+    with TestClient(app) as client:
+        _login(client)
+
+        with SessionLocal() as db:
+            admin = db.scalar(
+                __import__("sqlalchemy").select(WebUser).where(
+                    WebUser.username == "ci-admin"
+                )
+            )
+            assert admin is not None
+            admin_id = admin.id
+
+        disable_self = client.post(
+            f"/users/{admin_id}/edit",
+            data={
+                "csrf_token": csrf_token(),
+                "username": "ci-admin",
+                "is_admin": "on",
+            },
+        )
+        assert disable_self.status_code == 400
+        assert "cannot disable your own account" in disable_self.text
+
+        demote_self = client.post(
+            f"/users/{admin_id}/edit",
+            data={
+                "csrf_token": csrf_token(),
+                "username": "ci-admin",
+                "enabled": "on",
+            },
+        )
+        assert demote_self.status_code == 400
+        assert "cannot remove your own administrator role" in demote_self.text
+
+        delete_self = client.post(
+            f"/users/{admin_id}/delete",
+            data={"csrf_token": csrf_token()},
+        )
+        assert delete_self.status_code == 400
+        assert "cannot delete your own account" in delete_self.text
