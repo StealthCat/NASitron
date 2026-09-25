@@ -441,3 +441,12 @@ NASitron now collects and displays OpenZFS configuration properties alongside no
 Dataset and zvol views collect explicitly set properties only, so settings such as compression, recordsize, atime, sync, quota, reservation, dedup and related options are visible without storing every inherited/default property on every dataset.
 
 Property collection participates in partial-collection handling: if a property query fails, NASitron retains the previous property values and marks that property subsystem stale instead of erasing the last known configuration.
+
+
+## NASitron 0.6.15 local user administration
+
+NASitron now stores web-console users in its database and includes an administrator-only **Users** page for creating, editing, disabling, promoting/demoting, deleting, and changing passwords for local accounts.
+
+On an empty user database, the existing `NASITRON_WEB_USERNAME` and `NASITRON_WEB_PASSWORD` values seed the initial administrator. After the first account exists, the database is authoritative: changing that administrator's password in the UI is not overwritten by the environment values on restart.
+
+Passwords are stored as salted scrypt hashes. Password changes, username changes, role changes, and disabling an account increment that user's session version, immediately invalidating existing signed sessions for that account. NASitron prevents an administrator from deleting or disabling their own account or removing their own administrator role, and it prevents removal of the last enabled administrator.
