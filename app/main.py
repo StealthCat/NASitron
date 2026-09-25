@@ -12,7 +12,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -321,6 +321,22 @@ def _validate_web_password(value: str, field: str = "Password") -> str:
     if len(password) < 12:
         bad_request(f"{field} must contain at least 12 characters.")
     return password
+
+
+def _validate_mailjet_api_url(value: str) -> str:
+    url = bounded_text(value, "Mailjet API URL", maximum=2048)
+    parsed = urlparse(url)
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        bad_request(
+            "Mailjet API URL must be an HTTPS URL without credentials or a fragment."
+        )
+    return url
 
 
 @app.get("/healthz")
@@ -1816,6 +1832,8 @@ def delete_web_user(
 def settings_page(request: Request, db: Session = Depends(get_db)):
     keys = [
         "smtp_enabled",
+        "email_transport",
+        "mailjet_api_url",
         "smtp_host",
         "smtp_port",
         "smtp_username",
@@ -1841,6 +1859,8 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
     ]
     values = get_many(db, keys)
     values["smtp_password_configured"] = bool(get_setting(db, "smtp_password"))
+    values["mailjet_api_key_configured"] = bool(get_setting(db, "mailjet_api_key"))
+    values["mailjet_secret_key_configured"] = bool(get_setting(db, "mailjet_secret_key"))
     values["tls_status"] = manual_certificate_status()
     active_tab = request.query_params.get("tab", "smtp").strip().lower()
     if active_tab not in {"smtp", "health", "history", "enrollment", "tls"}:
@@ -1860,6 +1880,10 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
 def save_settings(
     section: str = Form("all"),
     smtp_enabled: bool = Form(False),
+    email_transport: str = Form("smtp"),
+    mailjet_api_url: str = Form("https://api.mailjet.com/v3.1/send"),
+    mailjet_api_key: str = Form(""),
+    mailjet_secret_key: str = Form(""),
     smtp_host: str = Form(""),
     smtp_port: int = Form(587),
     smtp_username: str = Form(""),
@@ -1889,6 +1913,10 @@ def save_settings(
     saved_sections: list[str] = []
 
     if section in {"all", "smtp"}:
+        transport = email_transport.strip().lower()
+        if transport not in {"smtp", "mailjet"}:
+            bad_request("Email transport must be SMTP or Mailjet.")
+
         if smtp_ssl and smtp_starttls:
             bad_request("SMTP implicit TLS and STARTTLS cannot both be enabled.")
 
@@ -1907,18 +1935,42 @@ def save_settings(
             "SMTP password",
             maximum=4096,
         )
+
         clean_from = smtp_from.strip()
         if clean_from:
-            clean_from = validate_email(clean_from, "SMTP From address")
+            clean_from = validate_email(clean_from, "From address")
         clean_to = validate_recipient_list(smtp_to) if smtp_to.strip() else ""
 
-        if smtp_enabled and (not clean_smtp_host or not clean_from or not clean_to):
-            bad_request(
-                "SMTP host, From address, and at least one recipient are required when SMTP is enabled."
-            )
+        clean_mailjet_url = _validate_mailjet_api_url(mailjet_api_url)
+        clean_mailjet_api_key = bounded_secret(
+            mailjet_api_key,
+            "Mailjet API key",
+            maximum=1024,
+        )
+        clean_mailjet_secret_key = bounded_secret(
+            mailjet_secret_key,
+            "Mailjet secret key",
+            maximum=4096,
+        )
+        stored_mailjet_api_key = get_setting(db, "mailjet_api_key")
+        stored_mailjet_secret_key = get_setting(db, "mailjet_secret_key")
 
-        smtp_values = {
+        if smtp_enabled and (not clean_from or not clean_to):
+            bad_request(
+                "From address and at least one recipient are required when email alerts are enabled."
+            )
+        if smtp_enabled and transport == "smtp" and not clean_smtp_host:
+            bad_request("SMTP host is required when SMTP is selected.")
+        if smtp_enabled and transport == "mailjet":
+            if not (clean_mailjet_api_key or stored_mailjet_api_key):
+                bad_request("Mailjet API key is required when Mailjet is selected.")
+            if not (clean_mailjet_secret_key or stored_mailjet_secret_key):
+                bad_request("Mailjet secret key is required when Mailjet is selected.")
+
+        email_values = {
             "smtp_enabled": str(smtp_enabled).lower(),
+            "email_transport": transport,
+            "mailjet_api_url": clean_mailjet_url,
             "smtp_host": clean_smtp_host,
             "smtp_port": str(clean_smtp_port),
             "smtp_username": clean_smtp_user,
@@ -1927,10 +1979,15 @@ def save_settings(
             "smtp_starttls": str(smtp_starttls).lower(),
             "smtp_ssl": str(smtp_ssl).lower(),
         }
-        for key, value in smtp_values.items():
+        for key, value in email_values.items():
             set_setting(db, key, value)
+
         if clean_smtp_password:
             set_setting(db, "smtp_password", clean_smtp_password, secret=True)
+        if clean_mailjet_api_key:
+            set_setting(db, "mailjet_api_key", clean_mailjet_api_key, secret=True)
+        if clean_mailjet_secret_key:
+            set_setting(db, "mailjet_secret_key", clean_mailjet_secret_key, secret=True)
         saved_sections.append("Email")
 
     if section in {"all", "health"}:
@@ -2108,13 +2165,17 @@ def test_email(
     db: Session = Depends(get_db),
 ):
     try:
+        transport = get_setting(db, "email_transport", "smtp").strip().lower()
         send_email(
             db,
-            "[NASitron] SMTP test",
-            f"NASitron {APP_VERSION} successfully connected to the configured SMTP relay.",
+            "[NASitron] Email delivery test",
+            (
+                f"NASitron {APP_VERSION} successfully sent this test through "
+                f"the configured {transport.upper()} transport."
+            ),
             force=True,
         )
-        result = "SMTP test message sent."
+        result = f"{transport.upper()} test message sent."
     except Exception as exc:
-        result = f"SMTP test failed: {exc}"
+        result = f"Email test failed: {exc}"
     return RedirectResponse("/settings?tab=smtp&message=" + quote(result), status_code=303)
