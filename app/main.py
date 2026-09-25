@@ -334,7 +334,11 @@ async def complete_remote_enrollment(
         maximum=120,
     )
     host = validate_host(str(payload.get("host") or ""), "Remote host")
-    port = bounded_int(int(payload.get("port") or 22), "SSH port", 1, 65535)
+    try:
+        raw_port = int(payload.get("port") or 22)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="SSH port must be an integer.")
+    port = bounded_int(raw_port, "SSH port", 1, 65535)
     username = bounded_text(
         str(payload.get("username") or "nasitron"),
         "SSH username",
