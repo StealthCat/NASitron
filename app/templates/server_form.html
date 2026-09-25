@@ -8,7 +8,8 @@
     <p class="muted">NASitron connects outbound over SSH; no agent is installed on the storage server.</p>
   </div>
 </div>
-<form method="post" class="panel accent-panel" style="max-width:980px">\n  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<form method="post" class="panel accent-panel" style="max-width:980px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="panel-title"><h2>Connection</h2><span class="badge">Agentless</span></div>
   <div class="grid two">
     <div class="field"><label>Name</label><input name="name" required value="{{ server.name if server else '' }}" placeholder="Primary NAS"></div>
