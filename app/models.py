@@ -53,6 +53,22 @@ class Server(Base):
     )
 
 
+class RemoteEnrollment(Base):
+    __tablename__ = "remote_enrollments"
+    __table_args__ = (Index("ix_remote_enrollment_expires", "expires_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    secret_enc: Mapped[str] = mapped_column(Text)
+    public_key: Mapped[str] = mapped_column(Text)
+    private_key_enc: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class CurrentState(Base):
     __tablename__ = "current_states"
 
