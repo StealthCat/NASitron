@@ -400,3 +400,12 @@ The normal remote-host installation flow is now a single paste. With trusted HTT
 For internal-CA deployments, the Add Server page generates a one-line pinned-hash command: it downloads the installer to a temporary file with curl's certificate check bypassed, verifies the exact installer SHA-256 shown by the authenticated NASitron instance, and only then executes the verified file as root. This avoids a direct unverified `curl -k | sudo bash` pipeline while retaining a single-paste workflow.
 
 The Add Server page is also centered consistently and Remote Host Preparation is now a collapsible header.
+
+
+## NASitron 0.6.9 automatic server registration
+
+The Add Server enrollment command now performs true end-to-end enrollment. NASitron creates a short-lived one-time enrollment record and an Ed25519 keypair before displaying the command. Only the public key and one-time enrollment proof are passed to the remote installer; the private key stays encrypted inside NASitron.
+
+After the installer configures the remote NAS, it sends a signed callback containing the detected hostname/IP, SSH port, username, and SSH host-key fingerprint. NASitron verifies the HMAC proof, consumes the enrollment once, creates or updates the matching Server record, enables monitoring, and begins collection. The Add Server page polls the enrollment status and redirects to the new server automatically when registration completes.
+
+For internal-CA deployments the callback may use curl's TLS verification bypass, but the registration payload is HMAC-signed with a secret that is never transmitted in the callback. The one-time enrollment expires after 30 minutes and cannot be replayed after successful registration.
