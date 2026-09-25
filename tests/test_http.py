@@ -704,3 +704,48 @@ def test_last_admin_and_self_lockout_are_blocked():
         )
         assert delete_self.status_code == 400
         assert "cannot delete your own account" in delete_self.text
+
+
+
+def test_email_settings_support_mailjet_transport():
+    with TestClient(app) as client:
+        _login(client)
+
+        page = client.get("/settings?tab=smtp")
+        assert page.status_code == 200
+        assert "Mailjet-compatible API" in page.text
+        assert 'name="mailjet_api_url"' in page.text
+        assert 'name="mailjet_api_key"' in page.text
+        assert 'name="mailjet_secret_key"' in page.text
+
+        save = client.post(
+            "/settings",
+            data={
+                "csrf_token": csrf_token(),
+                "section": "smtp",
+                "smtp_enabled": "on",
+                "email_transport": "mailjet",
+                "mailjet_api_url": "https://mail.example.test/v3.1/send",
+                "mailjet_api_key": "mailjet-public",
+                "mailjet_secret_key": "mailjet-secret",
+                "smtp_from": "nasitron@example.test",
+                "smtp_to": "admin@example.test",
+                "smtp_port": "587",
+            },
+            follow_redirects=False,
+        )
+        assert save.status_code == 303
+        assert save.headers["location"].startswith("/settings?tab=smtp&message=")
+
+        with SessionLocal() as db:
+            assert get_setting(db, "email_transport") == "mailjet"
+            assert get_setting(db, "mailjet_api_url") == "https://mail.example.test/v3.1/send"
+            assert get_setting(db, "mailjet_api_key") == "mailjet-public"
+            assert get_setting(db, "mailjet_secret_key") == "mailjet-secret"
+
+            set_setting(db, "smtp_enabled", "false")
+            set_setting(db, "email_transport", "smtp")
+            set_setting(db, "mailjet_api_url", "https://api.mailjet.com/v3.1/send")
+            set_setting(db, "smtp_from", "")
+            set_setting(db, "smtp_to", "")
+            db.commit()
