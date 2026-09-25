@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 310 76" role="img" aria-labelledby="title desc">
+<title id="title">NASitron</title><desc id="desc">NASitron shield and storage logo</desc>
+<defs>
+  <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff3c78"/><stop offset="1" stop-color="#FC1859"/></linearGradient>
+  <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#e9eefb"/><stop offset="1" stop-color="#8da0bd"/></linearGradient>
+  <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<g transform="translate(4 3)">
+  <path d="M34 1 64 18v34L34 69 4 52V18Z" fill="#0b111b" stroke="url(#pink)" stroke-width="5"/>
+  <path d="M13 20 34 8l21 12" fill="none" stroke="#FC1859" stroke-width="3" opacity=".75"/>
+  <g transform="translate(15 20)">
+    <ellipse cx="19" cy="7" rx="15" ry="6" fill="#c7d1e4" stroke="#f5f8ff" stroke-width="1.5"/>
+    <path d="M4 7v10c0 3 7 6 15 6s15-3 15-6V7" fill="#7f91ad" stroke="#d7dfef" stroke-width="1.5"/>
+    <ellipse cx="19" cy="17" rx="15" ry="6" fill="#a6b5cb" stroke="#e3e9f4" stroke-width="1.5"/>
+    <path d="M4 17v10c0 3 7 6 15 6s15-3 15-6V17" fill="#677994" stroke="#d7dfef" stroke-width="1.5"/>
+    <ellipse cx="19" cy="27" rx="15" ry="6" fill="#90a1ba" stroke="#e3e9f4" stroke-width="1.5"/>
+    <path d="M8 35 19 41l11-6" fill="none" stroke="#FC1859" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</g>
+<text x="82" y="50" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="39" font-weight="800" fill="#f3f6fc" letter-spacing="-1.5">NAS</text>
+<text x="158" y="50" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="39" font-weight="800" fill="#FC1859" letter-spacing="-1.5" filter="url(#glow)">itron</text>
+</svg>
