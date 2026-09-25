@@ -871,9 +871,13 @@ def new_server(request: Request, db: Session = Depends(get_db)):
         context={
             "request": request,
             "server": None,
-            "installer_url": installer_url,
+            "installer_url": enrollment_installer_url,
             "installer_url_shell": installer_url_shell,
-            "installer_sha256": installer_sha256,
+            "installer_sha256": (
+                enrollment_script_sha256
+                if enrollment_script_sha256
+                else installer_sha256
+            ),
             "enrollment_script_sha256": enrollment_script_sha256,
             "installer_command": installer_command,
             "installer_tls_mode": tls_mode,
