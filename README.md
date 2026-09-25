@@ -418,3 +418,10 @@ The Add Server workflow now serves a one-time enrollment-specific installer scri
 Internal-CA deployments keep the same one-command experience using a temporary-file download plus SHA-256 verification before execution. The hash is calculated from the exact one-time enrollment script, not the generic installer.
 
 The Settings page now points administrators to Add Server for automatic enrollment so the generic manual installer is not confused with the self-registering path.
+
+
+## NASitron 0.6.11 enrollment reliability
+
+Automatic registration now occurs immediately after the remote account, SSH configuration, root helper and sudo policy are installed. ZFS inventory, block-device inventory and diagnostic dmesg checks run afterward and are warnings rather than blockers, so a diagnostic permission limitation can no longer leave Add Server stuck waiting despite a usable SSH setup.
+
+The enrollment callback now retries transient failures and has explicit connect/request timeouts. Add Server continues polling but changes its status text after roughly 30 seconds to direct the administrator to the installer terminal for the explicit registration-complete line or callback error.
