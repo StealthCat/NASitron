@@ -1,9 +1,12 @@
 import pytest
 from fastapi import HTTPException
 
+from app.db import SessionLocal, init_db
+from app.models import WebUser
 from app.security import (
     create_session_token,
     csrf_token,
+    hash_password,
     safe_next_url,
     verify_csrf,
     verify_session_token,
@@ -18,10 +21,34 @@ def test_csrf_token_verifies_and_rejects_tampering():
 
 
 def test_signed_session_verifies_and_rejects_tampering_and_expiry():
-    token = create_session_token(now=1_000_000)
-    assert verify_session_token(token, now=1_000_001)
-    assert not verify_session_token(token + "x", now=1_000_001)
-    assert not verify_session_token(token, now=2_000_000)
+    init_db()
+    with SessionLocal() as db:
+        user = WebUser(
+            username="session-token-test",
+            password_hash=hash_password("session-test-password"),
+            is_admin=False,
+            enabled=True,
+            session_version=1,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        user_id = user.id
+
+        token = create_session_token(user, now=1_000_000)
+        assert verify_session_token(token, db, now=1_000_001) is not None
+        assert verify_session_token(token + "x", db, now=1_000_001) is None
+        assert verify_session_token(token, db, now=2_000_000) is None
+
+        user.session_version += 1
+        db.commit()
+        assert verify_session_token(token, db, now=1_000_001) is None
+
+        db.delete(user)
+        db.commit()
+
+    with SessionLocal() as db:
+        assert db.get(WebUser, user_id) is None
 
 
 def test_safe_next_url_blocks_external_redirects():
