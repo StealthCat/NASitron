@@ -6,6 +6,7 @@ from app.db import SessionLocal
 from app.main import app
 from app.models import CurrentState, Metric, Server
 from app.security import csrf_token
+from app.settings_store import set_setting
 
 
 def _login(client: TestClient) -> None:
@@ -206,3 +207,37 @@ def test_sidebar_pages_are_real_routes_and_drives_page_shows_all_25():
             if server:
                 db.delete(server)
                 db.commit()
+
+
+
+def test_add_server_page_shows_environment_specific_curl_instructions():
+    with TestClient(app) as client:
+        _login(client)
+
+        with SessionLocal() as db:
+            set_setting(db, "tls_mode", "internal")
+            set_setting(db, "tls_domain", "nasitron.internal")
+
+        response = client.get("/servers/new")
+        assert response.status_code == 200
+        assert "Install NASitron access on this server" in response.text
+        assert "/install-remote.sh" in response.text
+        assert "curl --cacert /tmp/nasitron-caddy-root.crt" in response.text
+        assert "docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt" in response.text
+        assert "Do not use" in response.text
+        assert "curl -k" in response.text
+
+        with SessionLocal() as db:
+            set_setting(db, "tls_mode", "acme")
+            set_setting(db, "tls_domain", "nas.example.com")
+
+        response = client.get("/servers/new")
+        assert response.status_code == 200
+        assert "Trusted HTTPS" in response.text
+        assert "curl -fsSL" in response.text
+        assert "/install-remote.sh" in response.text
+        assert "--cacert /tmp/nasitron-caddy-root.crt" not in response.text
+
+        with SessionLocal() as db:
+            set_setting(db, "tls_mode", "internal")
+            set_setting(db, "tls_domain", "localhost")
