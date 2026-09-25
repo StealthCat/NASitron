@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import base64
 import gzip
-import hmac
 import json
 import os
 import re
@@ -13,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,9 +26,8 @@ from .config import (
     APP_NAME,
     APP_VERSION,
     MAX_METRIC_POINTS,
+    SESSION_TTL_SECONDS,
     TIMEZONE,
-    WEB_PASSWORD,
-    WEB_USERNAME,
     validate_runtime_config,
 )
 from .crypto import encrypt
@@ -50,10 +47,35 @@ from .middleware import (
 )
 from .models import Alert, CurrentState, MaintenanceAction, Metric, Server
 from .scheduler import start_scheduler, stop_scheduler, trigger_now
-from .security import csrf_token, require_csrf, require_secure_maintenance
+from .security import (
+    SESSION_COOKIE_NAME,
+    authenticate_web_credentials,
+    clear_login_failures,
+    create_session_token,
+    csrf_token,
+    login_is_rate_limited,
+    record_login_failure,
+    request_is_authenticated,
+    require_csrf,
+    require_secure_maintenance,
+    safe_next_url,
+)
 from .service import latest_snapshot
 from .settings_store import ensure_defaults, get_many, get_setting, set_setting
 from .support import sanitize_diagnostics, support_bundle_lock
+from .tls_manager import (
+    ACME_CA_ROOT_PATH,
+    MANUAL_CERT_PATH,
+    MANUAL_KEY_PATH,
+    TLSConfigurationError,
+    build_caddyfile,
+    manual_certificate_status,
+    persist_and_apply_caddyfile,
+    validate_acme_directory_url,
+    validate_ca_root,
+    validate_certificate_pair,
+    write_secret_file,
+)
 from .validation import (
     bad_request,
     bounded_int,
@@ -149,36 +171,92 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 
 
 @app.middleware("http")
-async def required_basic_auth(request: Request, call_next):
-    if request.url.path == "/healthz":
+async def require_web_session(request: Request, call_next):
+    path = request.url.path
+    if path == "/healthz" or path == "/login" or path.startswith("/static/"):
         return await call_next(request)
-    if not ALLOW_INSECURE_HTTP and request.url.scheme.lower() != "https":
-        return Response(
-            content=(
-                "HTTPS is required. Terminate TLS at a trusted reverse proxy or "
-                "set NASITRON_ALLOW_INSECURE_HTTP=true only on a trusted network."
-            ),
-            status_code=426,
-            headers={"Upgrade": "TLS/1.2, HTTP/1.1"},
+    if request_is_authenticated(request):
+        return await call_next(request)
+
+    if path.startswith("/api/"):
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    query = request.url.query
+    next_url = path + (f"?{query}" if query else "")
+    return RedirectResponse(
+        "/login?next=" + quote(safe_next_url(next_url), safe="/"),
+        status_code=303,
+    )
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = Query("/")):
+    if request_is_authenticated(request):
+        return RedirectResponse(safe_next_url(next), status_code=303)
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={
+            "request": request,
+            "next_url": safe_next_url(next),
+            "error": None,
+        },
+    )
+
+
+@app.post("/login")
+def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+    _: None = Depends(require_csrf),
+):
+    next_url = safe_next_url(next)
+    if login_is_rate_limited(request):
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            status_code=429,
+            context={
+                "request": request,
+                "next_url": next_url,
+                "error": "Too many failed sign-in attempts. Try again in a few minutes.",
+            },
         )
 
-    auth = request.headers.get("Authorization", "")
-    valid = False
-    if auth.startswith("Basic ") and len(auth) <= 8192:
-        try:
-            decoded = base64.b64decode(auth[6:], validate=True).decode("utf-8")
-            username, password = decoded.split(":", 1)
-            valid = hmac.compare_digest(username, WEB_USERNAME) and hmac.compare_digest(
-                password, WEB_PASSWORD
-            )
-        except Exception:
-            valid = False
-    if not valid:
-        return Response(
+    if not authenticate_web_credentials(username, password):
+        record_login_failure(request)
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
             status_code=401,
-            headers={"WWW-Authenticate": 'Basic realm="NASitron"'},
+            context={
+                "request": request,
+                "next_url": next_url,
+                "error": "Invalid username or password.",
+            },
         )
-    return await call_next(request)
+
+    clear_login_failures(request)
+    response = RedirectResponse(next_url, status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        create_session_token(),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=request.url.scheme.lower() == "https" or not ALLOW_INSECURE_HTTP,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.post("/logout")
+def logout(_: None = Depends(require_csrf)):
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return response
 
 
 @app.get("/healthz")
@@ -1008,9 +1086,14 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
         "metric_retention_days",
         "snapshot_retention_days",
         "full_snapshot_interval_minutes",
+        "tls_mode",
+        "tls_domain",
+        "tls_acme_email",
+        "tls_acme_ca",
     ]
     values = get_many(db, keys)
     values["smtp_password_configured"] = bool(get_setting(db, "smtp_password"))
+    values["tls_status"] = manual_certificate_status()
     return templates.TemplateResponse(
         request=request,
         name="settings.html",
@@ -1121,6 +1204,112 @@ def save_settings(
         set_setting(db, "smtp_password", clean_smtp_password, secret=True)
     db.commit()
     return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/tls")
+async def save_tls_settings(
+    tls_mode: str = Form("internal"),
+    tls_domain: str = Form(""),
+    tls_acme_email: str = Form(""),
+    tls_acme_ca: str = Form(""),
+    clear_acme_ca_root: bool = Form(False),
+    certificate: UploadFile | None = File(None),
+    private_key: UploadFile | None = File(None),
+    acme_ca_root: UploadFile | None = File(None),
+    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    mode = tls_mode.strip().lower()
+    if mode not in {"internal", "manual", "acme"}:
+        bad_request("TLS mode must be internal, manual, or acme.")
+
+    domain = tls_domain.strip()
+    if mode in {"internal", "acme"}:
+        domain = validate_host(domain, "TLS hostname")
+    elif domain:
+        domain = validate_host(domain, "TLS hostname")
+
+    email = tls_acme_email.strip()
+    if email:
+        email = validate_email(email, "ACME account email")
+
+    ca_url = tls_acme_ca.strip()
+    if mode == "acme":
+        try:
+            ca_url = validate_acme_directory_url(ca_url)
+        except TLSConfigurationError as exc:
+            bad_request(str(exc))
+
+    old_cert = MANUAL_CERT_PATH.read_bytes() if MANUAL_CERT_PATH.exists() else None
+    old_key = MANUAL_KEY_PATH.read_bytes() if MANUAL_KEY_PATH.exists() else None
+    old_ca_root = ACME_CA_ROOT_PATH.read_bytes() if ACME_CA_ROOT_PATH.exists() else None
+
+    try:
+        if mode == "manual":
+            cert_bytes = await certificate.read() if certificate and certificate.filename else b""
+            key_bytes = await private_key.read() if private_key and private_key.filename else b""
+            if bool(cert_bytes) != bool(key_bytes):
+                raise TLSConfigurationError(
+                    "Upload both the certificate chain and private key together."
+                )
+            if cert_bytes:
+                if len(cert_bytes) > 192 * 1024 or len(key_bytes) > 192 * 1024:
+                    raise TLSConfigurationError("Certificate or key upload is too large.")
+                validate_certificate_pair(cert_bytes, key_bytes)
+                write_secret_file(MANUAL_CERT_PATH, cert_bytes)
+                write_secret_file(MANUAL_KEY_PATH, key_bytes)
+            elif not (MANUAL_CERT_PATH.exists() and MANUAL_KEY_PATH.exists()):
+                raise TLSConfigurationError(
+                    "Upload a certificate chain and matching private key for manual TLS."
+                )
+
+        ca_root_bytes = (
+            await acme_ca_root.read()
+            if acme_ca_root and acme_ca_root.filename
+            else b""
+        )
+        if len(ca_root_bytes) > 192 * 1024:
+            raise TLSConfigurationError("ACME CA root upload is too large.")
+        if ca_root_bytes:
+            validate_ca_root(ca_root_bytes)
+            write_secret_file(ACME_CA_ROOT_PATH, ca_root_bytes)
+        elif clear_acme_ca_root:
+            ACME_CA_ROOT_PATH.unlink(missing_ok=True)
+
+        caddyfile = build_caddyfile(
+            mode,
+            domain=domain,
+            email=email,
+            acme_ca=ca_url,
+            use_acme_ca_root=ACME_CA_ROOT_PATH.exists(),
+        )
+        persist_and_apply_caddyfile(caddyfile)
+    except Exception as exc:
+        if old_cert is None:
+            MANUAL_CERT_PATH.unlink(missing_ok=True)
+        else:
+            write_secret_file(MANUAL_CERT_PATH, old_cert)
+        if old_key is None:
+            MANUAL_KEY_PATH.unlink(missing_ok=True)
+        else:
+            write_secret_file(MANUAL_KEY_PATH, old_key)
+        if old_ca_root is None:
+            ACME_CA_ROOT_PATH.unlink(missing_ok=True)
+        else:
+            write_secret_file(ACME_CA_ROOT_PATH, old_ca_root)
+        if isinstance(exc, TLSConfigurationError):
+            bad_request(str(exc))
+        raise
+
+    set_setting(db, "tls_mode", mode)
+    set_setting(db, "tls_domain", domain)
+    set_setting(db, "tls_acme_email", email)
+    set_setting(db, "tls_acme_ca", ca_url)
+    db.commit()
+    return RedirectResponse(
+        "/settings?message=" + quote("TLS configuration applied successfully."),
+        status_code=303,
+    )
 
 
 @app.post("/settings/test-email")

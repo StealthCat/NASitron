@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#070b12">
+  <title>Sign in · NASitron</title>
+  <link rel="icon" href="/static/nasitron-logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-card">
+      <img class="login-logo" src="/static/nasitron-logo.svg" alt="NASitron">
+      <div class="hero-kicker">Secure Console</div>
+      <h1>Sign in to NASitron</h1>
+      <p class="muted">Use the administrator credentials configured for this NASitron instance.</p>
+      {% if error %}<div class="message login-error">{{ error }}</div>{% endif %}
+      <form method="post" action="/login" class="login-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" required autofocus>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" name="password" autocomplete="current-password" required>
+        </div>
+        <button class="primary login-submit" type="submit">Sign in</button>
+      </form>
+      <div class="login-security">
+        <span class="status-orb"></span>
+        <span>HTTP Basic authentication is disabled. Sessions use a signed, HttpOnly cookie.</span>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

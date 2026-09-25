@@ -5,7 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 APP_NAME = "NASitron"
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.6.0"
 
 _CONFIG_ERRORS: list[str] = []
 
@@ -41,6 +41,13 @@ SECRET_KEY = os.getenv("NASITRON_SECRET_KEY", "")
 TIMEZONE = os.getenv("NASITRON_TIMEZONE", "UTC")
 WEB_USERNAME = os.getenv("NASITRON_WEB_USERNAME", "")
 WEB_PASSWORD = os.getenv("NASITRON_WEB_PASSWORD", "")
+TLS_HOST = os.getenv("NASITRON_TLS_HOST", "localhost").strip()
+CADDY_ADMIN_URL = os.getenv(
+    "NASITRON_CADDY_ADMIN_URL", "http://caddy:2019/load"
+).strip()
+CADDY_SHARED_TLS_DIR = os.getenv(
+    "NASITRON_CADDY_SHARED_TLS_DIR", "/nasitron-data/tls"
+).rstrip("/")
 KNOWN_HOSTS_PATH = Path(os.getenv("NASITRON_KNOWN_HOSTS", str(DATA_DIR / "known_hosts")))
 REMOTE_HELPER_PATH = os.getenv(
     "NASITRON_REMOTE_HELPER_PATH", "/usr/local/sbin/nasitron-root-helper"
@@ -59,6 +66,7 @@ MAX_DIAGNOSTIC_OUTPUT_BYTES = _env_int(
 MAX_METRIC_POINTS = _env_int("NASITRON_MAX_METRIC_POINTS", 1200)
 COLLECTOR_WORKERS = _env_int("NASITRON_COLLECTOR_WORKERS", 2)
 MAX_REQUEST_BODY_BYTES = _env_int("NASITRON_MAX_REQUEST_BODY_BYTES", 256 * 1024)
+SESSION_TTL_SECONDS = _env_int("NASITRON_SESSION_TTL_SECONDS", 12 * 60 * 60)
 WEB_CONCURRENCY = _env_int("WEB_CONCURRENCY", 1)
 
 DEFAULT_SETTINGS = {
@@ -82,6 +90,10 @@ DEFAULT_SETTINGS = {
     "metric_retention_days": "90",
     "snapshot_retention_days": "30",
     "full_snapshot_interval_minutes": "15",
+    "tls_mode": "internal",
+    "tls_domain": TLS_HOST,
+    "tls_acme_email": "",
+    "tls_acme_ca": "https://acme-v02.api.letsencrypt.org/directory",
 }
 
 SECRET_SETTING_KEYS = {"smtp_password"}
@@ -109,10 +121,26 @@ def validate_runtime_config() -> None:
         errors.append("NASITRON_COLLECTOR_WORKERS must be between 1 and 16")
     if not 16 * 1024 <= MAX_REQUEST_BODY_BYTES <= 8 * 1024 * 1024:
         errors.append("NASITRON_MAX_REQUEST_BODY_BYTES must be between 16 KiB and 8 MiB")
+    if not 300 <= SESSION_TTL_SECONDS <= 7 * 24 * 60 * 60:
+        errors.append(
+            "NASITRON_SESSION_TTL_SECONDS must be between 300 and 604800 seconds"
+        )
     if WEB_CONCURRENCY != 1:
         errors.append("NASitron requires WEB_CONCURRENCY=1; its scheduler is single-instance")
     if not REMOTE_HELPER_PATH.startswith("/") or len(REMOTE_HELPER_PATH) > 512:
         errors.append("NASITRON_REMOTE_HELPER_PATH must be a short absolute path")
+    if (
+        not TLS_HOST
+        or len(TLS_HOST) > 253
+        or "://" in TLS_HOST
+        or "/" in TLS_HOST
+        or any(ord(ch) < 33 for ch in TLS_HOST)
+    ):
+        errors.append("NASITRON_TLS_HOST must be a hostname or IP address without a scheme")
+    if not CADDY_ADMIN_URL.startswith(("http://", "https://")):
+        errors.append("NASITRON_CADDY_ADMIN_URL must be an HTTP(S) URL")
+    if not CADDY_SHARED_TLS_DIR.startswith("/") or len(CADDY_SHARED_TLS_DIR) > 512:
+        errors.append("NASITRON_CADDY_SHARED_TLS_DIR must be a short absolute path")
     try:
         ZoneInfo(TIMEZONE)
     except ZoneInfoNotFoundError:

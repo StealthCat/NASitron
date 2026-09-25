@@ -1,0 +1,9 @@
+{
+    admin 0.0.0.0:2019
+}
+
+{$NASITRON_TLS_HOST:localhost} {
+    tls internal
+    encode zstd gzip
+    reverse_proxy nasitron:8080
+}
