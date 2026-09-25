@@ -265,8 +265,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     }
 
     return templates.TemplateResponse(
-        "dashboard.html",
-        {
+        request=request,
+        name="dashboard.html",
+        context={
             "request": request,
             "cards": cards,
             "summary": summary,
@@ -282,8 +283,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 @app.get("/servers/new", response_class=HTMLResponse)
 def new_server(request: Request):
     return templates.TemplateResponse(
-        "server_form.html",
-        {"request": request, "server": None},
+        request=request,
+        name="server_form.html",
+        context={"request": request, "server": None},
     )
 
 
@@ -414,8 +416,9 @@ def edit_server(server_id: int, request: Request, db: Session = Depends(get_db))
     if not server:
         raise HTTPException(404)
     return templates.TemplateResponse(
-        "server_form.html",
-        {"request": request, "server": server},
+        request=request,
+        name="server_form.html",
+        context={"request": request, "server": server},
     )
 
 
@@ -536,8 +539,9 @@ def server_detail(server_id: int, request: Request, db: Session = Depends(get_db
         .limit(50)
     ).all()
     return templates.TemplateResponse(
-        "server.html",
-        {"request": request, "server": server, "snapshot": snapshot, "alerts": alerts},
+        request=request,
+        name="server.html",
+        context={"request": request, "server": server, "snapshot": snapshot, "alerts": alerts},
     )
 
 
@@ -571,8 +575,9 @@ def replace_drive_page(
         .limit(30)
     ).all()
     return templates.TemplateResponse(
-        "replace_drive.html",
-        {
+        request=request,
+        name="replace_drive.html",
+        context={
             "request": request,
             "server": server,
             "inventory": inventory,
@@ -823,8 +828,9 @@ def alerts_page(request: Request, db: Session = Depends(get_db)):
         .limit(500)
     ).all()
     return templates.TemplateResponse(
-        "alerts.html",
-        {"request": request, "alerts": alerts},
+        request=request,
+        name="alerts.html",
+        context={"request": request, "alerts": alerts},
     )
 
 
@@ -867,8 +873,9 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
         values[key] = get_setting(db, key)
     values["smtp_password_configured"] = bool(get_setting(db, "smtp_password"))
     return templates.TemplateResponse(
-        "settings.html",
-        {"request": request, "values": values},
+        request=request,
+        name="settings.html",
+        context={"request": request, "values": values},
     )
 
 

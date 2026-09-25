@@ -235,8 +235,8 @@ def _flatten_json_vdevs(
                 "indent": depth * 2,
                 "guid": str(value.get("guid")) if value.get("guid") is not None else None,
                 "size_bytes": _int(
-                    value.get("phys_space")
-                    or value.get("rep_dev_size")
+                    value.get("rep_dev_size")
+                    or value.get("phys_space")
                     or value.get("total_space")
                 ),
                 "leaf": not bool(children),

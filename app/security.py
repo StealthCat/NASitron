@@ -37,8 +37,7 @@ def require_csrf(csrf_token: str = Form(...)) -> None:
 def require_secure_maintenance(request: Request) -> None:
     if ALLOW_INSECURE_MAINTENANCE:
         return
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",", 1)[0].strip().lower()
-    if proto != "https":
+    if request.url.scheme.lower() != "https":
         raise HTTPException(
             status_code=403,
             detail=(
