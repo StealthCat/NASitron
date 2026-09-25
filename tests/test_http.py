@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
 from app.main import app
-from app.models import Metric, Server
+from app.models import CurrentState, Metric, Server
 from app.security import csrf_token
 
 
@@ -121,3 +121,81 @@ def test_metric_history_is_bounded_and_keeps_latest_sample():
         server = db.get(Server, server_id)
         db.delete(server)
         db.commit()
+
+
+
+def test_sidebar_pages_are_real_routes_and_drives_page_shows_all_25():
+    drives = [
+        {
+            "name": f"sd{chr(ord('a') + index)}",
+            "kname": f"sd{chr(ord('a') + index)}",
+            "path": f"/dev/sd{chr(ord('a') + index)}",
+            "size_bytes": 1_000_000_000_000,
+            "rotational": True,
+            "transport": "sata",
+            "model": "Test Disk",
+            "serial": f"SERIAL-{index:02d}",
+            "smart": {"smart_passed": True, "temperature_c": 30 + index % 5},
+            "zfs_memberships": [],
+        }
+        for index in range(25)
+    ]
+    payload = {
+        "system": {
+            "hostname": "big-nas",
+            "memory": {"used_pct": 10},
+            "zfs_version": "zfs-2.2",
+        },
+        "arc": {"hit_rate_pct": 99.0},
+        "pools": [],
+        "datasets": [],
+        "drives": drives,
+        "collection": {"stale_subsystems": [], "errors": []},
+    }
+
+    with SessionLocal() as db:
+        server = Server(
+            name="twenty-five-drive-test",
+            host="127.0.0.2",
+            username="nasitron",
+            auth_type="password",
+            enabled=False,
+        )
+        db.add(server)
+        db.commit()
+        db.refresh(server)
+        db.add(
+            CurrentState(
+                server_id=server.id,
+                captured_at=datetime.utcnow(),
+                payload_json=__import__("json").dumps(payload),
+            )
+        )
+        db.commit()
+        server_id = server.id
+
+    try:
+        with TestClient(app) as client:
+            _login(client)
+            for path in (
+                "/servers",
+                "/pools",
+                "/drives",
+                "/alerts",
+                "/maintenance",
+                "/settings",
+            ):
+                assert client.get(path).status_code == 200
+
+            response = client.get("/drives")
+            assert response.status_code == 200
+            assert "25 shown" in response.text
+            assert "/dev/sda" in response.text
+            assert "/dev/sdy" in response.text
+            assert "SERIAL-24" in response.text
+    finally:
+        with SessionLocal() as db:
+            server = db.get(Server, server_id)
+            if server:
+                db.delete(server)
+                db.commit()
