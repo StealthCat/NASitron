@@ -16,7 +16,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from cryptography.hazmat.primitives import serialization
@@ -287,6 +287,65 @@ def download_remote_installer():
         media_type="text/x-shellscript",
         filename="nasitron-install-remote.sh",
         headers={"X-NASitron-Version": APP_VERSION},
+    )
+
+
+@app.get("/api/enroll/{enrollment_id}/install.sh")
+def download_enrollment_installer(
+    enrollment_id: str,
+    request: Request,
+    token: str = Query(..., min_length=64, max_length=64),
+    db: Session = Depends(get_db),
+):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", enrollment_id):
+        raise HTTPException(status_code=404)
+    if not re.fullmatch(r"[0-9a-f]{64}", token):
+        raise HTTPException(status_code=404)
+
+    enrollment = db.get(RemoteEnrollment, enrollment_id)
+    if enrollment is None:
+        raise HTTPException(status_code=404)
+    now = datetime.utcnow()
+    if enrollment.used_at is not None:
+        raise HTTPException(status_code=409, detail="Enrollment token has already been used.")
+    if enrollment.expires_at <= now:
+        raise HTTPException(status_code=410, detail="Enrollment token has expired.")
+
+    secret = decrypt(enrollment.secret_enc) or ""
+    expected_token = hmac.new(
+        secret.encode("utf-8"),
+        b"installer-download",
+        hashlib.sha256,
+    ).hexdigest()
+    if not secret or not hmac.compare_digest(token, expected_token):
+        raise HTTPException(status_code=404)
+
+    callback_url = str(
+        request.url_for(
+            "complete_remote_enrollment",
+            enrollment_id=enrollment_id,
+        )
+    )
+    base_installer = INSTALLER_PATH.read_text(encoding="utf-8")
+    preamble = (
+        "#!/usr/bin/env bash\n"
+        "# One-time NASitron enrollment bootstrap.\n"
+        f"export NASITRON_SSH_PUBLIC_KEY={shlex.quote(enrollment.public_key)}\n"
+        f"export NASITRON_ENROLL_URL={shlex.quote(callback_url)}\n"
+        f"export NASITRON_ENROLL_SECRET={shlex.quote(secret)}\n"
+    )
+    if (get_setting(db, "tls_mode") or "internal").strip().lower() == "internal":
+        preamble += "set -- --enroll-insecure \"$@\"\n"
+
+    body = preamble + "\n" + base_installer
+    return Response(
+        content=body,
+        media_type="text/x-shellscript",
+        headers={
+            "Content-Disposition": 'inline; filename="nasitron-enroll.sh"',
+            "Cache-Control": "no-store",
+            "X-NASitron-Version": APP_VERSION,
+        },
     )
 
 
@@ -770,32 +829,42 @@ def new_server(request: Request, db: Session = Depends(get_db)):
     db.add(enrollment)
     db.commit()
 
-    complete_url = str(
+    download_token = hmac.new(
+        enrollment_secret.encode("utf-8"),
+        b"installer-download",
+        hashlib.sha256,
+    ).hexdigest()
+    enrollment_installer_url = str(
         request.url_for(
-            "complete_remote_enrollment",
+            "download_enrollment_installer",
             enrollment_id=enrollment_id,
         )
-    )
-    installer_args = (
-        f"--public-key {shlex.quote(public_key)} "
-        f"--enroll-url {shlex.quote(complete_url)} "
-        f"--enroll-secret {shlex.quote(enrollment_secret)}"
-    )
-    installer_url_shell = shlex.quote(installer_url)
+    ) + "?token=" + download_token
+    installer_url_shell = shlex.quote(enrollment_installer_url)
+
     if tls_mode == "internal":
+        enrollment_script = (
+            "#!/usr/bin/env bash\n"
+            "# One-time NASitron enrollment bootstrap.\n"
+            f"export NASITRON_SSH_PUBLIC_KEY={shlex.quote(public_key)}\n"
+            f"export NASITRON_ENROLL_URL={shlex.quote(str(request.url_for('complete_remote_enrollment', enrollment_id=enrollment_id)))}\n"
+            f"export NASITRON_ENROLL_SECRET={shlex.quote(enrollment_secret)}\n"
+            "set -- --enroll-insecure \"$@\"\n\n"
+            + INSTALLER_PATH.read_text(encoding="utf-8")
+        )
+        enrollment_script_sha256 = hashlib.sha256(
+            enrollment_script.encode("utf-8")
+        ).hexdigest()
         installer_command = (
             '(tmp="$(mktemp)" && '
             f'curl -kfsSL {installer_url_shell} -o "$tmp" && '
-            f"printf '%s  %s\\n' {shlex.quote(installer_sha256)} \"$tmp\" "
-            '| sha256sum -c - && '
-            f'sudo bash "$tmp" {installer_args} --enroll-insecure; '
+            f"printf '%s  %s\\n' {shlex.quote(enrollment_script_sha256)} \"$tmp\" "
+            '| sha256sum -c - && sudo bash "$tmp"; '
             'rc=$?; rm -f "$tmp"; exit "$rc")'
         )
     else:
-        installer_command = (
-            f"curl -fsSL {installer_url_shell} | "
-            f"sudo bash -s -- {installer_args}"
-        )
+        enrollment_script_sha256 = ""
+        installer_command = f"curl -fsSL {installer_url_shell} | sudo bash"
     return templates.TemplateResponse(
         request=request,
         name="server_form.html",
@@ -805,6 +874,7 @@ def new_server(request: Request, db: Session = Depends(get_db)):
             "installer_url": installer_url,
             "installer_url_shell": installer_url_shell,
             "installer_sha256": installer_sha256,
+            "enrollment_script_sha256": enrollment_script_sha256,
             "installer_command": installer_command,
             "installer_tls_mode": tls_mode,
             "installer_tls_domain": tls_domain,
