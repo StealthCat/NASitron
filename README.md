@@ -115,12 +115,13 @@ From a NASitron checkout on the NAS:
 sudo ./scripts/install-remote.sh --public-key-file /path/to/nasitron-monitoring.pub
 ```
 
-The installer is self-contained and is also served directly by every running NASitron instance at `/install-remote.sh`. This is the simplest installation path because the remote NAS does not need GitHub access:
+The installer is self-contained and is also served directly by every running NASitron instance at `/install-remote.sh`. This is the simplest installation path because the remote NAS does not need GitHub access or a pre-generated SSH key:
  
 ```bash
-curl -fsSL https://YOUR-NASITRON-HOST/install-remote.sh \
-  | sudo bash -s -- --public-key 'ssh-ed25519 AAAA...'
+curl -fsSL https://YOUR-NASITRON-HOST/install-remote.sh | sudo bash
 ```
+
+When no public key is supplied, the installer generates a dedicated Ed25519 keypair, installs the public key for the `nasitron` account, and prints the private key once at completion. Copy that private key into NASitron's **Add Server → Private key** field. The temporary private-key file is deleted when the installer exits.
 
 There is also a **Settings → NAS Installer** panel with a direct download link and a command using the current NASitron URL. The endpoint is intentionally unauthenticated because the script contains no NASitron credentials or instance secrets and must be reachable before a remote NAS has been enrolled. It is still served over NASitron's normal HTTPS path.
 
@@ -160,7 +161,7 @@ The installer:
 - validates ZFS inventory access, block-device inventory access, and non-interactive helper sudo
 - enables/reloads OpenSSH and prints the detected host/IP, SSH port, and server host-key fingerprints for entry into NASitron
 
-Run `./scripts/install-remote.sh --help` for options such as a custom remote username/helper path, skipping package installation, or skipping the sshd hardening drop-in. The same options can be passed after `bash -s --` when using the curl pipeline.
+Run `./scripts/install-remote.sh --help` for options such as using an existing public key, a custom remote username/helper path, skipping package installation, or skipping the sshd hardening drop-in. Supplying `--public-key`, `--public-key-file`, or `NASITRON_SSH_PUBLIC_KEY` disables automatic key generation.
 
 Most `zpool status/list/iostat`, `zfs list/get`, `/proc`, and `lsblk` data remains unprivileged. SMART, diagnostic `dmesg`, blank-disk inspection, and guarded ZFS replacement are exposed only through NASitron's root helper. Do not replace the generated sudo rule with wildcard sudo access to `zpool`, `smartctl`, `wipefs`, or a shell.
 
@@ -390,3 +391,12 @@ Every NASitron instance now exposes the packaged self-contained installer at `/i
 ## NASitron 0.6.7 Add Server installation guidance
 
 The **Add Server** page now includes environment-specific remote-host preparation instructions using the locally served `/install-remote.sh` curl-to-bash workflow. The page derives the installer URL from the current NASitron request and reads the active TLS mode. ACME/uploaded-certificate installations show the direct HTTPS command, while internal-CA installations show the Caddy root-CA export/transfer steps and a `curl --cacert` command rather than recommending insecure certificate bypass. The page also walks through SSH key generation and the NASitron connection settings to use after installation.
+
+
+## NASitron 0.6.8 zero-prep remote enrollment
+
+The normal remote-host installation flow is now a single paste. With trusted HTTPS, run `curl -fsSL https://NASITRON/install-remote.sh | sudo bash`. The installer generates a dedicated Ed25519 keypair, installs the public key, and prints the private key once for the Add Server form. Re-running automatic-key mode removes only the prior installer-generated key before authorizing the new one; unrelated authorized keys are preserved.
+
+For internal-CA deployments, the Add Server page generates a one-line pinned-hash command: it downloads the installer to a temporary file with curl's certificate check bypassed, verifies the exact installer SHA-256 shown by the authenticated NASitron instance, and only then executes the verified file as root. This avoids a direct unverified `curl -k | sudo bash` pipeline while retaining a single-paste workflow.
+
+The Add Server page is also centered consistently and Remote Host Preparation is now a collapsible header.
