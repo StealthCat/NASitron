@@ -144,12 +144,15 @@ openssl rand -hex 32
 
 Put the generated value in `.env` as `NASITRON_SECRET_KEY`. **Keep this key stable**: it encrypts stored SSH and SMTP secrets. Changing it later makes those existing encrypted values unreadable.
 
-Dashboard HTTP Basic authentication is required:
+NASitron uses a normal web sign-in form. Configure the administrator credentials and initial TLS hostname in `.env`:
 
 ```dotenv
 NASITRON_WEB_USERNAME=admin
 NASITRON_WEB_PASSWORD=use-a-long-unique-password
+NASITRON_TLS_HOST=nas.example.com
 ```
+
+Successful sign-ins create a signed, HttpOnly session cookie; HTTP Basic authentication is not used.
 
 Start the application:
 
@@ -157,7 +160,7 @@ Start the application:
 docker compose up -d --build
 ```
 
-The supplied Compose file binds NASitron to `127.0.0.1:8080` and the UI requires HTTPS by default. Put an HTTPS reverse proxy in front of that loopback listener, then open the proxy URL and choose **Add server**. For deliberate local testing only, set `NASITRON_ALLOW_INSECURE_HTTP=true` (and `NASITRON_ALLOW_INSECURE_MAINTENANCE=true` if you need the replacement page).
+The supplied Compose stack includes Caddy. Only ports 80/443 are published; the NASitron application port stays private on the Compose network. On first start Caddy uses its internal CA for `NASITRON_TLS_HOST`, so a browser may require you to trust or accept the bootstrap certificate. After signing in, open **Settings → TLS Certificate Management** to upload a certificate/key or switch to ACME.
 
 ### 3. Host-key behavior
 
@@ -171,10 +174,12 @@ By default NASitron uses trust-on-first-use (TOFU) and stores observed host keys
 | `NASITRON_DATA_DIR` | Database/known_hosts directory | `/data` |
 | `NASITRON_DATABASE_URL` | SQLAlchemy database URL | SQLite in `/data/nasitron.db` |
 | `NASITRON_TIMEZONE` | Display timezone | `UTC` |
-| `NASITRON_WEB_USERNAME` | Required HTTP Basic username | none |
-| `NASITRON_WEB_PASSWORD` | Required HTTP Basic password (minimum 12 characters) | none |
+| `NASITRON_WEB_USERNAME` | Required web sign-in username | none |
+| `NASITRON_WEB_PASSWORD` | Required web sign-in password (minimum 12 characters) | none |
+| `NASITRON_TLS_HOST` | Hostname/IP for the bootstrap internal-CA HTTPS certificate | `localhost` |
+| `NASITRON_SESSION_TTL_SECONDS` | Signed web-session lifetime | `43200` |
 
-The supplied Compose file persists `/data` in the `nasitron_data` named volume.
+The supplied Compose file persists NASitron state in `nasitron_data` and Caddy certificate/account state in dedicated `caddy_data` and `caddy_config` volumes.
 
 ## SMTP
 
@@ -199,7 +204,7 @@ The scheduler can monitor multiple servers concurrently. Each host's collection 
 - Use a dedicated, minimally privileged SSH account.
 - Prefer SSH keys over passwords.
 - Keep `NASITRON_SECRET_KEY` outside source control and back it up with the persistent database.
-- Dashboard HTTP Basic authentication is mandatory; protect those credentials with HTTPS before exposing NASitron beyond a trusted management network.
+- The web UI uses a signed, HttpOnly session cookie after form-based sign-in; HTTP Basic authentication is disabled.
 - Do not grant unrestricted passwordless sudo to the monitoring account.
 - The optional drive-replacement page is intentionally the only current feature that mutates ZFS state; it is limited to `zpool replace` and records every attempt.
 - Install the root helper as `root:root` and grant sudo only to that helper path; do not grant the monitoring account direct passwordless access to `zpool`, `wipefs`, `flock`, or arbitrary `smartctl` arguments.
@@ -287,7 +292,7 @@ NASitron now has an SSH host-key enrollment page. Verify the displayed SHA256 fi
 
 ### Web security and deployment
 
-The authenticated UI requires HTTPS by default. Docker Compose binds only to 127.0.0.1:8080 for a reverse proxy. Set NASITRON_FORWARDED_ALLOW_IPS to only the trusted proxy address/network.
+The authenticated UI requires HTTPS by default. Docker Compose includes Caddy, publishes ports 80/443, keeps NASitron's port 8080 private, and trusts forwarded scheme/client information only inside that private Compose path.
 
 For deliberate testing on a trusted private network only:
 
@@ -309,3 +314,20 @@ NASitron 0.5 intentionally supports one application process/replica per data dir
 - Replacement inventory is cached briefly while destructive execution always revalidates.
 - Support-bundle generation is POST + CSRF protected.
 - Production and development dependencies are exact-pinned, the Docker image uses an exact Python patch/bookworm tag, and CI builds and starts the actual Docker image.
+
+
+## NASitron 0.6 authentication and HTTPS
+
+Version 0.6 replaces browser HTTP Basic authentication with a normal NASitron sign-in page. Credentials still come from `NASITRON_WEB_USERNAME` and `NASITRON_WEB_PASSWORD`, but successful authentication creates a signed, HttpOnly, SameSite=Lax session cookie. Sessions expire after `NASITRON_SESSION_TTL_SECONDS` (12 hours by default), are invalidated when the configured web credentials change, and failed sign-ins are rate-limited.
+
+The Compose deployment includes Caddy 2.11.4 as the only public-facing service. NASitron itself listens only on the private Compose network. Caddy provides an internal-CA bootstrap certificate and redirects normal HTTP traffic to HTTPS.
+
+The **Settings → TLS Certificate Management** panel supports three modes:
+
+- **Internal CA** for private/lab deployments and initial bootstrap.
+- **Uploaded certificate** using a PEM certificate chain and matching unencrypted PEM private key. NASitron verifies the pair before Caddy reloads it.
+- **ACME managed certificate** using a configurable HTTPS ACME directory URL and optional custom CA root certificate. This works with public ACME services or private/internal ACME servers.
+
+TLS changes are sent to Caddy's admin API over the private Compose network using the Caddyfile adapter. Caddy applies valid changes without downtime and retains the old active configuration if a reload fails. The generated Caddyfile is also stored in the NASitron data volume so the selected TLS mode survives container restarts.
+
+For public HTTP-01 or TLS-ALPN ACME validation, the ACME service must be able to reach the configured hostname on ports 80/443. Private ACME deployments may additionally upload the CA root that signs the ACME directory endpoint.
