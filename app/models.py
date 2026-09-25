@@ -12,6 +12,20 @@ def utcnow() -> datetime:
     return datetime.utcnow()
 
 
+class WebUser(Base):
+    __tablename__ = "web_users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    session_version: Mapped[int] = mapped_column(Integer, default=1)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class Server(Base):
     __tablename__ = "servers"
 
