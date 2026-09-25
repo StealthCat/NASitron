@@ -16,9 +16,9 @@ def _utcnow() -> datetime:
     return datetime.utcnow()
 
 
-def send_email(db: Session, subject: str, body: str) -> None:
-    if not get_bool(db, "smtp_enabled", False):
-        return
+def send_email(db: Session, subject: str, body: str, force: bool = False) -> bool:
+    if not force and not get_bool(db, "smtp_enabled", False):
+        return False
     host = get_setting(db, "smtp_host")
     port = get_int(db, "smtp_port", 587)
     sender = get_setting(db, "smtp_from")
@@ -46,6 +46,7 @@ def send_email(db: Session, subject: str, body: str) -> None:
         if username:
             smtp.login(username, password)
         smtp.send_message(msg)
+    return True
 
 
 def _upsert_alert(
@@ -90,14 +91,18 @@ def _upsert_alert(
         alert.title = title
         alert.message = message
 
+    if get_bool(db, "smtp_enabled", False) and alert.last_notified_at is None:
+        notify = True
+
     if notify:
         try:
-            send_email(
+            sent = send_email(
                 db,
                 f"[NASitron][{severity.upper()}] {server.name}: {title}",
                 f"Server: {server.name} ({server.host})\nSeverity: {severity}\n\n{message}\n",
             )
-            alert.last_notified_at = now
+            if sent:
+                alert.last_notified_at = now
         except Exception as exc:
             # Alert persistence must not fail because the relay is unavailable.
             alert.message = f"{message}\n\nSMTP notification error: {exc}"
