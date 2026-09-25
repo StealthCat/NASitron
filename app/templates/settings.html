@@ -9,7 +9,8 @@
   </div>
 </div>
 {% if request.query_params.get('message') %}<div class="message">{{ request.query_params.get('message') }}</div>{% endif %}
-<form method="post" class="grid two">\n  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<form method="post" class="grid two">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <section class="panel">
     <div class="panel-title"><h2>SMTP Alerts</h2><span class="badge {{ 'good' if values.smtp_enabled == 'true' else 'offline' }}">{{ "Enabled" if values.smtp_enabled == 'true' else "Disabled" }}</span></div>
     <label class="checkbox"><input type="checkbox" name="smtp_enabled" {{ 'checked' if values.smtp_enabled == 'true' else '' }}> Enable email alerts</label>
