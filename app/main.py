@@ -89,6 +89,7 @@ from .validation import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+INSTALLER_PATH = BASE_DIR.parent / "scripts" / "install-remote.sh"
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals["csrf_token"] = csrf_token
 _instance_lock = InstanceLock()
@@ -173,7 +174,10 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 @app.middleware("http")
 async def require_web_session(request: Request, call_next):
     path = request.url.path
-    if path == "/healthz" or path == "/login" or path.startswith("/static/"):
+    if (
+        path in {"/healthz", "/login", "/install-remote.sh"}
+        or path.startswith("/static/")
+    ):
         return await call_next(request)
     if request_is_authenticated(request):
         return await call_next(request)
@@ -265,6 +269,18 @@ def logout(_: None = Depends(require_csrf)):
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "version": APP_VERSION}
+
+
+@app.get("/install-remote.sh", response_class=FileResponse)
+def download_remote_installer():
+    if not INSTALLER_PATH.is_file():
+        raise HTTPException(status_code=404, detail="Remote installer is not packaged.")
+    return FileResponse(
+        INSTALLER_PATH,
+        media_type="text/x-shellscript",
+        filename="nasitron-install-remote.sh",
+        headers={"X-NASitron-Version": APP_VERSION},
+    )
 
 
 def _decode_state(row: CurrentState | None) -> dict | None:
