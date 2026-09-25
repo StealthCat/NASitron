@@ -203,16 +203,18 @@ https:// {
 """
         )
 
-    if not domain:
-        raise TLSConfigurationError("A TLS hostname or IP address is required.")
-    site = _site_address(domain)
-
     if mode == "internal":
         return (
             _base_caddyfile()
-            + site
-            + """ {
-    tls internal
+            + """
+http:// {
+    redir https://{host}{uri} permanent
+}
+
+https:// {
+    tls internal {
+        on_demand
+    }
     encode zstd gzip
     reverse_proxy nasitron:8080
 }
@@ -221,6 +223,9 @@ https:// {
 
     if mode != "acme":
         raise TLSConfigurationError("TLS mode must be internal, manual, or acme.")
+    if not domain:
+        raise TLSConfigurationError("A TLS hostname or IP address is required.")
+    site = _site_address(domain)
     if not acme_ca:
         raise TLSConfigurationError("An ACME directory URL is required.")
 
