@@ -1591,15 +1591,23 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
     values = get_many(db, keys)
     values["smtp_password_configured"] = bool(get_setting(db, "smtp_password"))
     values["tls_status"] = manual_certificate_status()
+    active_tab = request.query_params.get("tab", "smtp").strip().lower()
+    if active_tab not in {"smtp", "health", "history", "enrollment", "tls"}:
+        active_tab = "smtp"
     return templates.TemplateResponse(
         request=request,
         name="settings.html",
-        context={"request": request, "values": values},
+        context={
+            "request": request,
+            "values": values,
+            "active_tab": active_tab,
+        },
     )
 
 
 @app.post("/settings")
 def save_settings(
+    section: str = Form("all"),
     smtp_enabled: bool = Form(False),
     smtp_host: str = Form(""),
     smtp_port: int = Form(587),
@@ -1623,85 +1631,119 @@ def save_settings(
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ):
-    if smtp_ssl and smtp_starttls:
-        bad_request("SMTP implicit TLS and STARTTLS cannot both be enabled.")
+    section = section.strip().lower()
+    if section not in {"all", "smtp", "health", "history"}:
+        bad_request("Unknown settings section.")
 
-    clean_smtp_host = smtp_host.strip()
-    if clean_smtp_host:
-        clean_smtp_host = validate_host(clean_smtp_host, "SMTP host")
-    clean_smtp_port = bounded_int(smtp_port, "SMTP port", 1, 65535)
-    clean_smtp_user = bounded_text(
-        smtp_username,
-        "SMTP username",
-        minimum=0,
-        maximum=320,
-    )
-    clean_smtp_password = bounded_secret(
-        smtp_password,
-        "SMTP password",
-        maximum=4096,
-    )
-    clean_from = smtp_from.strip()
-    if clean_from:
-        clean_from = validate_email(clean_from, "SMTP From address")
-    clean_to = validate_recipient_list(smtp_to) if smtp_to.strip() else ""
+    saved_sections: list[str] = []
 
-    if smtp_enabled and (not clean_smtp_host or not clean_from or not clean_to):
-        bad_request(
-            "SMTP host, From address, and at least one recipient are required when SMTP is enabled."
+    if section in {"all", "smtp"}:
+        if smtp_ssl and smtp_starttls:
+            bad_request("SMTP implicit TLS and STARTTLS cannot both be enabled.")
+
+        clean_smtp_host = smtp_host.strip()
+        if clean_smtp_host:
+            clean_smtp_host = validate_host(clean_smtp_host, "SMTP host")
+        clean_smtp_port = bounded_int(smtp_port, "SMTP port", 1, 65535)
+        clean_smtp_user = bounded_text(
+            smtp_username,
+            "SMTP username",
+            minimum=0,
+            maximum=320,
+        )
+        clean_smtp_password = bounded_secret(
+            smtp_password,
+            "SMTP password",
+            maximum=4096,
+        )
+        clean_from = smtp_from.strip()
+        if clean_from:
+            clean_from = validate_email(clean_from, "SMTP From address")
+        clean_to = validate_recipient_list(smtp_to) if smtp_to.strip() else ""
+
+        if smtp_enabled and (not clean_smtp_host or not clean_from or not clean_to):
+            bad_request(
+                "SMTP host, From address, and at least one recipient are required when SMTP is enabled."
+            )
+
+        smtp_values = {
+            "smtp_enabled": str(smtp_enabled).lower(),
+            "smtp_host": clean_smtp_host,
+            "smtp_port": str(clean_smtp_port),
+            "smtp_username": clean_smtp_user,
+            "smtp_from": clean_from,
+            "smtp_to": clean_to,
+            "smtp_starttls": str(smtp_starttls).lower(),
+            "smtp_ssl": str(smtp_ssl).lower(),
+        }
+        for key, value in smtp_values.items():
+            set_setting(db, key, value)
+        if clean_smtp_password:
+            set_setting(db, "smtp_password", clean_smtp_password, secret=True)
+        saved_sections.append("Email")
+
+    if section in {"all", "health"}:
+        warn_cap, crit_cap = validate_threshold_pair(
+            pool_capacity_warning, pool_capacity_critical, "Pool capacity", 1, 100
+        )
+        warn_temp, crit_temp = validate_threshold_pair(
+            drive_temp_warning_c, drive_temp_critical_c, "Drive temperature", 1, 150
+        )
+        warn_nvme, crit_nvme = validate_threshold_pair(
+            nvme_percentage_used_warning,
+            nvme_percentage_used_critical,
+            "NVMe percentage used",
+            1,
+            100,
+        )
+        scrub_days = bounded_int(scrub_age_warning_days, "Scrub age", 0, 3650)
+        fail_threshold = bounded_int(
+            collection_failure_threshold, "Collection failure threshold", 1, 100
         )
 
-    warn_cap, crit_cap = validate_threshold_pair(
-        pool_capacity_warning, pool_capacity_critical, "Pool capacity", 1, 100
-    )
-    warn_temp, crit_temp = validate_threshold_pair(
-        drive_temp_warning_c, drive_temp_critical_c, "Drive temperature", 1, 150
-    )
-    warn_nvme, crit_nvme = validate_threshold_pair(
-        nvme_percentage_used_warning,
-        nvme_percentage_used_critical,
-        "NVMe percentage used",
-        1,
-        100,
-    )
-    scrub_days = bounded_int(scrub_age_warning_days, "Scrub age", 0, 3650)
-    fail_threshold = bounded_int(
-        collection_failure_threshold, "Collection failure threshold", 1, 100
-    )
-    metric_days = bounded_int(metric_retention_days, "Metric retention", 1, 3650)
-    snapshot_days = bounded_int(snapshot_retention_days, "Snapshot retention", 1, 3650)
-    snapshot_interval = bounded_int(
-        full_snapshot_interval_minutes, "Full snapshot interval", 1, 1440
-    )
+        health_values = {
+            "pool_capacity_warning": str(warn_cap),
+            "pool_capacity_critical": str(crit_cap),
+            "drive_temp_warning_c": str(warn_temp),
+            "drive_temp_critical_c": str(crit_temp),
+            "nvme_percentage_used_warning": str(warn_nvme),
+            "nvme_percentage_used_critical": str(crit_nvme),
+            "scrub_age_warning_days": str(scrub_days),
+            "collection_failure_threshold": str(fail_threshold),
+        }
+        for key, value in health_values.items():
+            set_setting(db, key, value)
+        saved_sections.append("Health")
 
-    values = {
-        "smtp_enabled": str(smtp_enabled).lower(),
-        "smtp_host": clean_smtp_host,
-        "smtp_port": str(clean_smtp_port),
-        "smtp_username": clean_smtp_user,
-        "smtp_from": clean_from,
-        "smtp_to": clean_to,
-        "smtp_starttls": str(smtp_starttls).lower(),
-        "smtp_ssl": str(smtp_ssl).lower(),
-        "pool_capacity_warning": str(warn_cap),
-        "pool_capacity_critical": str(crit_cap),
-        "drive_temp_warning_c": str(warn_temp),
-        "drive_temp_critical_c": str(crit_temp),
-        "nvme_percentage_used_warning": str(warn_nvme),
-        "nvme_percentage_used_critical": str(crit_nvme),
-        "scrub_age_warning_days": str(scrub_days),
-        "collection_failure_threshold": str(fail_threshold),
-        "metric_retention_days": str(metric_days),
-        "snapshot_retention_days": str(snapshot_days),
-        "full_snapshot_interval_minutes": str(snapshot_interval),
-    }
-    for key, value in values.items():
-        set_setting(db, key, value)
-    if clean_smtp_password:
-        set_setting(db, "smtp_password", clean_smtp_password, secret=True)
+    if section in {"all", "history"}:
+        metric_days = bounded_int(metric_retention_days, "Metric retention", 1, 3650)
+        snapshot_days = bounded_int(snapshot_retention_days, "Snapshot retention", 1, 3650)
+        snapshot_interval = bounded_int(
+            full_snapshot_interval_minutes, "Full snapshot interval", 1, 1440
+        )
+
+        history_values = {
+            "metric_retention_days": str(metric_days),
+            "snapshot_retention_days": str(snapshot_days),
+            "full_snapshot_interval_minutes": str(snapshot_interval),
+        }
+        for key, value in history_values.items():
+            set_setting(db, key, value)
+        saved_sections.append("History")
+
     db.commit()
-    return RedirectResponse("/settings", status_code=303)
 
+    if section == "all":
+        redirect_tab = "smtp"
+        message = "Settings saved."
+    else:
+        redirect_tab = section
+        message = f"{saved_sections[0]} settings saved."
+
+    return RedirectResponse(
+        "/settings?tab=" + quote(redirect_tab) + "&message=" + quote(message),
+        status_code=303,
+    )
 
 @app.post("/settings/tls")
 async def save_tls_settings(
@@ -1804,7 +1846,7 @@ async def save_tls_settings(
     set_setting(db, "tls_acme_ca", ca_url)
     db.commit()
     return RedirectResponse(
-        "/settings?message=" + quote("TLS configuration applied successfully."),
+        "/settings?tab=tls&message=" + quote("TLS configuration applied successfully."),
         status_code=303,
     )
 
@@ -1824,4 +1866,4 @@ def test_email(
         result = "SMTP test message sent."
     except Exception as exc:
         result = f"SMTP test failed: {exc}"
-    return RedirectResponse("/settings?message=" + quote(result), status_code=303)
+    return RedirectResponse("/settings?tab=smtp&message=" + quote(result), status_code=303)
