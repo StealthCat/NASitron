@@ -71,6 +71,10 @@ WEB_CONCURRENCY = _env_int("WEB_CONCURRENCY", 1)
 
 DEFAULT_SETTINGS = {
     "smtp_enabled": "false",
+    "email_transport": "smtp",
+    "mailjet_api_url": "https://api.mailjet.com/v3.1/send",
+    "mailjet_api_key": "",
+    "mailjet_secret_key": "",
     "smtp_host": "",
     "smtp_port": "587",
     "smtp_username": "",
@@ -96,7 +100,7 @@ DEFAULT_SETTINGS = {
     "tls_acme_ca": "https://acme-v02.api.letsencrypt.org/directory",
 }
 
-SECRET_SETTING_KEYS = {"smtp_password"}
+SECRET_SETTING_KEYS = {"smtp_password", "mailjet_api_key", "mailjet_secret_key"}
 
 
 def validate_runtime_config() -> None:
