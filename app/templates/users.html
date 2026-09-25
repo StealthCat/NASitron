@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Users · NASitron{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-title-wrap">
+    <div class="hero-kicker">Access Control</div>
+    <h1>Users</h1>
+    <p class="muted">Manage local NASitron accounts, administrator access, account state, and passwords.</p>
+  </div>
+  <a class="button primary" href="/users/new">Add User</a>
+</div>
+
+{% if request.query_params.get('message') %}
+<div class="message">{{ request.query_params.get('message') }}</div>
+{% endif %}
+
+<section class="grid three">
+  <div class="metric-card">
+    <div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+    <div><div class="metric-label">Accounts</div><div class="metric-value">{{ users|length }}</div></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-icon good"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg></div>
+    <div><div class="metric-label">Enabled admins</div><div class="metric-value">{{ enabled_admins }}</div></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M12 1v22M5 5h14M5 19h14"/><circle cx="12" cy="12" r="4"/></svg></div>
+    <div><div class="metric-label">Auth source</div><div class="metric-value" style="font-size:1.1rem">Local</div><div class="metric-sub">Database-backed accounts</div></div>
+  </div>
+</section>
+
+<section class="section-block panel flush scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Role</th>
+        <th>Status</th>
+        <th>Last login</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for user in users %}
+      <tr>
+        <td>
+          <strong>{{ user.username }}</strong>
+          {% if user.id == request.state.current_user.id %}<span class="badge">You</span>{% endif %}
+        </td>
+        <td><span class="badge {{ 'good' if user.is_admin else '' }}">{{ "Administrator" if user.is_admin else "User" }}</span></td>
+        <td><span class="badge {{ 'good' if user.enabled else 'offline' }}">{{ "Enabled" if user.enabled else "Disabled" }}</span></td>
+        <td>{{ user.last_login_at|fmt_dt if user.last_login_at else "Never" }}</td>
+        <td>{{ user.created_at|fmt_dt }}</td>
+        <td><a class="button" href="/users/{{ user.id }}/edit">Edit</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No users configured.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="section-block panel">
+  <div class="panel-title"><h2>Bootstrap administrator</h2><span class="badge">Migration-safe</span></div>
+  <p class="muted">On an empty user database, NASitron creates the first administrator from <code>NASITRON_WEB_USERNAME</code> and <code>NASITRON_WEB_PASSWORD</code>. Once any user exists, the database is authoritative and changing a password here is not overwritten on restart.</p>
+</section>
+{% endblock %}
