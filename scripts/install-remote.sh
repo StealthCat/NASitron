@@ -669,7 +669,7 @@ PY
   if [[ "$ENROLL_INSECURE" -eq 1 ]]; then
     CURL_ENROLL+=(-k)
   fi
-  ENROLL_RESPONSE="$("\${CURL_ENROLL[@]}" "$ENROLL_URL")" || die "NASitron enrollment callback failed"
+  ENROLL_RESPONSE="$("${CURL_ENROLL[@]}" "$ENROLL_URL")" || die "NASitron enrollment callback failed"
   SERVER_ID="$(python3 - "$ENROLL_RESPONSE" <<'PY'
 import json
 import sys
