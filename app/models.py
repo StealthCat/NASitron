@@ -97,3 +97,21 @@ class Setting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
     secret: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+
+class MaintenanceAction(Base):
+    __tablename__ = "maintenance_actions"
+    __table_args__ = (Index("ix_maintenance_server_time", "server_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
+    action: Mapped[str] = mapped_column(String(80))
+    pool: Mapped[str] = mapped_column(String(255), default="")
+    old_device: Mapped[str] = mapped_column(Text, default="")
+    new_device: Mapped[str] = mapped_column(Text, default="")
+    command: Mapped[str] = mapped_column(Text, default="")
+    success: Mapped[bool] = mapped_column(Boolean, default=False)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
