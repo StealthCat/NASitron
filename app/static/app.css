@@ -262,6 +262,7 @@ button, .button {
   transition: .16s ease;
 }
 button:hover, .button:hover { border-color: rgba(252,24,89,.52); color: #fff; transform: translateY(-1px); }
+button:disabled, .button:disabled { opacity: .45; cursor: not-allowed; transform: none; filter: saturate(.5); }
 .button.primary, button.primary {
   color: #fff;
   border-color: var(--accent);
