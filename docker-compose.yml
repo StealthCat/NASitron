@@ -3,24 +3,55 @@ services:
     build: .
     container_name: nasitron
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8080:8080"
+    expose:
+      - "8080"
     environment:
       NASITRON_SECRET_KEY: "${NASITRON_SECRET_KEY:?Set NASITRON_SECRET_KEY in .env}"
       NASITRON_WEB_USERNAME: "${NASITRON_WEB_USERNAME:?Set NASITRON_WEB_USERNAME in .env}"
       NASITRON_WEB_PASSWORD: "${NASITRON_WEB_PASSWORD:?Set NASITRON_WEB_PASSWORD in .env}"
       NASITRON_DATA_DIR: /data
       NASITRON_TIMEZONE: "${NASITRON_TIMEZONE:-UTC}"
+      NASITRON_TLS_HOST: "${NASITRON_TLS_HOST:-localhost}"
+      NASITRON_CADDY_ADMIN_URL: "http://caddy:2019/load"
+      NASITRON_CADDY_SHARED_TLS_DIR: "/nasitron-data/tls"
       NASITRON_ALLOW_INSECURE_HTTP: "${NASITRON_ALLOW_INSECURE_HTTP:-false}"
       NASITRON_ALLOW_INSECURE_MAINTENANCE: "${NASITRON_ALLOW_INSECURE_MAINTENANCE:-false}"
+      NASITRON_SESSION_TTL_SECONDS: "${NASITRON_SESSION_TTL_SECONDS:-43200}"
       NASITRON_COLLECTOR_WORKERS: "${NASITRON_COLLECTOR_WORKERS:-2}"
       NASITRON_MAX_METRIC_POINTS: "${NASITRON_MAX_METRIC_POINTS:-1200}"
       NASITRON_MAX_REQUEST_BODY_BYTES: "${NASITRON_MAX_REQUEST_BODY_BYTES:-262144}"
       NASITRON_REMOTE_HELPER_PATH: "${NASITRON_REMOTE_HELPER_PATH:-/usr/local/sbin/nasitron-root-helper}"
-      FORWARDED_ALLOW_IPS: "${NASITRON_FORWARDED_ALLOW_IPS:-127.0.0.1}"
+      FORWARDED_ALLOW_IPS: "*"
       WEB_CONCURRENCY: "1"
     volumes:
       - nasitron_data:/data
 
+  caddy:
+    image: caddy:2.11.4-alpine
+    container_name: nasitron-caddy
+    restart: unless-stopped
+    depends_on:
+      - nasitron
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -s /nasitron-data/tls/Caddyfile ]; then
+          exec caddy run --config /nasitron-data/tls/Caddyfile --adapter caddyfile
+        fi
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    environment:
+      NASITRON_TLS_HOST: "${NASITRON_TLS_HOST:-localhost}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile.bootstrap:/etc/caddy/Caddyfile:ro
+      - nasitron_data:/nasitron-data:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
 volumes:
   nasitron_data:
+  caddy_data:
+  caddy_config:

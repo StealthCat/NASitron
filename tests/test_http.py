@@ -1,4 +1,3 @@
-import base64
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
@@ -6,25 +5,74 @@ from fastapi.testclient import TestClient
 from app.db import SessionLocal
 from app.main import app
 from app.models import Metric, Server
+from app.security import csrf_token
 
 
-def _auth_header() -> dict[str, str]:
-    token = base64.b64encode(b"ci-admin:ci-password-strong").decode("ascii")
-    return {"Authorization": f"Basic {token}"}
+def _login(client: TestClient) -> None:
+    response = client.post(
+        "/login",
+        data={
+            "username": "ci-admin",
+            "password": "ci-password-strong",
+            "csrf_token": csrf_token(),
+            "next": "/",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "nasitron_session" in response.cookies
 
 
-def test_healthz_is_public_but_dashboard_requires_authentication():
+def test_healthz_is_public_and_dashboard_uses_form_login():
     with TestClient(app) as client:
         assert client.get("/healthz").status_code == 200
-        assert client.get("/").status_code == 401
-        assert client.get("/", headers=_auth_header()).status_code == 200
+        response = client.get("/", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/login")
+
+        login_page = client.get("/login")
+        assert login_page.status_code == 200
+        assert 'name="username"' in login_page.text
+        assert "WWW-Authenticate" not in login_page.headers
+
+        _login(client)
+        assert client.get("/").status_code == 200
+
+
+def test_bad_login_is_rejected_without_basic_auth_challenge():
+    with TestClient(app) as client:
+        response = client.post(
+            "/login",
+            data={
+                "username": "ci-admin",
+                "password": "wrong-password",
+                "csrf_token": csrf_token(),
+                "next": "/",
+            },
+        )
+        assert response.status_code == 401
+        assert "Invalid username or password" in response.text
+        assert "WWW-Authenticate" not in response.headers
+
+
+def test_logout_clears_session():
+    with TestClient(app) as client:
+        _login(client)
+        response = client.post(
+            "/logout",
+            data={"csrf_token": csrf_token()},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login"
+        assert client.get("/", follow_redirects=False).status_code == 303
 
 
 def test_mutating_route_rejects_bad_csrf():
     with TestClient(app) as client:
+        _login(client)
         response = client.post(
             "/settings",
-            headers=_auth_header(),
             data={"csrf_token": "not-valid"},
         )
         assert response.status_code == 403
@@ -59,9 +107,9 @@ def test_metric_history_is_bounded_and_keeps_latest_sample():
         server_id = server.id
 
     with TestClient(app) as client:
+        _login(client)
         response = client.get(
             f"/api/servers/{server_id}/metrics?name=system.load1&hours=24",
-            headers=_auth_header(),
         )
         assert response.status_code == 200
         payload = response.json()
