@@ -10,7 +10,7 @@ from app.db import SessionLocal
 from app.main import app
 from app.models import CurrentState, Metric, RemoteEnrollment, Server
 from app.security import csrf_token
-from app.settings_store import set_setting
+from app.settings_store import get_setting, set_setting
 
 
 def _login(client: TestClient) -> None:
@@ -368,4 +368,59 @@ def test_remote_enrollment_callback_creates_server_and_is_one_time():
                 server = db.get(Server, created_server_id)
                 if server:
                     db.delete(server)
+            db.commit()
+
+
+
+def test_settings_page_uses_distinct_tabs_and_section_saves_are_isolated():
+    with TestClient(app) as client:
+        _login(client)
+
+        with SessionLocal() as db:
+            set_setting(db, "smtp_host", "smtp.keep.example")
+            set_setting(db, "pool_capacity_warning", "81")
+            set_setting(db, "pool_capacity_critical", "91")
+            set_setting(db, "metric_retention_days", "90")
+            db.commit()
+
+        response = client.get("/settings?tab=history")
+        assert response.status_code == 200
+        assert 'role="tablist"' in response.text
+        for label in ("Email", "Health", "History", "Enrollment", "HTTPS"):
+            assert f">{label}<" in response.text
+        assert 'data-settings-panel="history"' in response.text
+        assert 'id="panel-history"' in response.text
+        assert 'id="panel-smtp"' in response.text
+        assert 'id="panel-tls"' in response.text
+
+        save = client.post(
+            "/settings",
+            data={
+                "csrf_token": csrf_token(),
+                "section": "history",
+                "metric_retention_days": "120",
+                "snapshot_retention_days": "45",
+                "full_snapshot_interval_minutes": "20",
+            },
+            follow_redirects=False,
+        )
+        assert save.status_code == 303
+        assert save.headers["location"].startswith(
+            "/settings?tab=history&message="
+        )
+
+        with SessionLocal() as db:
+            assert get_setting(db, "metric_retention_days") == "120"
+            assert get_setting(db, "snapshot_retention_days") == "45"
+            assert get_setting(db, "full_snapshot_interval_minutes") == "20"
+            assert get_setting(db, "smtp_host") == "smtp.keep.example"
+            assert get_setting(db, "pool_capacity_warning") == "81"
+            assert get_setting(db, "pool_capacity_critical") == "91"
+
+            set_setting(db, "smtp_host", "")
+            set_setting(db, "pool_capacity_warning", "80")
+            set_setting(db, "pool_capacity_critical", "90")
+            set_setting(db, "metric_retention_days", "90")
+            set_setting(db, "snapshot_retention_days", "30")
+            set_setting(db, "full_snapshot_interval_minutes", "15")
             db.commit()
