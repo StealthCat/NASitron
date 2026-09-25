@@ -10,6 +10,10 @@ PUBLIC_KEY="${NASITRON_SSH_PUBLIC_KEY:-}"
 PUBLIC_KEY_FILE=""
 GENERATED_PRIVATE_KEY=""
 GENERATED_KEY=0
+ENROLL_URL="${NASITRON_ENROLL_URL:-}"
+ENROLL_SECRET="${NASITRON_ENROLL_SECRET:-}"
+ENROLL_INSECURE=0
+ENROLLMENT_MANAGED_KEY=0
 SKIP_PACKAGES=0
 SKIP_SSH_HARDENING=0
 QUIET=0
@@ -51,6 +55,10 @@ Options:
   --user USER               Remote monitoring account (default: nasitron).
   --helper-path PATH        Root helper install path
                             (default: /usr/local/sbin/nasitron-root-helper).
+  --enroll-url URL          NASitron one-time enrollment callback URL.
+  --enroll-secret SECRET    One-time HMAC enrollment secret.
+  --enroll-insecure         Allow callback TLS verification bypass. Intended only
+                            for NASitron internal-CA enrollment commands.
   --skip-packages           Do not apt-install OpenSSH/ZFS/SMART dependencies.
   --skip-ssh-hardening      Do not install the per-user sshd hardening drop-in.
   --quiet                   Reduce installer output.
@@ -91,6 +99,20 @@ while [[ $# -gt 0 ]]; do
       HELPER_PATH="$2"
       shift 2
       ;;
+    --enroll-url)
+      [[ $# -ge 2 ]] || die "--enroll-url requires a value"
+      ENROLL_URL="$2"
+      shift 2
+      ;;
+    --enroll-secret)
+      [[ $# -ge 2 ]] || die "--enroll-secret requires a value"
+      ENROLL_SECRET="$2"
+      shift 2
+      ;;
+    --enroll-insecure)
+      ENROLL_INSECURE=1
+      shift
+      ;;
     --skip-packages)
       SKIP_PACKAGES=1
       shift
@@ -116,6 +138,11 @@ done
 [[ "$EUID" -eq 0 ]] || die "Run this installer as root (for example: sudo $0 ...)"
 [[ "$NASITRON_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "Invalid monitoring username: $NASITRON_USER"
 [[ "$HELPER_PATH" == /* && "$HELPER_PATH" != *[[:space:]]* ]] || die "--helper-path must be an absolute path without whitespace"
+if [[ -n "$ENROLL_URL" || -n "$ENROLL_SECRET" ]]; then
+  [[ -n "$ENROLL_URL" && -n "$ENROLL_SECRET" ]] || die "--enroll-url and --enroll-secret must be supplied together"
+  [[ "$ENROLL_URL" == https://* || "$ENROLL_URL" == http://* ]] || die "--enroll-url must be HTTP(S)"
+  [[ "$ENROLL_SECRET" =~ ^[A-Za-z0-9_-]{32,128}$ ]] || die "--enroll-secret is malformed"
+fi
 
 TMP_DIR="$(mktemp -d -t nasitron-install.XXXXXX)"
 
@@ -158,6 +185,9 @@ else
   printf '%s\n' "$PUBLIC_KEY" > "$KEY_CHECK"
   chmod 0600 "$KEY_CHECK"
   ssh-keygen -l -f "$KEY_CHECK" >/dev/null 2>&1 || die "The supplied SSH public key is not valid"
+  if [[ "$PUBLIC_KEY" == *" nasitron-enrollment-"* ]]; then
+    ENROLLMENT_MANAGED_KEY=1
+  fi
 fi
 
 if ! getent passwd "$NASITRON_USER" >/dev/null; then
@@ -182,9 +212,9 @@ touch "$AUTHORIZED_KEYS"
 chown "$NASITRON_USER:$USER_GROUP" "$AUTHORIZED_KEYS"
 chmod 0600 "$AUTHORIZED_KEYS"
 
-if [[ "$GENERATED_KEY" -eq 1 ]]; then
+if [[ "$GENERATED_KEY" -eq 1 || "$ENROLLMENT_MANAGED_KEY" -eq 1 ]]; then
   TMP_AUTHORIZED="$TMP_DIR/authorized_keys"
-  grep -vE '[[:space:]]nasitron-installer-generated$' "$AUTHORIZED_KEYS" > "$TMP_AUTHORIZED" || true
+  grep -vE '[[:space:]](nasitron-installer-generated|nasitron-enrollment-[A-Za-z0-9_-]+)$' "$AUTHORIZED_KEYS" > "$TMP_AUTHORIZED" || true
   install -o "$NASITRON_USER" -g "$USER_GROUP" -m 0600 "$TMP_AUTHORIZED" "$AUTHORIZED_KEYS"
 fi
 
@@ -592,11 +622,75 @@ for hostkey in /etc/ssh/ssh_host_*_key.pub; do
   FINGERPRINTS+="$(ssh-keygen -lf "$hostkey")"$'\n'
 done
 
+HOST_KEY_FINGERPRINT=""
+if [[ -r /etc/ssh/ssh_host_ed25519_key.pub ]]; then
+  HOST_KEY_FINGERPRINT="$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 | awk '{print $2}')"
+else
+  first_host_key="$(find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key.pub' | sort | head -n1 || true)"
+  if [[ -n "$first_host_key" ]]; then
+    HOST_KEY_FINGERPRINT="$(ssh-keygen -lf "$first_host_key" -E sha256 | awk '{print $2}')"
+  fi
+fi
+
+if [[ -n "$ENROLL_URL" ]]; then
+  log "Registering this NAS with NASitron"
+  ENROLL_PAYLOAD="$TMP_DIR/enrollment.json"
+  python3 - "$HOST_FQDN" "$HOST_IP" "$SSH_PORT" "$NASITRON_USER" "$HOST_KEY_FINGERPRINT" > "$ENROLL_PAYLOAD" <<'PY'
+import json
+import sys
+
+hostname, host, port, username, fingerprint = sys.argv[1:]
+if not host or host == "unknown":
+    host = hostname
+print(json.dumps({
+    "hostname": hostname,
+    "host": host,
+    "port": int(port),
+    "username": username,
+    "host_key_fingerprint": fingerprint,
+}, separators=(",", ":"), sort_keys=True))
+PY
+  ENROLL_SIGNATURE="$(python3 - "$ENROLL_SECRET" "$ENROLL_PAYLOAD" <<'PY'
+import hashlib
+import hmac
+import pathlib
+import sys
+
+secret, path = sys.argv[1:]
+payload = pathlib.Path(path).read_bytes()
+print(hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest())
+PY
+)"
+  CURL_ENROLL=(curl -fsS -X POST
+    -H "Content-Type: application/json"
+    -H "X-NASitron-Enrollment-Signature: $ENROLL_SIGNATURE"
+    --data-binary "@$ENROLL_PAYLOAD"
+  )
+  if [[ "$ENROLL_INSECURE" -eq 1 ]]; then
+    CURL_ENROLL+=(-k)
+  fi
+  ENROLL_RESPONSE="$("\${CURL_ENROLL[@]}" "$ENROLL_URL")" || die "NASitron enrollment callback failed"
+  SERVER_ID="$(python3 - "$ENROLL_RESPONSE" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.loads(sys.argv[1])
+except Exception:
+    raise SystemExit(1)
+if payload.get("status") != "registered" or not payload.get("server_id"):
+    raise SystemExit(1)
+print(payload["server_id"])
+PY
+)" || die "NASitron enrollment response was invalid"
+  log "NASitron registration complete (server ID $SERVER_ID)"
+fi
+
 cat <<EOF
 
 NASitron remote NAS setup complete.
 
-Use these values when adding the server in NASitron:
+Connection details:
   Hostname:        $HOST_FQDN
   Detected IP:     $HOST_IP
   SSH port:        $SSH_PORT
@@ -605,13 +699,17 @@ Use these values when adding the server in NASitron:
   SMART via sudo:  enabled/recommended
   Root helper:     $HELPER_PATH
 
-Paste the PRIVATE key corresponding to the public key supplied to this installer
-into NASitron's server form. Do not paste the public key into that field.
-
-SSH host-key fingerprints (verify one through this trusted console before enabling
-strict host-key checking in NASitron):
+SSH host-key fingerprints:
 $FINGERPRINTS
 EOF
+
+if [[ -n "$ENROLL_URL" ]]; then
+  cat <<EOF
+
+This NAS has been registered automatically with NASitron.
+Refresh the Servers page if it does not appear immediately.
+EOF
+fi
 
 if [[ "$GENERATED_KEY" -eq 1 ]]; then
   cat <<EOF
