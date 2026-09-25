@@ -472,9 +472,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
     pools = parse_pool_list(raw.get("zpool_list", {}).get("stdout", ""))
     pool_names = {p["name"] for p in pools}
     iostat = parse_iostat(raw.get("zpool_iostat", {}).get("stdout", ""), pool_names)
-    pool_properties = parse_property_rows(
-        raw.get("zpool_get", {}).get("stdout", "")
-    )
+    pool_property_results = raw.get("zpool_get", {})
     dataset_properties = parse_property_rows(
         raw.get("zfs_get", {}).get("stdout", "")
     )
@@ -489,7 +487,6 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         "loadavg": "system.load",
         "meminfo": "system.memory",
         "zfs_version": "zfs.version",
-        "zpool_get": "zfs.pool_properties",
         "zfs_list": "zfs.datasets",
         "zfs_get": "zfs.dataset_properties",
         "arcstats": "zfs.arc",
@@ -569,7 +566,29 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
 
         pool["io"] = iostat.get(name, {})
         pool["status"] = parsed
-        pool["properties"] = pool_properties.get(name, [])
+
+        property_result = pool_property_results.get(name, {})
+        property_valid = (
+            property_result.get("exit") == 0
+            and not property_result.get("stdout_truncated")
+            and not property_result.get("stderr_truncated")
+        )
+        if property_valid:
+            pool["properties"] = parse_property_rows(
+                property_result.get("stdout", "")
+            ).get(name, [])
+            freshness[f"pool.properties:{name}"] = sampled_at
+        else:
+            pool["properties"] = []
+            subsystem = f"pool.properties:{name}"
+            failed_subsystems.add(subsystem)
+            reason = (
+                property_result.get("stderr")
+                or property_result.get("stdout")
+                or "Pool property query failed."
+            )
+            errors.append({"subsystem": subsystem, "message": reason[:1000]})
+
         if json_valid or text_valid:
             pool_status_ok.append(name)
             freshness[f"pool.status:{name}"] = sampled_at
