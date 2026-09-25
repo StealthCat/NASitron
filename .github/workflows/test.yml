@@ -28,6 +28,20 @@ jobs:
         run: |
           bash -n scripts/install-remote.sh
           ./scripts/install-remote.sh --help >/dev/null
+          cat scripts/install-remote.sh | bash -s -- --help >/dev/null
+          python - <<'PY'
+          from pathlib import Path
+          import py_compile
+          import tempfile
+
+          text = Path("scripts/install-remote.sh").read_text()
+          start = text.index("__NASITRON_ROOT_HELPER__'\n") + len("__NASITRON_ROOT_HELPER__'\n")
+          end = text.index("\n__NASITRON_ROOT_HELPER__\n", start)
+          with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as handle:
+              handle.write(text[start:end])
+              helper_path = handle.name
+          py_compile.compile(helper_path, doraise=True)
+          PY
       - run: python -m pytest -q
       - name: Validate Compose
         run: |
