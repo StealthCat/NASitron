@@ -1406,7 +1406,7 @@ async def save_tls_settings(
         bad_request("TLS mode must be internal, manual, or acme.")
 
     domain = tls_domain.strip()
-    if mode in {"internal", "acme"}:
+    if mode == "acme":
         domain = validate_host(domain, "TLS hostname")
     elif domain:
         domain = validate_host(domain, "TLS hostname")
