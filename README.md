@@ -425,3 +425,10 @@ The Settings page now points administrators to Add Server for automatic enrollme
 Automatic registration now occurs immediately after the remote account, SSH configuration, root helper and sudo policy are installed. ZFS inventory, block-device inventory and diagnostic dmesg checks run afterward and are warnings rather than blockers, so a diagnostic permission limitation can no longer leave Add Server stuck waiting despite a usable SSH setup.
 
 The enrollment callback now retries transient failures and has explicit connect/request timeouts. Add Server continues polling but changes its status text after roughly 30 seconds to direct the administrator to the installer terminal for the explicit registration-complete line or callback error.
+
+
+## NASitron 0.6.13 tabbed settings
+
+The Settings page is organized into independent tabs for **Email**, **Health**, **History**, **Enrollment**, and **HTTPS**. Email, health-threshold, and history-retention forms save only their own settings so changing one category cannot overwrite values in another. TLS keeps its dedicated apply workflow, and Enrollment links to the one-time automatic Add Server flow.
+
+The active tab is reflected in the URL and preserved after Email/Health/History saves, SMTP tests, and TLS changes.
