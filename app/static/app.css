@@ -468,3 +468,93 @@ pre {
   font-size: .75rem;
 }
 .login-security .status-orb { flex: 0 0 9px; width: 9px; height: 9px; }
+
+
+/* Add/Edit server */
+.server-form-shell {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+.add-server-head { margin-bottom: 2px; }
+.server-connection-panel { width: 100%; }
+.collection-policy-title { margin-top: 22px; }
+.form-actions { margin-top: 18px; }
+
+.prep-accordion {
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+.prep-accordion-summary {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  cursor: pointer;
+  user-select: none;
+}
+.prep-accordion-summary::-webkit-details-marker { display: none; }
+.prep-accordion-summary::marker { display: none; content: ""; }
+.prep-summary-copy h2 { margin: 0 0 4px; }
+.prep-summary-copy p { margin: 0; }
+.prep-summary-copy .hero-kicker { margin-bottom: 6px; }
+.prep-summary-meta {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 0 0 auto;
+}
+.accordion-chevron {
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  transition: transform .18s ease, color .18s ease;
+}
+.prep-accordion[open] .accordion-chevron {
+  transform: rotate(180deg);
+  color: var(--accent-bright);
+}
+.prep-accordion-body {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 20px;
+  border-top: 1px solid var(--border-soft);
+  background: rgba(6,10,16,.18);
+}
+.prep-meta-grid { margin-bottom: 2px; }
+.prep-step-card {
+  display: grid;
+  grid-template-columns: 38px minmax(0,1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 15px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: rgba(8,13,20,.48);
+}
+.prep-step-card h3 { margin: 2px 0 7px; }
+.prep-step-number {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 760;
+  background: var(--accent);
+  box-shadow: 0 0 14px rgba(252,24,89,.24);
+}
+.installer-command { margin-top: 10px; line-height: 1.55; }
+.break-anywhere { word-break: break-all; }
+.mono-small { font-family: "SFMono-Regular", Consolas, monospace; font-size: .75rem !important; }
+.prep-last-note { margin: 10px 0 0; }
+
+@media (max-width: 700px) {
+  .prep-accordion-summary { flex-direction: column; align-items: stretch; }
+  .prep-summary-meta { justify-content: space-between; }
+  .prep-step-card { grid-template-columns: 1fr; }
+}
