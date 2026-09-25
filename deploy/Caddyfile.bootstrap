@@ -2,8 +2,14 @@
     admin 0.0.0.0:2019
 }
 
-{$NASITRON_TLS_HOST:localhost} {
-    tls internal
+http:// {
+    redir https://{host}{uri} permanent
+}
+
+https:// {
+    tls internal {
+        on_demand
+    }
     encode zstd gzip
     reverse_proxy nasitron:8080
 }
