@@ -15,6 +15,22 @@
     <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else 'good') }}"><span style="width:{{ [cap,100]|min }}%"></span></div>
     <div class="server-card-metrics"><div class="mini-stat"><span>Used</span><strong>{{ pool.alloc_bytes|human_bytes }}</strong></div><div class="mini-stat"><span>Free</span><strong>{{ pool.free_bytes|human_bytes }}</strong></div><div class="mini-stat"><span>Capacity</span><strong>{{ "%.1f"|format(cap) }}%</strong></div></div>
     {% if pool.status.scan %}<div class="subtle" style="margin:10px 0"><strong>Scan:</strong> {{ pool.status.scan }}</div>{% endif %}
+    {% set configured_pool_props = pool.properties|selectattr('is_set')|list %}
+    {% if pool.properties %}
+    <details class="property-drawer">
+      <summary><strong>ZFS pool options</strong><span class="badge">{{ configured_pool_props|length }} configured</span><span class="subtle">{{ pool.properties|length }} total</span></summary>
+      <div class="scroll property-table-wrap">
+        <table>
+          <thead><tr><th>Property</th><th>Value</th><th>Source</th></tr></thead>
+          <tbody>
+          {% for prop in pool.properties %}
+            <tr class="{{ 'property-configured' if prop.is_set else '' }}"><td><code>{{ prop.property }}</code></td><td>{{ prop.value }}</td><td><span class="badge {{ 'good' if prop.is_set else 'offline' }}">{{ prop.source }}</span></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endif %}
     {% if pool.status.vdevs %}
     <div class="scroll"><table><thead><tr><th>Role</th><th>Vdev / device</th><th>State</th><th>Read</th><th>Write</th><th>Checksum</th></tr></thead><tbody>
     {% for vdev in pool.status.vdevs %}
