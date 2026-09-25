@@ -182,3 +182,53 @@ def test_build_snapshot_marks_partial_collection_and_current_smart():
     assert snapshot["collection"]["partial"] is True
     assert snapshot["drives"][0]["smart"]["smart_passed"] is False
     assert snapshot["drives"][0]["smart"]["stale"] is False
+
+
+
+def test_build_snapshot_keeps_all_25_physical_disks():
+    def ok(stdout=""):
+        return {
+            "stdout": stdout,
+            "stderr": "",
+            "exit": 0,
+            "stdout_truncated": False,
+            "stderr_truncated": False,
+        }
+
+    blockdevices = [
+        {
+            "name": f"sd{chr(ord('a') + index)}",
+            "kname": f"sd{chr(ord('a') + index)}",
+            "path": f"/dev/sd{chr(ord('a') + index)}",
+            "type": "disk",
+            "size": 1_000_000_000_000,
+            "rota": 1,
+            "mountpoints": [],
+        }
+        for index in range(25)
+    ]
+    raw = {
+        "smart_sampled": False,
+        "hostname": ok("nas\n"),
+        "os_release": ok('PRETTY_NAME="Ubuntu"\n'),
+        "kernel": ok("6.8\n"),
+        "uptime": ok("1000 0\n"),
+        "loadavg": ok("1 2 3 1/1 1\n"),
+        "meminfo": ok("MemTotal: 1000 kB\nMemAvailable: 500 kB\n"),
+        "zfs_version": ok("zfs-2.2\n"),
+        "zpool_list": ok(""),
+        "zfs_list": ok(""),
+        "arcstats": ok(""),
+        "zpool_iostat": ok(""),
+        "lsblk": ok(__import__("json").dumps({"blockdevices": blockdevices})),
+        "services": ok("zfs.target=active\n"),
+        "zpool_status": {},
+        "zpool_status_json": {},
+        "smart": {},
+        "smart_inventory_ok": True,
+        "smart_attempted_count": 0,
+    }
+    snapshot = build_snapshot(raw, datetime(2026, 9, 25, 12, 0, 0))
+    assert len(snapshot["drives"]) == 25
+    assert snapshot["drives"][0]["path"] == "/dev/sda"
+    assert snapshot["drives"][-1]["path"] == "/dev/sdy"
