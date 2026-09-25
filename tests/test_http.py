@@ -26,6 +26,13 @@ def _login(client: TestClient) -> None:
 def test_healthz_is_public_and_dashboard_uses_form_login():
     with TestClient(app) as client:
         assert client.get("/healthz").status_code == 200
+        installer = client.get("/install-remote.sh")
+        assert installer.status_code == 200
+        assert installer.headers["content-type"].startswith("text/x-shellscript")
+        assert "attachment;" in installer.headers["content-disposition"]
+        assert installer.text.startswith("#!/usr/bin/env bash")
+        assert "__NASITRON_ROOT_HELPER__" in installer.text
+
         response = client.get("/", follow_redirects=False)
         assert response.status_code == 303
         assert response.headers["location"].startswith("/login")
