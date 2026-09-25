@@ -1,11 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ "Edit " ~ server.name if server else "Add server" }} · NASitron{% endblock %}
 {% block content %}
-<div class="hero">
-  <h1>{{ "Edit server" if server else "Add ZFS server" }}</h1>
-  <div class="muted">NASitron connects outbound over SSH; no agent is installed on the storage server.</div>
+<div class="page-head">
+  <div class="page-title-wrap">
+    <div class="hero-kicker">SSH Monitoring</div>
+    <h1>{{ "Edit Server" if server else "Add ZFS Server" }}</h1>
+    <p class="muted">NASitron connects outbound over SSH; no agent is installed on the storage server.</p>
+  </div>
 </div>
-<form method="post" class="panel" style="max-width:900px">
+<form method="post" class="panel accent-panel" style="max-width:980px">
+  <div class="panel-title"><h2>Connection</h2><span class="badge">Agentless</span></div>
   <div class="grid two">
     <div class="field"><label>Name</label><input name="name" required value="{{ server.name if server else '' }}" placeholder="Primary NAS"></div>
     <div class="field"><label>Host / IP</label><input name="host" required value="{{ server.host if server else '' }}" placeholder="nas.example.net"></div>
@@ -28,16 +32,17 @@
     <label>SSH password {% if server %}(leave blank to keep existing){% endif %}</label><input type="password" name="password">
   </div>
 
+  <div class="panel-title" style="margin-top:22px"><h2>Collection Policy</h2><span class="badge">Telemetry</span></div>
   <div class="grid two">
     <div class="field"><label>Poll interval (seconds, minimum 15)</label><input type="number" min="15" name="poll_interval_seconds" value="{{ server.poll_interval_seconds if server else 60 }}"></div>
     <div class="field"><label>SMART/NVMe detail interval (minutes)</label><input type="number" min="1" name="smart_interval_minutes" value="{{ server.smart_interval_minutes if server else 15 }}"></div>
   </div>
-  <label class="checkbox"><input type="checkbox" name="sudo_for_smart" {{ 'checked' if not server or server.sudo_for_smart else '' }}> Use <code>sudo -n</code> for smartctl (recommended)</label>
-  <label class="checkbox"><input type="checkbox" name="strict_host_key" {{ 'checked' if server and server.strict_host_key else '' }}> Require host key to already exist in NASitron known_hosts (strict mode)</label>
+  <label class="checkbox"><input type="checkbox" name="sudo_for_smart" {{ 'checked' if not server or server.sudo_for_smart else '' }}> Use <code>sudo -n</code> for smartctl</label>
+  <label class="checkbox"><input type="checkbox" name="strict_host_key" {{ 'checked' if server and server.strict_host_key else '' }}> Require host key to already exist in NASitron known_hosts</label>
   <label class="checkbox"><input type="checkbox" name="enabled" {{ 'checked' if not server or server.enabled else '' }}> Enable scheduled monitoring</label>
-  <p class="subtle">With strict mode off, NASitron uses trust-on-first-use and stores the host key in its persistent data volume.</p>
+  <p class="subtle">With strict mode off, NASitron uses trust-on-first-use and stores the observed host key in its persistent data volume.</p>
   <div class="row" style="margin-top:18px">
-    <button class="primary" type="submit">{{ "Save changes" if server else "Add server" }}</button>
+    <button class="primary" type="submit">{{ "Save Changes" if server else "Add Server" }}</button>
     <a class="button" href="{{ '/servers/' ~ server.id if server else '/' }}">Cancel</a>
   </div>
 </form>
