@@ -138,6 +138,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     online_servers = 0
     failed_drives = 0
     degraded_pools = 0
+    maintenance_server = None
 
     for server in servers:
         snapshot = latest_snapshot(db, server.id)
@@ -157,12 +158,16 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             pool_rows.append({"server": server, "pool": pool})
             if str(pool.get("health", "")).upper() != "ONLINE":
                 degraded_pools += 1
+                if maintenance_server is None:
+                    maintenance_server = server
 
         for drive in snapshot.get("drives", []):
             drive_rows.append({"server": server, "drive": drive})
             smart = drive.get("smart") or {}
             if smart.get("smart_passed") is False:
                 failed_drives += 1
+                if maintenance_server is None:
+                    maintenance_server = server
 
     recent_alerts = db.scalars(
         select(Alert).order_by(Alert.last_seen.desc()).limit(8)
@@ -201,6 +206,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "pool_rows": pool_rows,
             "drive_rows": drive_rows,
             "recent_alerts": recent_alerts,
+            "maintenance_server": maintenance_server,
             "app_version": APP_VERSION,
         },
     )
