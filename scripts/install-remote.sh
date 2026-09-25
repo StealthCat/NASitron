@@ -8,6 +8,8 @@ NASITRON_USER="${NASITRON_REMOTE_USER:-$DEFAULT_USER}"
 HELPER_PATH="${NASITRON_REMOTE_HELPER_PATH:-$DEFAULT_HELPER}"
 PUBLIC_KEY="${NASITRON_SSH_PUBLIC_KEY:-}"
 PUBLIC_KEY_FILE=""
+GENERATED_PRIVATE_KEY=""
+GENERATED_KEY=0
 SKIP_PACKAGES=0
 SKIP_SSH_HARDENING=0
 QUIET=0
@@ -38,13 +40,14 @@ NASitron remote NAS installer
 Configures an Ubuntu/Debian OpenZFS NAS for agentless NASitron monitoring.
 
 Usage:
+  curl -fsSL <installer-url> | sudo bash
+  sudo ./scripts/install-remote.sh
   sudo ./scripts/install-remote.sh --public-key-file /path/to/nasitron.pub
   sudo ./scripts/install-remote.sh --public-key 'ssh-ed25519 AAAA...'
-  curl -fsSL <installer-url> | sudo bash -s -- --public-key 'ssh-ed25519 AAAA...'
 
 Options:
-  --public-key KEY          Public key authorized for the NASitron SSH account.
-  --public-key-file FILE    Read the public key from FILE.
+  --public-key KEY          Use an existing public key instead of generating one.
+  --public-key-file FILE    Read an existing public key from FILE.
   --user USER               Remote monitoring account (default: nasitron).
   --helper-path PATH        Root helper install path
                             (default: /usr/local/sbin/nasitron-root-helper).
@@ -54,12 +57,15 @@ Options:
   -h, --help                Show this help.
 
 Piped install:
-  This installer is self-contained. The root helper is embedded, so after the
-  installer itself is fetched no additional NASitron repository download occurs.
+  This installer is self-contained. If no public key is supplied, it generates a
+  dedicated Ed25519 keypair, installs the public key, prints the private key once at
+  completion for entry into NASitron, and removes the temporary key files.
 
 Security:
   The installer uses SSH public-key authentication. It locks password login for the
   dedicated account and grants passwordless sudo only to NASitron's root helper.
+  Re-running without an explicit public key replaces only a prior installer-generated
+  NASitron key; unrelated authorized_keys entries are preserved.
 EOF
 }
 
@@ -111,20 +117,15 @@ done
 [[ "$NASITRON_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "Invalid monitoring username: $NASITRON_USER"
 [[ "$HELPER_PATH" == /* && "$HELPER_PATH" != *[[:space:]]* ]] || die "--helper-path must be an absolute path without whitespace"
 
+TMP_DIR="$(mktemp -d -t nasitron-install.XXXXXX)"
+
 if [[ -n "$PUBLIC_KEY_FILE" ]]; then
   [[ -r "$PUBLIC_KEY_FILE" ]] || die "Cannot read public key file: $PUBLIC_KEY_FILE"
   PUBLIC_KEY="$(cat "$PUBLIC_KEY_FILE")"
 fi
 
 PUBLIC_KEY="$(printf '%s' "$PUBLIC_KEY" | tr -d '\r' | awk 'NF { print; exit }')"
-[[ -n "$PUBLIC_KEY" ]] || die "Provide the NASitron SSH public key with --public-key-file, --public-key, or NASITRON_SSH_PUBLIC_KEY"
 [[ "$PUBLIC_KEY" != *$'\n'* ]] || die "Only one SSH public key may be installed per invocation"
-
-TMP_DIR="$(mktemp -d -t nasitron-install.XXXXXX)"
-KEY_CHECK="$TMP_DIR/nasitron.pub"
-printf '%s\n' "$PUBLIC_KEY" > "$KEY_CHECK"
-chmod 0600 "$KEY_CHECK"
-ssh-keygen -l -f "$KEY_CHECK" >/dev/null 2>&1 || die "The supplied SSH public key is not valid"
 
 if [[ -r /etc/os-release ]]; then
   # shellcheck disable=SC1091
@@ -144,6 +145,20 @@ fi
 for command in sshd ssh-keygen sudo visudo python3 zpool zfs smartctl lsblk; do
   command -v "$command" >/dev/null 2>&1 || die "Required command is missing after setup: $command"
 done
+
+if [[ -z "$PUBLIC_KEY" ]]; then
+  GENERATED_KEY=1
+  GENERATED_KEY_PATH="$TMP_DIR/nasitron-monitoring"
+  log "Generating a dedicated Ed25519 SSH keypair for NASitron"
+  ssh-keygen -q -t ed25519 -N "" -C "nasitron-installer-generated" -f "$GENERATED_KEY_PATH"
+  PUBLIC_KEY="$(cat "$GENERATED_KEY_PATH.pub")"
+  GENERATED_PRIVATE_KEY="$(cat "$GENERATED_KEY_PATH")"
+else
+  KEY_CHECK="$TMP_DIR/nasitron.pub"
+  printf '%s\n' "$PUBLIC_KEY" > "$KEY_CHECK"
+  chmod 0600 "$KEY_CHECK"
+  ssh-keygen -l -f "$KEY_CHECK" >/dev/null 2>&1 || die "The supplied SSH public key is not valid"
+fi
 
 if ! getent passwd "$NASITRON_USER" >/dev/null; then
   log "Creating dedicated account: $NASITRON_USER"
@@ -166,6 +181,12 @@ install -d -o "$NASITRON_USER" -g "$USER_GROUP" -m 0700 "$SSH_DIR"
 touch "$AUTHORIZED_KEYS"
 chown "$NASITRON_USER:$USER_GROUP" "$AUTHORIZED_KEYS"
 chmod 0600 "$AUTHORIZED_KEYS"
+
+if [[ "$GENERATED_KEY" -eq 1 ]]; then
+  TMP_AUTHORIZED="$TMP_DIR/authorized_keys"
+  grep -vE '[[:space:]]nasitron-installer-generated$' "$AUTHORIZED_KEYS" > "$TMP_AUTHORIZED" || true
+  install -o "$NASITRON_USER" -g "$USER_GROUP" -m 0600 "$TMP_AUTHORIZED" "$AUTHORIZED_KEYS"
+fi
 
 if ! grep -Fqx -- "$PUBLIC_KEY" "$AUTHORIZED_KEYS"; then
   log "Adding NASitron SSH public key"
@@ -591,3 +612,20 @@ SSH host-key fingerprints (verify one through this trusted console before enabli
 strict host-key checking in NASitron):
 $FINGERPRINTS
 EOF
+
+if [[ "$GENERATED_KEY" -eq 1 ]]; then
+  cat <<EOF
+
+======================================================================
+NASITRON GENERATED PRIVATE KEY
+======================================================================
+Copy the complete OpenSSH private key below into the Private key field
+on NASitron's Add Server page. This installer does not retain the private
+key after it exits, so save it before closing this terminal.
+
+$GENERATED_PRIVATE_KEY
+======================================================================
+END NASITRON GENERATED PRIVATE KEY
+======================================================================
+EOF
+fi
