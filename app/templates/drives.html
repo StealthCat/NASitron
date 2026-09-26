@@ -11,7 +11,7 @@
 </section>
 <section class="section-block panel flush">
   <div class="panel-title" style="padding:16px 16px 0"><h2>Complete Drive Inventory</h2><span class="badge">{{ drive_rows|length }} shown</span></div>
-  <div class="scroll"><table><thead><tr><th>#</th><th>Device</th><th>Server</th><th>ZFS Role</th><th>Model / Serial</th><th>Size</th><th>Transport</th><th>SMART</th><th>Temp</th><th>Power-on</th><th>Indicators</th></tr></thead><tbody>
+  <div class="scroll"><table class="readable-table"><thead><tr><th>#</th><th>Device</th><th>Server</th><th>ZFS Role</th><th>Model / Serial</th><th>Size</th><th>Transport</th><th>SMART</th><th>Temp</th><th>Power-on</th><th>Indicators</th></tr></thead><tbody>
   {% for row in drive_rows %}{% set disk = row.drive %}{% set smart = disk.smart or {} %}
   <tr>
     <td class="subtle">{{ loop.index }}</td>
