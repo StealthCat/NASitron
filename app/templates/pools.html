@@ -13,7 +13,7 @@
   <div class="panel" style="margin-bottom:16px">
     <div class="panel-title"><div><h2 style="margin-bottom:4px">{{ pool.name }}</h2><a class="subtle" href="/servers/{{ row.server.id }}">{{ row.server.name }}</a></div><span class="badge {{ 'good' if pool.health == 'ONLINE' else 'critical' }}"><span class="dot"></span>{{ pool.health }}</span></div>
     <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else 'good') }}"><span style="width:{{ [cap,100]|min }}%"></span></div>
-    <div class="server-card-metrics"><div class="mini-stat"><span>Used</span><strong>{{ pool.alloc_bytes|human_bytes }}</strong></div><div class="mini-stat"><span>Free</span><strong>{{ pool.free_bytes|human_bytes }}</strong></div><div class="mini-stat"><span>Capacity</span><strong>{{ "%.1f"|format(cap) }}%</strong></div><div class="mini-stat"><span>Compression Ratio</span><strong>{{ ("%.2f"|format(pool.compression_ratio) ~ "x") if pool.compression_ratio is not none else "—" }}</strong></div></div>
+    <div class="server-card-metrics"><div class="mini-stat"><span>Used</span><strong>{{ pool.alloc_bytes|human_bytes }}</strong></div><div class="mini-stat"><span>Free</span><strong>{{ pool.free_bytes|human_bytes }}</strong></div><div class="mini-stat"><span>Capacity</span><strong>{{ "%.1f"|format(cap) }}%</strong></div><div class="mini-stat"><span>Compression Ratio</span><strong>{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</strong></div></div>
     {% if pool.status.scan %}<div class="subtle" style="margin:10px 0"><strong>Scan:</strong> {{ pool.status.scan }}</div>{% endif %}
     {% set configured_pool_props = pool.properties|selectattr('is_set')|list %}
     {% if pool.properties %}
