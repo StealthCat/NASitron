@@ -102,6 +102,11 @@ def _merge_previous_subsystems(
         if "zfs.iostat" in errors:
             pool["io"] = old.get("io", pool.get("io", {}))
             stale.add("zfs.iostat")
+        if "zfs.datasets" in errors:
+            pool["compression_ratio"] = old.get(
+                "compression_ratio",
+                pool.get("compression_ratio"),
+            )
         properties_key = f"pool.properties:{name}"
         if properties_key in errors:
             pool["properties"] = old.get("properties", [])
