@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Datasets · NASitron{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-title-wrap">
+    <div class="hero-kicker">OpenZFS Storage</div>
+    <h1>Datasets</h1>
+    <p class="muted">Filesystems and zvols across every monitored server, with space usage, compression, mountpoints, snapshot usage, and explicitly configured properties.</p>
+  </div>
+</div>
+
+<section class="grid four">
+  <div class="metric-card">
+    <div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 4v16"/></svg></div>
+    <div><div class="metric-label">Datasets / zvols</div><div class="metric-value">{{ dataset_rows|length }}</div><div class="metric-sub">{{ root_dataset_count }} root dataset{{ '' if root_dataset_count == 1 else 's' }}</div></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-icon good"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M4 9h16"/></svg></div>
+    <div><div class="metric-label">Filesystems</div><div class="metric-value">{{ filesystem_count }}</div><div class="metric-sub">Mounted or mountable datasets</div></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-icon"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="2"/><circle cx="12" cy="12" r="3"/></svg></div>
+    <div><div class="metric-label">Zvols</div><div class="metric-value">{{ volume_count }}</div><div class="metric-sub">Block volumes</div></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M4 8h16M4 16h16"/><path d="M8 4v16M16 4v16"/></svg></div>
+    <div><div class="metric-label">Average compression</div><div class="metric-value">{{ ("%.2f"|format(average_dataset_compression) ~ "x") if average_dataset_compression is not none else "—" }}</div><div class="metric-sub">{{ configured_dataset_properties }} explicit properties</div></div>
+  </div>
+</section>
+
+<section class="section-block panel dataset-inventory-panel">
+  <div class="dataset-toolbar">
+    <div class="field dataset-search-field">
+      <label for="dataset-search">Search datasets</label>
+      <input id="dataset-search" type="search" placeholder="Name, server, tank, mountpoint…" autocomplete="off">
+    </div>
+    <div class="field dataset-type-field">
+      <label for="dataset-type-filter">Type</label>
+      <select id="dataset-type-filter">
+        <option value="all">All types</option>
+        <option value="filesystem">Filesystems</option>
+        <option value="volume">Zvols</option>
+        <option value="root">Root datasets</option>
+      </select>
+    </div>
+    <div class="dataset-result-count"><strong id="dataset-visible-count">{{ dataset_rows|length }}</strong><span>shown</span></div>
+  </div>
+
+  <div class="scroll dataset-table-wrap">
+    <table class="dataset-table">
+      <thead>
+        <tr>
+          <th>Dataset</th>
+          <th>Server</th>
+          <th>Tank</th>
+          <th>Type</th>
+          <th>Used</th>
+          <th>Available</th>
+          <th>Referenced</th>
+          <th>Logical used</th>
+          <th>Snapshots</th>
+          <th>Compression</th>
+          <th>Mountpoint</th>
+          <th>Properties</th>
+        </tr>
+      </thead>
+      <tbody id="dataset-table-body">
+      {% for row in dataset_rows %}
+        {% set ds = row.dataset %}
+        {% set dataset_type = ds.get('type') or 'unknown' %}
+        <tr
+          data-dataset-row
+          data-dataset-type="{{ dataset_type }}"
+          data-root="{{ 'true' if row.is_root else 'false' }}"
+          data-search="{{ (ds.get('name','') ~ ' ' ~ row.server.name ~ ' ' ~ row.server.host ~ ' ' ~ row.tank_name ~ ' ' ~ ds.get('mountpoint',''))|lower }}"
+        >
+          <td>
+            <strong>{{ ds.get('name') }}</strong>
+            {% if row.is_root %}<div><span class="badge good">Root dataset</span></div>{% endif %}
+          </td>
+          <td><a href="/servers/{{ row.server.id }}">{{ row.server.name }}</a><div class="subtle">{{ row.server.host }}</div></td>
+          <td><a href="/tanks"><strong>{{ row.tank_name }}</strong></a></td>
+          <td><span class="badge">{{ "Filesystem" if dataset_type == "filesystem" else ("Zvol" if dataset_type == "volume" else dataset_type) }}</span></td>
+          <td>{{ ds.get('used_bytes')|human_bytes }}</td>
+          <td>{{ ds.get('available_bytes')|human_bytes }}</td>
+          <td>{{ ds.get('referenced_bytes')|human_bytes }}</td>
+          <td>{{ ds.get('logical_used_bytes')|human_bytes }}</td>
+          <td>{{ ds.get('snapshot_used_bytes')|human_bytes }}</td>
+          <td><span class="badge">{{ "%.2f"|format(ds.get('compression_ratio') or 0) }}x</span></td>
+          <td class="dataset-mountpoint">{{ ds.get('mountpoint') or "—" }}</td>
+          <td>
+            {% if ds.get('properties') %}
+            <details class="property-popover dataset-properties">
+              <summary><span class="badge good">{{ ds.properties|length }} set</span></summary>
+              <div class="property-popover-body dataset-property-body">
+                {% for prop in ds.properties %}
+                <div class="property-row">
+                  <code>{{ prop.property }}</code>
+                  <strong>{{ prop.value }}</strong>
+                  <span class="subtle">{{ prop.source }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+            {% else %}
+            <span class="subtle">Defaults / inherited</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="12" class="muted">No dataset or zvol data has been collected yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div id="dataset-empty-filter" class="muted dataset-empty-filter" hidden>No datasets match the current filters.</div>
+</section>
+
+<script>
+(function initDatasetFilters() {
+  const search = document.getElementById("dataset-search");
+  const type = document.getElementById("dataset-type-filter");
+  const rows = Array.from(document.querySelectorAll("[data-dataset-row]"));
+  const count = document.getElementById("dataset-visible-count");
+  const empty = document.getElementById("dataset-empty-filter");
+
+  if (!search || !type || !count || !empty) return;
+
+  function applyFilters() {
+    const query = search.value.trim().toLowerCase();
+    const selectedType = type.value;
+    let visible = 0;
+
+    rows.forEach((row) => {
+      const matchesSearch = !query || row.dataset.search.includes(query);
+      const matchesType =
+        selectedType === "all" ||
+        row.dataset.datasetType === selectedType ||
+        (selectedType === "root" && row.dataset.root === "true");
+      const show = matchesSearch && matchesType;
+      row.hidden = !show;
+      if (show) visible += 1;
+    });
+
+    count.textContent = String(visible);
+    empty.hidden = visible !== 0 || rows.length === 0;
+  }
+
+  search.addEventListener("input", applyFilters);
+  type.addEventListener("change", applyFilters);
+  applyFilters();
+})();
+</script>
+{% endblock %}
