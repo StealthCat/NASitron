@@ -617,7 +617,6 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
     cards = []
     pool_rows = []
-    tank_rows = []
     drive_rows = []
     arc_rates = []
     online_servers = 0
@@ -726,6 +725,7 @@ def _inventory_rows(db: Session) -> dict:
 
     cards = []
     pool_rows = []
+    tank_rows = []
     drive_rows = []
     inventory_warnings = []
     for server in servers:
