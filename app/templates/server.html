@@ -163,7 +163,7 @@
     <span class="subtle">{{ snapshot.drives|length }} physical drives</span>
   </div>
   <div class="panel flush scroll">
-    <table>
+    <table class="readable-table">
       <thead><tr><th>Device</th><th>ZFS Role</th><th>Model / Serial</th><th>Size</th><th>Transport</th><th>SMART</th><th>Temp</th><th>Power-on</th><th>Indicators</th></tr></thead>
       <tbody>
       {% for disk in snapshot.drives %}
@@ -206,7 +206,7 @@
 <section class="section-block">
   <div class="section-heading"><h2>Datasets / zvols</h2><span class="subtle">{{ snapshot.datasets|length }} entries</span></div>
   <div class="panel flush scroll">
-    <table>
+    <table class="readable-table">
       <thead><tr><th>Name</th><th>Type</th><th>Used</th><th>Available</th><th>Referenced</th><th>Logical Used</th><th>Compression Ratio</th><th>Mountpoint</th><th>Set properties</th></tr></thead>
       <tbody>
       {% for ds in snapshot.datasets %}
@@ -235,7 +235,7 @@
 <section class="section-block">
   <div class="section-heading"><h2>Recent Alerts</h2><a class="subtle" href="/alerts">View all ›</a></div>
   <div class="panel flush scroll">
-    <table><thead><tr><th>Status</th><th>Severity</th><th>Alert</th><th>Last seen</th></tr></thead><tbody>
+    <table class="readable-table"><thead><tr><th>Status</th><th>Severity</th><th>Alert</th><th>Last seen</th></tr></thead><tbody>
     {% for alert in alerts %}
     <tr><td>{{ "Active" if alert.active else "Resolved" }}</td><td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td><td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message }}</div></td><td>{{ alert.last_seen|fmt_dt }}</td></tr>
     {% endfor %}
