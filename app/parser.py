@@ -476,6 +476,14 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
     dataset_properties = parse_property_rows(
         raw.get("zfs_get", {}).get("stdout", "")
     )
+    datasets = parse_zfs_list(raw.get("zfs_list", {}).get("stdout", ""))
+    for dataset in datasets:
+        dataset["properties"] = dataset_properties.get(dataset["name"], [])
+    datasets_by_name = {
+        str(dataset.get("name")): dataset
+        for dataset in datasets
+        if dataset.get("name")
+    }
 
     errors: list[dict[str, str]] = []
     freshness: dict[str, str] = {}
@@ -566,6 +574,12 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
 
         pool["io"] = iostat.get(name, {})
         pool["status"] = parsed
+        root_dataset = datasets_by_name.get(name)
+        pool["compression_ratio"] = (
+            root_dataset.get("compression_ratio")
+            if root_dataset is not None
+            else None
+        )
 
         property_result = pool_property_results.get(name, {})
         property_valid = (
@@ -672,10 +686,6 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
                 failed_subsystems.add(subsystem)
             else:
                 freshness[f"smart:{disk.get('serial') or disk.get('path')}"] = sampled_at
-
-    datasets = parse_zfs_list(raw.get("zfs_list", {}).get("stdout", ""))
-    for dataset in datasets:
-        dataset["properties"] = dataset_properties.get(dataset["name"], [])
 
     load_parts = raw.get("loadavg", {}).get("stdout", "").split()
     try:
