@@ -968,6 +968,7 @@ pre {
   padding-top: 11px;
   padding-bottom: 11px;
   border-bottom-color: rgba(49,63,84,.55);
+  font-variant-numeric: tabular-nums;
 }
 .readable-table tbody tr:last-child td {
   border-bottom: 0;
@@ -996,4 +997,26 @@ pre {
 .panel.flush.scroll .readable-table,
 .dataset-table-wrap .readable-table {
   background: #0a111a;
+}
+
+
+.dataset-table th:first-child,
+.dataset-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  box-shadow: 1px 0 0 rgba(49,63,84,.7);
+}
+.dataset-table th:first-child {
+  z-index: 5;
+  background: linear-gradient(180deg, #17243a, #121d2c);
+}
+.dataset-table tbody tr:nth-child(odd) td:first-child {
+  background: #0b121c;
+}
+.dataset-table tbody tr:nth-child(even) td:first-child {
+  background: #111b29;
+}
+.dataset-table tbody tr:hover td:first-child {
+  background: #241523;
 }
