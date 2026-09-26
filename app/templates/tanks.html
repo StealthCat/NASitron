@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Tanks · NASitron{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-title-wrap">
+    <div class="hero-kicker">OpenZFS Storage</div>
+    <h1>Tanks</h1>
+    <p class="muted">Root ZFS filesystems paired with their backing pools across every monitored server.</p>
+  </div>
+</div>
+
+<section class="grid four">
+  <div class="metric-card">
+    <div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg></div>
+    <div><div class="metric-label">Tanks</div><div class="metric-value">{{ tank_rows|length }}</div><div class="metric-sub">Root filesystems</div></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-icon good"><svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg></div>
+    <div><div class="metric-label">Healthy</div><div class="metric-value">{{ healthy_tanks }}</div><div class="metric-sub">{{ unhealthy_tanks }} need attention</div></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M4 8h16M4 16h16"/><path d="M8 4v16M16 4v16"/></svg></div>
+    <div><div class="metric-label">Average compression</div><div class="metric-value">{{ ("%.2f"|format(average_compression_ratio) ~ "x") if average_compression_ratio is not none else "—" }}</div><div class="metric-sub">Across reporting tanks</div></div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="8"/></svg></div>
+    <div><div class="metric-label">Explicit properties</div><div class="metric-value">{{ configured_tank_properties }}</div><div class="metric-sub">Pool + root dataset</div></div>
+  </div>
+</section>
+
+<section class="section-block tank-grid">
+{% for row in tank_rows %}
+  {% set pool = row.pool %}
+  {% set dataset = row.dataset or {} %}
+  {% set cap = pool.get('capacity_pct') or 0 %}
+  {% set configured_pool_props = pool.get('properties', [])|selectattr('is_set')|list %}
+  <article class="panel tank-card">
+    <div class="panel-title tank-card-head">
+      <div>
+        <div class="hero-kicker">Tank</div>
+        <h2>{{ row.tank_name }}</h2>
+        <a class="subtle" href="/servers/{{ row.server.id }}">{{ row.server.name }} · {{ row.server.host }}</a>
+      </div>
+      <div class="row">
+        <span class="badge">{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }} compression</span>
+        <span class="badge {{ 'good' if pool.get('health') == 'ONLINE' else 'critical' }}"><span class="dot"></span>{{ pool.get('health') or "Unknown" }}</span>
+      </div>
+    </div>
+
+    <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else 'good') }}">
+      <span style="width:{{ [cap,100]|min }}%"></span>
+    </div>
+
+    <div class="tank-metric-groups">
+      <section>
+        <div class="subtle tank-group-label">Pool</div>
+        <div class="server-card-metrics tank-stats">
+          <div class="mini-stat"><span>Used</span><strong>{{ pool.get('alloc_bytes')|human_bytes }}</strong></div>
+          <div class="mini-stat"><span>Free</span><strong>{{ pool.get('free_bytes')|human_bytes }}</strong></div>
+          <div class="mini-stat"><span>Capacity</span><strong>{{ "%.1f"|format(cap) }}%</strong></div>
+          <div class="mini-stat"><span>Fragmentation</span><strong>{{ "%.1f"|format(pool.get('fragmentation_pct') or 0) }}%</strong></div>
+          <div class="mini-stat"><span>Dedup</span><strong>{{ "%.2f"|format(pool.get('dedup_ratio') or 1) }}x</strong></div>
+          <div class="mini-stat"><span>Compression</span><strong>{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</strong></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="subtle tank-group-label">Root dataset</div>
+        {% if dataset %}
+        <div class="server-card-metrics tank-stats">
+          <div class="mini-stat"><span>Dataset used</span><strong>{{ dataset.get('used_bytes')|human_bytes }}</strong></div>
+          <div class="mini-stat"><span>Available</span><strong>{{ dataset.get('available_bytes')|human_bytes }}</strong></div>
+          <div class="mini-stat"><span>Referenced</span><strong>{{ dataset.get('referenced_bytes')|human_bytes }}</strong></div>
+          <div class="mini-stat"><span>Logical used</span><strong>{{ dataset.get('logical_used_bytes')|human_bytes }}</strong></div>
+          <div class="mini-stat"><span>Compression</span><strong>{{ "%.2f"|format(dataset.get('compression_ratio') or 0) }}x</strong></div>
+          <div class="mini-stat"><span>Mountpoint</span><strong class="tank-mount">{{ dataset.get('mountpoint') or "—" }}</strong></div>
+        </div>
+        {% else %}
+        <div class="message">The root dataset for this pool was not present in the latest dataset inventory.</div>
+        {% endif %}
+      </section>
+    </div>
+
+    <div class="grid three tank-io">
+      <div class="mini-stat"><span>Read IOPS</span><strong>{{ (pool.get('io') or {}).get('read_iops', 0) }}</strong></div>
+      <div class="mini-stat"><span>Write IOPS</span><strong>{{ (pool.get('io') or {}).get('write_iops', 0) }}</strong></div>
+      <div class="mini-stat"><span>R / W bandwidth</span><strong>{{ ((pool.get('io') or {}).get('read_bps', 0))|human_bytes }}/s · {{ ((pool.get('io') or {}).get('write_bps', 0))|human_bytes }}/s</strong></div>
+    </div>
+
+    {% if (pool.get('status') or {}).get('scan') %}
+    <div class="subtle tank-scan"><strong>Scan:</strong> {{ pool.status.scan }}</div>
+    {% endif %}
+
+    {% if pool.get('properties') %}
+    <details class="property-drawer">
+      <summary>
+        <strong>Pool properties</strong>
+        <span class="badge">{{ configured_pool_props|length }} configured</span>
+        <span class="subtle">{{ pool.properties|length }} total</span>
+      </summary>
+      <div class="scroll property-table-wrap">
+        <table>
+          <thead><tr><th>Property</th><th>Value</th><th>Source</th></tr></thead>
+          <tbody>
+          {% for prop in pool.properties %}
+            <tr class="{{ 'property-configured' if prop.is_set else '' }}">
+              <td><code>{{ prop.property }}</code></td>
+              <td>{{ prop.value }}</td>
+              <td><span class="badge {{ 'good' if prop.is_set else 'offline' }}">{{ prop.source }}</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endif %}
+
+    {% if dataset and dataset.get('properties') %}
+    <details class="property-drawer">
+      <summary>
+        <strong>Root dataset properties</strong>
+        <span class="badge good">{{ dataset.properties|length }} set</span>
+      </summary>
+      <div class="scroll property-table-wrap">
+        <table>
+          <thead><tr><th>Property</th><th>Value</th><th>Source</th></tr></thead>
+          <tbody>
+          {% for prop in dataset.properties %}
+            <tr class="property-configured">
+              <td><code>{{ prop.property }}</code></td>
+              <td>{{ prop.value }}</td>
+              <td><span class="badge good">{{ prop.source }}</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endif %}
+  </article>
+{% else %}
+  <div class="panel"><p class="muted">No tank data has been collected yet.</p></div>
+{% endfor %}
+</section>
+{% endblock %}
