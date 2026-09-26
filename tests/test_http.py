@@ -577,6 +577,22 @@ def test_server_and_pool_pages_show_zfs_properties():
             assert "recordsize" in tanks_page.text
             assert "autotrim" in tanks_page.text
 
+            datasets_page = client.get("/datasets")
+            assert datasets_page.status_code == 200
+            assert "<h1>Datasets</h1>" in datasets_page.text
+            assert "tank/data" in datasets_page.text
+            assert "Root dataset" in datasets_page.text
+            assert "zfs-property-test" in datasets_page.text
+            assert "1.75x" in datasets_page.text
+            assert "1.25x" in datasets_page.text
+            assert "Logical used" in datasets_page.text
+            assert "Snapshots" in datasets_page.text
+            assert "25 B" in datasets_page.text
+            assert "recordsize" in datasets_page.text
+            assert "compression" in datasets_page.text
+            assert 'id="dataset-search"' in datasets_page.text
+            assert 'id="dataset-type-filter"' in datasets_page.text
+
             dashboard = client.get("/")
             assert dashboard.status_code == 200
             assert "1.75x" in dashboard.text
