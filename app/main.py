@@ -617,6 +617,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
     cards = []
     pool_rows = []
+    tank_rows = []
     drive_rows = []
     arc_rates = []
     online_servers = 0
@@ -749,8 +750,23 @@ def _inventory_rows(db: Session) -> dict:
         ):
             inventory_warnings.append(server)
 
+        datasets_by_name = {
+            str(dataset.get("name")): dataset
+            for dataset in snapshot.get("datasets", [])
+            if dataset.get("name")
+        }
         for pool in snapshot.get("pools", []):
             pool_rows.append({"server": server, "pool": pool})
+            pool_name = str(pool.get("name") or "")
+            root_dataset = datasets_by_name.get(pool_name)
+            tank_rows.append(
+                {
+                    "server": server,
+                    "pool": pool,
+                    "dataset": root_dataset,
+                    "tank_name": pool_name,
+                }
+            )
         for drive in snapshot.get("drives", []):
             drive_rows.append({"server": server, "drive": drive})
 
@@ -758,6 +774,12 @@ def _inventory_rows(db: Session) -> dict:
         key=lambda row: (
             row["server"].name.lower(),
             str(row["pool"].get("name", "")).lower(),
+        )
+    )
+    tank_rows.sort(
+        key=lambda row: (
+            row["server"].name.lower(),
+            str(row["tank_name"]).lower(),
         )
     )
     drive_rows.sort(
@@ -770,6 +792,7 @@ def _inventory_rows(db: Session) -> dict:
         "servers": servers,
         "cards": cards,
         "pool_rows": pool_rows,
+        "tank_rows": tank_rows,
         "drive_rows": drive_rows,
         "inventory_warnings": inventory_warnings,
     }
@@ -801,6 +824,36 @@ def pools_index(request: Request, db: Session = Depends(get_db)):
             **data,
             "degraded_pools": degraded,
             "healthy_pools": max(0, len(data["pool_rows"]) - degraded),
+        },
+    )
+
+
+@app.get("/tanks", response_class=HTMLResponse)
+def tanks_index(request: Request, db: Session = Depends(get_db)):
+    data = _inventory_rows(db)
+    healthy_tanks = sum(
+        1
+        for row in data["tank_rows"]
+        if str(row["pool"].get("health", "")).upper() == "ONLINE"
+    )
+    configured_properties = sum(
+        len((row["dataset"] or {}).get("properties", []))
+        + sum(
+            1
+            for prop in row["pool"].get("properties", [])
+            if prop.get("is_set")
+        )
+        for row in data["tank_rows"]
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="tanks.html",
+        context={
+            "request": request,
+            **data,
+            "healthy_tanks": healthy_tanks,
+            "unhealthy_tanks": max(0, len(data["tank_rows"]) - healthy_tanks),
+            "configured_tank_properties": configured_properties,
         },
     )
 
