@@ -476,3 +476,10 @@ NASitron now includes a dedicated **Tanks** page in the primary navigation. A ta
 Each tank view combines pool and root-filesystem data in one place, including pool health, used/free/capacity, fragmentation, dedup ratio, compression ratio, root-dataset used/available/referenced/logical-used space, root compression ratio, mountpoint, read/write IOPS, bandwidth, scan state, configured pool properties, and explicitly set root-dataset properties.
 
 The page spans all monitored servers and includes summary counts for total/healthy tanks, average compression ratio, and explicitly configured properties.
+
+
+## NASitron 0.6.19 Datasets page
+
+NASitron now includes a dedicated **Datasets** page in the primary navigation. It aggregates every collected ZFS filesystem and zvol across all monitored servers and associates each entry with its owning server and tank/pool.
+
+The inventory shows dataset name, root-dataset status, type, used/available/referenced/logical-used space, snapshot-used space, compression ratio, mountpoint, and explicitly configured local/received ZFS properties. The page includes summary counts for filesystems and zvols, average compression ratio, and configured properties, plus client-side search and type/root filtering for large installations.
