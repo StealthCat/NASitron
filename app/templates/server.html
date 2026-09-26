@@ -99,6 +99,7 @@
         <div class="mini-stat"><span>Free</span><strong>{{ pool.free_bytes|human_bytes }}</strong></div>
         <div class="mini-stat"><span>Capacity</span><strong>{{ "%.1f"|format(cap) }}%</strong></div>
         <div class="mini-stat"><span>Fragmentation</span><strong>{{ "%.1f"|format(pool.fragmentation_pct) }}%</strong></div>
+        <div class="mini-stat"><span>Compression Ratio</span><strong>{{ ("%.2f"|format(pool.compression_ratio) ~ "x") if pool.compression_ratio is not none else "—" }}</strong></div>
         <div class="mini-stat"><span>Read IOPS</span><strong>{{ pool.io.read_iops or 0 }}</strong></div>
         <div class="mini-stat"><span>Write IOPS</span><strong>{{ pool.io.write_iops or 0 }}</strong></div>
       </div>
@@ -206,7 +207,7 @@
   <div class="section-heading"><h2>Datasets / zvols</h2><span class="subtle">{{ snapshot.datasets|length }} entries</span></div>
   <div class="panel flush scroll">
     <table>
-      <thead><tr><th>Name</th><th>Type</th><th>Used</th><th>Available</th><th>Referenced</th><th>Logical Used</th><th>Compression</th><th>Mountpoint</th><th>Set properties</th></tr></thead>
+      <thead><tr><th>Name</th><th>Type</th><th>Used</th><th>Available</th><th>Referenced</th><th>Logical Used</th><th>Compression Ratio</th><th>Mountpoint</th><th>Set properties</th></tr></thead>
       <tbody>
       {% for ds in snapshot.datasets %}
       <tr>
