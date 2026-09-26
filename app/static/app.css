@@ -305,7 +305,7 @@ textarea { min-height: 150px; resize: vertical; font-family: "SFMono-Regular", C
 .progress.good > span { background: linear-gradient(90deg, #22c98c, var(--good)); box-shadow: 0 0 9px rgba(56,223,163,.2); }
 .progress.warning > span { background: var(--warn); }
 .progress.critical > span { background: var(--accent); }
-.pool-cap-row { display: grid; grid-template-columns: minmax(90px, .6fr) minmax(170px, 2.3fr) minmax(118px, .8fr) 48px; align-items: center; gap: 12px; padding: 9px 0; }
+.pool-cap-row { display: grid; grid-template-columns: minmax(90px, .6fr) minmax(170px, 2.3fr) minmax(118px, .8fr) auto 48px; align-items: center; gap: 12px; padding: 9px 0; }
 .pool-cap-row + .pool-cap-row { border-top: 1px solid var(--border-soft); }
 
 .statlist { display: grid; grid-template-columns: minmax(115px, auto) 1fr; gap: 8px 15px; }
