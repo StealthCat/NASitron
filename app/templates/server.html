@@ -99,7 +99,7 @@
         <div class="mini-stat"><span>Free</span><strong>{{ pool.free_bytes|human_bytes }}</strong></div>
         <div class="mini-stat"><span>Capacity</span><strong>{{ "%.1f"|format(cap) }}%</strong></div>
         <div class="mini-stat"><span>Fragmentation</span><strong>{{ "%.1f"|format(pool.fragmentation_pct) }}%</strong></div>
-        <div class="mini-stat"><span>Compression Ratio</span><strong>{{ ("%.2f"|format(pool.compression_ratio) ~ "x") if pool.compression_ratio is not none else "—" }}</strong></div>
+        <div class="mini-stat"><span>Compression Ratio</span><strong>{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</strong></div>
         <div class="mini-stat"><span>Read IOPS</span><strong>{{ pool.io.read_iops or 0 }}</strong></div>
         <div class="mini-stat"><span>Write IOPS</span><strong>{{ pool.io.write_iops or 0 }}</strong></div>
       </div>
