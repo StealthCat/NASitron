@@ -33,6 +33,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg>
         <span>Tanks</span>
       </a>
+      <a class="nav-item {{ 'active' if request.url.path.startswith('/datasets') else '' }}" href="/datasets">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 4v16"/></svg>
+        <span>Datasets</span>
+      </a>
       <a class="nav-item {{ 'active' if request.url.path.startswith('/drives') else '' }}" href="/drives">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><circle cx="12" cy="9" r="3"/><path d="M8 17h8"/><circle cx="17" cy="17" r="1"/></svg>
         <span>Drives</span>
