@@ -197,6 +197,7 @@ def test_sidebar_pages_are_real_routes_and_drives_page_shows_all_25():
                 "/servers",
                 "/pools",
                 "/tanks",
+                "/datasets",
                 "/drives",
                 "/alerts",
                 "/maintenance",
