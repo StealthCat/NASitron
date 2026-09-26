@@ -95,7 +95,7 @@
         <strong>{{ pool.name }}</strong>
         <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else 'good') }}"><span style="width:{{ [cap,100]|min }}%"></span></div>
         <span class="pool-bytes subtle">{{ pool.alloc_bytes|human_bytes }} / {{ pool.size_bytes|human_bytes }}</span>
-        <span class="badge">{{ ("%.2f"|format(pool.compression_ratio) ~ "x") if pool.compression_ratio is not none else "—" }}</span>
+        <span class="badge">{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</span>
         <strong style="color:{{ 'var(--accent-bright)' if cap >= 80 else 'var(--text)' }}">{{ "%.0f"|format(cap) }}%</strong>
       </div>
     {% else %}
@@ -164,7 +164,7 @@
               <div class="progress"><span style="width:{{ [pool.capacity_pct or 0,100]|min }}%"></span></div>
               <div class="subtle" style="margin-top:4px">{{ pool.alloc_bytes|human_bytes }} / {{ pool.size_bytes|human_bytes }}</div>
             </td>
-            <td><span class="badge">{{ ("%.2f"|format(pool.compression_ratio) ~ "x") if pool.compression_ratio is not none else "—" }}</span></td>
+            <td><span class="badge">{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</span></td>
             <td><strong>{{ "%.0f"|format(pool.capacity_pct or 0) }}%</strong></td>
           </tr>
         {% else %}
