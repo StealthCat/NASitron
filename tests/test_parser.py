@@ -301,7 +301,10 @@ def test_build_snapshot_attaches_pool_and_dataset_properties():
     assert snapshot["pools"][0]["compression_ratio"] == 1.75
     assert next(p for p in pool_props if p["property"] == "autotrim")["value"] == "on"
     assert next(p for p in pool_props if p["property"] == "comment")["is_set"] is False
-    assert snapshot["datasets"][0]["properties"] == [
+    data_dataset = next(
+        dataset for dataset in snapshot["datasets"] if dataset["name"] == "tank/data"
+    )
+    assert data_dataset["properties"] == [
         {
             "property": "compression",
             "value": "zstd",
