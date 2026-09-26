@@ -86,7 +86,7 @@
           <td>{{ ds.get('referenced_bytes')|human_bytes }}</td>
           <td>{{ ds.get('logical_used_bytes')|human_bytes }}</td>
           <td>{{ ds.get('snapshot_used_bytes')|human_bytes }}</td>
-          <td><span class="badge">{{ "%.2f"|format(ds.get('compression_ratio') or 0) }}x</span></td>
+          <td><span class="badge">{{ ("%.2f"|format(ds.get('compression_ratio')) ~ "x") if ds.get('compression_ratio') is not none else "—" }}</span></td>
           <td class="dataset-mountpoint">{{ ds.get('mountpoint') or "—" }}</td>
           <td>
             {% if ds.get('properties') %}
