@@ -275,7 +275,10 @@ def test_build_snapshot_attaches_pool_and_dataset_properties():
         "zpool_get": {
             "tank": ok("tank\tautotrim\ton\tlocal\ntank\tcomment\t-\tdefault\n")
         },
-        "zfs_list": ok("tank/data\tfilesystem\t100\t900\t80\t/tank/data\t1.25x\t125\t10\n"),
+        "zfs_list": ok(
+            "tank\tfilesystem\t400\t600\t400\t/tank\t1.75x\t700\t10\n"
+            "tank/data\tfilesystem\t100\t900\t80\t/tank/data\t1.25x\t125\t10\n"
+        ),
         "zfs_get": ok("tank/data\tcompression\tzstd\tlocal\n"),
         "arcstats": ok(""),
         "zpool_iostat": ok(""),
@@ -295,6 +298,7 @@ def test_build_snapshot_attaches_pool_and_dataset_properties():
     }
     snapshot = build_snapshot(raw, datetime(2026, 9, 25, 12, 0, 0))
     pool_props = snapshot["pools"][0]["properties"]
+    assert snapshot["pools"][0]["compression_ratio"] == 1.75
     assert next(p for p in pool_props if p["property"] == "autotrim")["value"] == "on"
     assert next(p for p in pool_props if p["property"] == "comment")["is_set"] is False
     assert snapshot["datasets"][0]["properties"] == [
