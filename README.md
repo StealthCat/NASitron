@@ -483,3 +483,10 @@ The page spans all monitored servers and includes summary counts for total/healt
 NASitron now includes a dedicated **Datasets** page in the primary navigation. It aggregates every collected ZFS filesystem and zvol across all monitored servers and associates each entry with its owning server and tank/pool.
 
 The inventory shows dataset name, root-dataset status, type, used/available/referenced/logical-used space, snapshot-used space, compression ratio, mountpoint, and explicitly configured local/received ZFS properties. The page includes summary counts for filesystems and zvols, average compression ratio, and configured properties, plus client-side search and type/root filtering for large installations.
+
+
+## NASitron 0.6.20 dense table readability
+
+Large inventory tables now use alternating dark row backgrounds, stronger sticky headers, clearer row separators, a high-contrast hover indicator, tabular numerals, and improved primary/secondary text contrast. The treatment is applied selectively to dense views such as Datasets, Drives, Alerts, Users, Maintenance history, and the large drive/dataset/alert tables on a server page; compact topology and property tables retain the simpler presentation.
+
+The wide Datasets inventory also keeps its dataset-name column pinned during horizontal scrolling so the row identity remains visible while inspecting storage metrics and properties.
