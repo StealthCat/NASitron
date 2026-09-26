@@ -726,6 +726,7 @@ def _inventory_rows(db: Session) -> dict:
     cards = []
     pool_rows = []
     tank_rows = []
+    dataset_rows = []
     drive_rows = []
     inventory_warnings = []
     for server in servers:
@@ -755,6 +756,23 @@ def _inventory_rows(db: Session) -> dict:
             for dataset in snapshot.get("datasets", [])
             if dataset.get("name")
         }
+        pool_names = {
+            str(pool.get("name"))
+            for pool in snapshot.get("pools", [])
+            if pool.get("name")
+        }
+        for dataset in snapshot.get("datasets", []):
+            dataset_name = str(dataset.get("name") or "")
+            tank_name = dataset_name.split("/", 1)[0] if dataset_name else ""
+            dataset_rows.append(
+                {
+                    "server": server,
+                    "dataset": dataset,
+                    "tank_name": tank_name,
+                    "is_root": dataset_name in pool_names,
+                }
+            )
+
         for pool in snapshot.get("pools", []):
             pool_rows.append({"server": server, "pool": pool})
             pool_name = str(pool.get("name") or "")
@@ -782,6 +800,12 @@ def _inventory_rows(db: Session) -> dict:
             str(row["tank_name"]).lower(),
         )
     )
+    dataset_rows.sort(
+        key=lambda row: (
+            row["server"].name.lower(),
+            str(row["dataset"].get("name", "")).lower(),
+        )
+    )
     drive_rows.sort(
         key=lambda row: (
             row["server"].name.lower(),
@@ -793,6 +817,7 @@ def _inventory_rows(db: Session) -> dict:
         "cards": cards,
         "pool_rows": pool_rows,
         "tank_rows": tank_rows,
+        "dataset_rows": dataset_rows,
         "drive_rows": drive_rows,
         "inventory_warnings": inventory_warnings,
     }
@@ -865,6 +890,57 @@ def tanks_index(request: Request, db: Session = Depends(get_db)):
             "unhealthy_tanks": max(0, len(data["tank_rows"]) - healthy_tanks),
             "configured_tank_properties": configured_properties,
             "average_compression_ratio": average_compression_ratio,
+        },
+    )
+
+
+@app.get("/datasets", response_class=HTMLResponse)
+def datasets_index(request: Request, db: Session = Depends(get_db)):
+    data = _inventory_rows(db)
+    filesystem_count = 0
+    volume_count = 0
+    root_count = 0
+    configured_properties = 0
+    total_used = 0
+    total_logical_used = 0
+    total_snapshot_used = 0
+    compression_ratios: list[float] = []
+
+    for row in data["dataset_rows"]:
+        dataset = row["dataset"]
+        dataset_type = str(dataset.get("type") or "").lower()
+        if dataset_type == "filesystem":
+            filesystem_count += 1
+        elif dataset_type == "volume":
+            volume_count += 1
+        if row["is_root"]:
+            root_count += 1
+
+        configured_properties += len(dataset.get("properties", []))
+        total_used += int(dataset.get("used_bytes") or 0)
+        total_logical_used += int(dataset.get("logical_used_bytes") or 0)
+        total_snapshot_used += int(dataset.get("snapshot_used_bytes") or 0)
+        if dataset.get("compression_ratio") is not None:
+            compression_ratios.append(float(dataset["compression_ratio"]))
+
+    return templates.TemplateResponse(
+        request=request,
+        name="datasets.html",
+        context={
+            "request": request,
+            **data,
+            "filesystem_count": filesystem_count,
+            "volume_count": volume_count,
+            "root_dataset_count": root_count,
+            "configured_dataset_properties": configured_properties,
+            "total_dataset_used": total_used,
+            "total_logical_used": total_logical_used,
+            "total_snapshot_used": total_snapshot_used,
+            "average_dataset_compression": (
+                sum(compression_ratios) / len(compression_ratios)
+                if compression_ratios
+                else None
+            ),
         },
     )
 
