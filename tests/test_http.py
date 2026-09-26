@@ -457,6 +457,7 @@ def test_server_and_pool_pages_show_zfs_properties():
                 "fragmentation_pct": 10,
                 "capacity_pct": 40,
                 "dedup_ratio": 1,
+                "compression_ratio": 1.75,
                 "health": "ONLINE",
                 "io": {},
                 "status": {"scan": "", "vdevs": []},
@@ -528,6 +529,9 @@ def test_server_and_pool_pages_show_zfs_properties():
             detail = client.get(f"/servers/{server_id}")
             assert detail.status_code == 200
             assert "Pool properties" in detail.text
+            assert "Compression Ratio" in detail.text
+            assert "1.75x" in detail.text
+            assert "1.25x" in detail.text
             assert "autotrim" in detail.text
             assert "compression" in detail.text
             assert "zstd" in detail.text
@@ -535,7 +539,13 @@ def test_server_and_pool_pages_show_zfs_properties():
             pools_page = client.get("/pools")
             assert pools_page.status_code == 200
             assert "ZFS pool options" in pools_page.text
+            assert "Compression Ratio" in pools_page.text
+            assert "1.75x" in pools_page.text
             assert "autotrim" in pools_page.text
+
+            dashboard = client.get("/")
+            assert dashboard.status_code == 200
+            assert "1.75x" in dashboard.text
     finally:
         with SessionLocal() as db:
             server = db.get(Server, server_id)
