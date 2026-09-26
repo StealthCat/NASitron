@@ -792,3 +792,68 @@ pre {
 .email-provider-title {
   margin-bottom: 12px;
 }
+
+
+/* Tanks overview */
+.tank-grid {
+  display: grid;
+  gap: 16px;
+}
+.tank-card {
+  padding: 18px;
+}
+.tank-card-head {
+  align-items: flex-start;
+}
+.tank-card-head .hero-kicker {
+  margin-bottom: 5px;
+}
+.tank-card-head h2 {
+  margin-bottom: 3px;
+  font-size: 1.3rem;
+}
+.tank-metric-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.tank-group-label {
+  margin: 0 0 7px 2px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .65rem;
+}
+.tank-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+.tank-io {
+  margin-top: 14px;
+}
+.tank-mount {
+  overflow-wrap: anywhere;
+  font-size: .82rem !important;
+}
+.tank-scan {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: rgba(6,10,16,.24);
+}
+
+@media (max-width: 1000px) {
+  .tank-metric-groups {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 680px) {
+  .tank-card-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .tank-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
