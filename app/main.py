@@ -845,6 +845,16 @@ def tanks_index(request: Request, db: Session = Depends(get_db)):
         )
         for row in data["tank_rows"]
     )
+    compression_ratios = [
+        float(row["pool"].get("compression_ratio"))
+        for row in data["tank_rows"]
+        if row["pool"].get("compression_ratio") is not None
+    ]
+    average_compression_ratio = (
+        sum(compression_ratios) / len(compression_ratios)
+        if compression_ratios
+        else None
+    )
     return templates.TemplateResponse(
         request=request,
         name="tanks.html",
@@ -854,6 +864,7 @@ def tanks_index(request: Request, db: Session = Depends(get_db)):
             "healthy_tanks": healthy_tanks,
             "unhealthy_tanks": max(0, len(data["tank_rows"]) - healthy_tanks),
             "configured_tank_properties": configured_properties,
+            "average_compression_ratio": average_compression_ratio,
         },
     )
 
