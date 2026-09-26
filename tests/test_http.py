@@ -196,6 +196,7 @@ def test_sidebar_pages_are_real_routes_and_drives_page_shows_all_25():
             for path in (
                 "/servers",
                 "/pools",
+                "/tanks",
                 "/drives",
                 "/alerts",
                 "/maintenance",
@@ -479,6 +480,24 @@ def test_server_and_pool_pages_show_zfs_properties():
         ],
         "datasets": [
             {
+                "name": "tank",
+                "type": "filesystem",
+                "used_bytes": 400,
+                "available_bytes": 600,
+                "referenced_bytes": 350,
+                "logical_used_bytes": 700,
+                "compression_ratio": 1.75,
+                "mountpoint": "/tank",
+                "properties": [
+                    {
+                        "property": "recordsize",
+                        "value": "1M",
+                        "source": "local",
+                        "is_set": True,
+                    }
+                ],
+            },
+            {
                 "name": "tank/data",
                 "type": "filesystem",
                 "used_bytes": 100,
@@ -542,6 +561,18 @@ def test_server_and_pool_pages_show_zfs_properties():
             assert "Compression Ratio" in pools_page.text
             assert "1.75x" in pools_page.text
             assert "autotrim" in pools_page.text
+
+            tanks_page = client.get("/tanks")
+            assert tanks_page.status_code == 200
+            assert "<h1>Tanks</h1>" in tanks_page.text
+            assert "tank" in tanks_page.text
+            assert "zfs-property-test" in tanks_page.text
+            assert "1.75x" in tanks_page.text
+            assert "Logical used" in tanks_page.text
+            assert "700 B" in tanks_page.text
+            assert "/tank" in tanks_page.text
+            assert "recordsize" in tanks_page.text
+            assert "autotrim" in tanks_page.text
 
             dashboard = client.get("/")
             assert dashboard.status_code == 200
