@@ -462,3 +462,8 @@ The **Settings → Email** tab now supports two selectable outbound email transp
 The Mailjet API URL is configurable and defaults to `https://api.mailjet.com/v3.1/send`, allowing use of Mailjet itself or another HTTPS service that implements the same request format. Sender and recipient settings are shared between the transports. Mailjet API credentials and SMTP passwords are encrypted at rest with `NASITRON_SECRET_KEY`.
 
 The test-email action uses whichever transport is currently selected, and normal alert notification retries/backoff are shared by both transports.
+
+
+## NASitron 0.6.17 compression ratio visibility
+
+Compression ratios are again shown prominently in the storage UI. NASitron derives each pool/tank ratio from the matching root ZFS dataset and displays it on the server pool card, global Pools page, dashboard pool summary, and dashboard pool table. The per-dataset/zvol **Compression Ratio** column remains available as well.
