@@ -467,3 +467,12 @@ The test-email action uses whichever transport is currently selected, and normal
 ## NASitron 0.6.17 compression ratio visibility
 
 Compression ratios are again shown prominently in the storage UI. NASitron derives each pool/tank ratio from the matching root ZFS dataset and displays it on the server pool card, global Pools page, dashboard pool summary, and dashboard pool table. The per-dataset/zvol **Compression Ratio** column remains available as well.
+
+
+## NASitron 0.6.18 Tanks page
+
+NASitron now includes a dedicated **Tanks** page in the primary navigation. A tank is represented as an imported ZFS pool paired with its matching root ZFS filesystem (the dataset whose name matches the pool).
+
+Each tank view combines pool and root-filesystem data in one place, including pool health, used/free/capacity, fragmentation, dedup ratio, compression ratio, root-dataset used/available/referenced/logical-used space, root compression ratio, mountpoint, read/write IOPS, bandwidth, scan state, configured pool properties, and explicitly set root-dataset properties.
+
+The page spans all monitored servers and includes summary counts for total/healthy tanks, average compression ratio, and explicitly configured properties.
