@@ -487,6 +487,7 @@ def test_server_and_pool_pages_show_zfs_properties():
                 "available_bytes": 600,
                 "referenced_bytes": 350,
                 "logical_used_bytes": 700,
+                "snapshot_used_bytes": 25,
                 "compression_ratio": 1.75,
                 "mountpoint": "/tank",
                 "properties": [
@@ -505,6 +506,7 @@ def test_server_and_pool_pages_show_zfs_properties():
                 "available_bytes": 900,
                 "referenced_bytes": 100,
                 "logical_used_bytes": 100,
+                "snapshot_used_bytes": 5,
                 "compression_ratio": 1.25,
                 "mountpoint": "/tank/data",
                 "properties": [
