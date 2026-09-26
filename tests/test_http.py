@@ -207,6 +207,7 @@ def test_sidebar_pages_are_real_routes_and_drives_page_shows_all_25():
 
             response = client.get("/drives")
             assert response.status_code == 200
+            assert 'class="readable-table"' in response.text
             assert "25 shown" in response.text
             assert "/dev/sda" in response.text
             assert "/dev/sdy" in response.text
@@ -580,6 +581,7 @@ def test_server_and_pool_pages_show_zfs_properties():
             datasets_page = client.get("/datasets")
             assert datasets_page.status_code == 200
             assert "<h1>Datasets</h1>" in datasets_page.text
+            assert 'class="dataset-table readable-table"' in datasets_page.text
             assert "tank/data" in datasets_page.text
             assert "Root dataset" in datasets_page.text
             assert "zfs-property-test" in datasets_page.text
