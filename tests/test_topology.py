@@ -90,6 +90,7 @@ errors: Permanent errors have been detected in the following files:
     assert len(parsed['vdevs']) == 4
     assert parsed['vdevs'][-1]['detail'] == 'too many errors'
     assert 'Replace the faulted device.' in sections['action']
+    assert sections['see'] == 'https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-9P'
     assert '50.00% done' in sections['scan']
     assert 'family photo.jpg' in sections['errors']
     assert 'tank/data:<0xdeadbeef>' in sections['errors']

@@ -145,7 +145,7 @@ def parse_status_sections(text: str) -> list[dict[str, str]]:
     sections = []
     current = None
     for line in text.expandtabs(8).splitlines():
-        header = re.match(r"^ {0,2}([a-z][a-z0-9_ ]*):\s*(.*)$", line)
+        header = re.match(r"^ {0,6}([a-z][a-z0-9_ ]*):\s*(.*)$", line)
         if header:
             key, value = header.groups()
             current = {"key": key, "text": value}
