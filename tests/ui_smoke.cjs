@@ -92,12 +92,12 @@ const fs = require('node:fs');
     await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
     assert.ok(page.url().includes('hours=0.25'));
     await page.locator('#io-range').selectOption('custom');
-    await page.locator('#io-start').fill('2026-01-01T01:00:00');
-    await page.locator('#io-end').fill('2026-01-01T00:00:00');
+    await page.locator('#io-start').fill('2026-01-01T01:00');
+    await page.locator('#io-end').fill('2026-01-01T00:00');
     await page.locator('#io-range-form button').click();
     assert.match(await page.locator('#io-range-error').innerText(), /end after/);
     const dates = await page.evaluate(() => {
-      const local = d => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+      const local = d => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
       return [local(new Date(Date.now()-3600000)), local(new Date())];
     });
     await page.locator('#io-start').fill(dates[0]);
