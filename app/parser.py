@@ -140,6 +140,22 @@ def _normalize_vdev_state(value: Any) -> str:
     return "ONLINE" if state == "HEALTHY" else state
 
 
+def parse_status_sections(text: str) -> list[dict[str, str]]:
+    """Keep all human-readable status sections, including verbose error paths."""
+    sections = []
+    current = None
+    for line in text.expandtabs(8).splitlines():
+        header = re.match(r"^ {0,2}([a-z][a-z0-9_ ]*):\s*(.*)$", line)
+        if header:
+            key, value = header.groups()
+            current = {"key": key, "text": value}
+            if key not in {"pool", "state", "config"}:
+                sections.append(current)
+        elif current is not None and line.strip():
+            current["text"] += "\n" + line.strip()
+    return sections
+
+
 def parse_pool_status(text: str) -> dict[str, Any]:
     state = ""
     scan = ""
@@ -172,6 +188,7 @@ def parse_pool_status(text: str) -> dict[str, Any]:
             in_scan = True
         elif stripped.startswith("errors:"):
             errors = stripped.split(":", 1)[1].strip()
+            in_config = False
         elif stripped == "config:":
             in_config = True
             role = "data"
@@ -196,6 +213,7 @@ def parse_pool_status(text: str) -> dict[str, Any]:
                     "checksum_errors": _int(parts[state_index + 3]) if len(parts) > state_index + 3 else None,
                     "role": role,
                     "indent": len(line) - len(line.lstrip()),
+                    "detail": " ".join(parts[state_index + 4:]),
                     "guid": None,
                     "size_bytes": 0,
                     "leaf": False,
@@ -216,6 +234,7 @@ def parse_pool_status(text: str) -> dict[str, Any]:
         "vdevs": config,
         "raw": text,
         "structured": False,
+        "sections": parse_status_sections(text),
     }
 
 
@@ -301,6 +320,10 @@ def parse_pool_status_json(
         if isinstance(nodes, dict):
             _flatten_json_vdevs(nodes, role=role, depth=0, output=vdevs)
 
+    text_nodes = {v["name"]: v for v in fallback.get("vdevs", [])}
+    for vdev in vdevs:
+        vdev["detail"] = text_nodes.get(vdev["name"], {}).get("detail", "")
+
     return {
         "state": str(pool.get("state") or fallback.get("state") or ""),
         "scan": fallback.get("scan", ""),
@@ -310,6 +333,7 @@ def parse_pool_status_json(
         "vdevs": vdevs,
         "raw": text_fallback,
         "structured": True,
+        "sections": fallback.get("sections", []),
     }
 
 
@@ -587,6 +611,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
                 }
             )
 
+        parsed["verbose_complete"] = text_valid
         pool["io"] = iostat.get(name, {})
         pool["status"] = parsed
         root_dataset = datasets_by_name.get(name)

@@ -442,7 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
     panes = [...document.querySelectorAll('[data-page-pane]')];
 
   function activate(name) {
-    if (!tabs.some(t => t.dataset.pageTab === name)) name = 'overview';
+    if (!tabs.some(t => t.dataset.pageTab === name)) name = tabs[0]?.dataset.pageTab;
     tabs.forEach((tab, i) => {
       const active = tab.dataset.pageTab === name;
       tab.id = 'server-tab-' + i;

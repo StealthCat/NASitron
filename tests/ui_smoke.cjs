@@ -76,15 +76,29 @@ const fs = require('node:fs');
       assert.equal(response.status(), 200, path);
     }
     await page.goto('http://127.0.0.1:8765/pools');
-    assert.equal(await page.locator('.topology-group').count(), 3);
+    assert.equal(await page.locator('.topology-group:visible').count(), 3);
     for (let i = 0; i < 3; i++) {
       assert.equal(await page.locator(`[data-vdev-name="raidz2-${i}"] .topology-device`).count(), 6);
     }
-    await page.locator('[data-topology-toggle=collapse]').click();
+    await page.locator('[data-topology-toggle=collapse]:visible').click();
     assert.equal(await page.locator('.topology-device:visible').count(), 0);
-    await page.locator('[data-topology-toggle=expand]').click();
+    await page.locator('[data-topology-toggle=expand]:visible').click();
     assert.equal(await page.locator('.topology-device:visible').count(), 18);
     await page.screenshot({path: 'test-results/pools-desktop.png', fullPage: true});
+    assert.equal(await page.locator('.pool-tabs [role=tab]').count(), 2);
+    await page.locator('.pool-tabs [role=tab]').nth(1).click();
+    assert.equal(await page.locator('.pool-pane:visible').count(), 1);
+    assert.match(await page.locator('.pool-pane:visible').innerText(), /family photo.jpg/);
+    assert.match(await page.locator('.pool-pane:visible').innerText(), /50.00% done/);
+    await page.reload();
+    assert.equal(await page.locator('.pool-tabs [aria-selected=true] .pool-tab-server').innerText(), 'Boreas Demo');
+    await page.locator('.pool-pane:visible .pool-raw summary').click();
+    assert.match(await page.locator('.pool-pane:visible .pool-raw pre').innerText(), /tank\/data:<0xdeadbeef>/);
+    await page.screenshot({path: 'test-results/pool-errors-desktop.png', fullPage: true});
+    await page.locator('.pool-tabs [aria-selected=true]').focus();
+    await page.keyboard.press('Home');
+    assert.equal(await page.locator('.pool-tabs [aria-selected=true] .pool-tab-server').innerText(), 'Athena Demo');
+
     await page.goto('http://127.0.0.1:8765/disk-io?server_id=1&identity=DEMO-000');
     await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
     assert.equal(await page.locator('#io-charts canvas').count(), 8);
@@ -131,6 +145,11 @@ const fs = require('node:fs');
     assert.equal(await page.locator('.topology-device:visible').count(), 18);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile topology overflows');
     await page.screenshot({path: 'test-results/pools-mobile.png', fullPage: true});
+    await page.locator('.pool-tabs [role=tab]').nth(1).click();
+    assert.equal(await page.locator('.pool-pane:visible').count(), 1);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile verbose status overflows');
+    await page.screenshot({path: 'test-results/pool-errors-mobile.png', fullPage: true});
+
     await page.goto('http://127.0.0.1:8765/disk-io?server_id=1&identity=DEMO-000&hours=0.25');
     await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile disk I/O overflows');

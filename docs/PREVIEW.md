@@ -220,3 +220,17 @@ counting. Interrupted samples and counter resets create gaps; idle intervals
 record zero throughput/IOPS but no latency when no operations completed. Samples
 do not capture bursts between polls. Busy time is not an NVMe saturation score.
 History starts after upgrade; no historical measurements are backfilled.
+
+### Verbose pool status and pool tabs
+
+Each pool has a separate, keyboard-accessible tab labeled with pool name, server
+and health. Tab URLs remain stable across refreshes and distinguish identically
+named pools on different servers. Regular polling now requests
+`zpool status -v -p -P -L`, retaining the full text alongside structured topology.
+The page displays multiline status/action advice, scrub or resilver progress,
+verbose permanent-error paths (including unresolved object IDs), and other
+reported sections. The full command output is available in a disclosure below
+the device configuration. Incomplete verbose collection is explicitly labeled.
+Device rows show aligned state and error counters; drive identity and SMART
+information are expandable. Verbose file lists become available after the next
+successful poll following deployment.

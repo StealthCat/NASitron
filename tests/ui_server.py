@@ -51,12 +51,13 @@ payload["pools"][0].update(
     capacity_pct=70.8,
 )
 
-topology_lines = ["config:", "  tank ONLINE 0 0 0"]
+topology_lines = ["  pool: tank", " state: ONLINE", "  scan: scrub repaired 0B in 01:25:00 with 0 errors on Sun Sep 27 10:00:00 2026", "config:", "  tank ONLINE 0 0 0"]
 for group in range(3):
     topology_lines.append(f"    raidz2-{group} ONLINE 0 0 0")
     for member in range(6):
         topology_lines.append(f"      /dev/sd{chr(97 + group * 6 + member)} ONLINE 0 0 0")
 topology_lines[-1] = "      scsi-SATA_WDC_WD60EFAX-68S_WD-WX31D49KSZTT ONLINE 0 0 0"
+topology_lines.append("errors: No known data errors")
 payload["pools"][0]["status"] = parse_pool_status("\n".join(topology_lines))
 with SessionLocal() as db:
     ensure_defaults(db)
@@ -109,6 +110,31 @@ with SessionLocal() as db:
                                ("write_latency_ms", 6), ("busy_pct", 45), ("queue_depth", 0.8)]:
                 db.add(Metric(server_id=sid, name="drive.io." + key, scope=scope,
                               value=value, captured_at=now - timedelta(minutes=minutes)))
+    other = Server(name="Boreas Demo", host="192.0.2.11", username="nasitron", enabled=True,
+                   last_collection_state="ok", last_ok_at=now, last_poll_at=now)
+    db.add(other)
+    db.flush()
+    damaged = json.loads(json.dumps(payload))
+    damaged["drives"] = []
+    damaged["pools"] = [dict(payload["pools"][0], health="DEGRADED", status=parse_pool_status("""  pool: tank
+ state: DEGRADED
+status: One or more devices has experienced an error.
+        The pool can still be used.
+action: Replace the affected device after checking its connections.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-9P
+  scan: resilver in progress since Sun Sep 27 10:00:00 2026
+        120G scanned, 60G issued, 50.00% done, 00:12:00 to go
+config:
+        NAME STATE READ WRITE CKSUM
+        tank DEGRADED 0 0 3
+          mirror-0 DEGRADED 0 0 3
+            /dev/sda ONLINE 0 0 0 (resilvering)
+            /dev/sdb FAULTED 0 0 3 too many errors
+errors: Permanent errors have been detected in the following files:
+        /tank/photos/family photo.jpg
+        tank/data:<0xdeadbeef>
+"""))]
+    db.add(CurrentState(server_id=other.id, payload_json=json.dumps(damaged)))
     db.commit()
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ from .crypto import decrypt, encrypt
 from .db import SessionLocal, init_db
 from .instance_lock import InstanceLock
 from .topology import pool_topology
+from .parser import parse_status_sections
 from .maintenance import (
     ReplacementRequest,
     discover_replacement_options,
@@ -877,6 +878,12 @@ def pools_index(request: Request, db: Session = Depends(get_db)):
     data = _inventory_rows(db)
     for row in data["pool_rows"]:
         row["topology"] = pool_topology(row["pool"], row["snapshot"].get("drives", []))
+        status = row["pool"].get("status") or {}
+        row["status_sections"] = status.get("sections") or parse_status_sections(status.get("raw", ""))
+        if not row["status_sections"]:
+            row["status_sections"] = [{"key": key, "text": status.get(key)}
+                                      for key in ("scan", "errors") if status.get(key)]
+        row["tab_key"] = f"pool-{row['server'].id}-" + str(row["pool"].get("name", "")).encode().hex()
     degraded = sum(
         1
         for row in data["pool_rows"]

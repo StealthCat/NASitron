@@ -61,3 +61,41 @@ def test_json_and_text_same_hierarchy_and_no_guessed_disk_identity():
     assert group['children'][0]['disk']['serial'] == 'A'
     assert group['children'][1]['disk'] is None
     assert pool_topology({'name': 'empty'}, [])['sections'] == []
+
+
+def test_verbose_status_preserves_advice_scan_and_error_paths_without_fake_vdevs():
+    from app.parser import parse_status_sections
+    text = '''  pool: tank
+ state: DEGRADED
+status: A device is unavailable.
+        The pool remains accessible.
+action: Check connections.
+        Replace the faulted device.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-9P
+  scan: resilver in progress
+        100G scanned, 50.00% done, 00:10:00 to go
+config:
+        NAME STATE READ WRITE CKSUM
+        tank DEGRADED 0 0 3
+          mirror-0 DEGRADED 0 0 3
+            /dev/sda ONLINE 0 0 0 (resilvering)
+            /dev/sdb FAULTED 0 0 3 too many errors
+errors: Permanent errors have been detected in the following files:
+        /tank/photos/family photo.jpg
+        tank/data:<0xdeadbeef>
+        /tank/path ONLINE 0 0 0
+'''
+    parsed = parse_pool_status(text)
+    sections = {s['key']: s['text'] for s in parsed['sections']}
+    assert len(parsed['vdevs']) == 4
+    assert parsed['vdevs'][-1]['detail'] == 'too many errors'
+    assert 'Replace the faulted device.' in sections['action']
+    assert '50.00% done' in sections['scan']
+    assert 'family photo.jpg' in sections['errors']
+    assert 'tank/data:<0xdeadbeef>' in sections['errors']
+    assert parse_status_sections(text) == parsed['sections']
+    json_status = parse_pool_status_json(json.dumps({'pools': {'tank': {'vdevs': {
+        'tank': {'state': 'DEGRADED', 'vdevs': {'a': {'path': '/dev/sda', 'state': 'ONLINE'}}}
+    }}}}), 'tank', text)
+    assert json_status['sections'] == parsed['sections']
+    assert json_status['vdevs'][-1]['detail'] == '(resilvering)'

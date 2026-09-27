@@ -8,21 +8,21 @@
 {% macro render_node(node) %}
 <li class="topology-node" data-vdev-name="{{ node.name }}">
 {% if node.children %}<details open class="topology-group"><summary>{% else %}<div class="topology-device">{% endif %}
-<div class="topology-heading"><strong class="topology-name">{{ node.name }}</strong><span class="badge {{ node.tone }}">{{ node.state }}</span></div>
-<div class="topology-facts"><span>{{ node.kind }}{% if node.children %} · {{ node.disk_count }} member devices{% endif %}</span>{% if node.size_bytes %}<span>Reported size {{ node.size_bytes|human_bytes }}</span>{% endif %}</div>
-{{ errors(node) }}
+<div class="topology-line"><div class="topology-identity"><strong class="topology-name">{{ node.name }}</strong>{% if node.children %}<span class="subtle">{{ node.kind }} · {{ node.disk_count }} member devices{% if node.size_bytes %} · {{ node.size_bytes|human_bytes }} reported{% endif %}</span>{% endif %}</div><span class="badge {{ node.tone }}">{{ node.state }}</span>{{ errors(node) }}</div>
+{% if node.get('detail') %}<p class="subtle">{{ node.detail }}</p>{% endif %}
 {% if node.children %}</summary><ul class="topology-children">{% for child in node.children %}{{ render_node(child) }}{% endfor %}</ul></details>
 {% else %}
 {% if node.disk %}{% set disk=node.disk %}{% set smart=disk.get('smart') or {} %}{% set health=smart_state(smart) %}
-<div class="topology-disk"><a href="/servers/{{ row.server.id }}/drive?identity={{ (disk.serial or disk.path)|urlencode }}">{{ disk.model or 'Drive details' }} · {{ disk.serial or disk.path }}</a><span>{{ disk.size_bytes|human_bytes }} physical disk{% if disk.bay_label %} · {{ disk.bay_label }}{% endif %}</span><span>SMART <span class="badge {{ health[0] }}">{{ health[1] }}</span> · {{ smart.temperature_c if smart.get('temperature_c') is not none else '—' }} °C</span></div>
-{% else %}<div class="subtle">Physical drive details unavailable</div>{% endif %}
+<details class="topology-drive-details"><summary>Drive details · {{ disk.size_bytes|human_bytes }}{% if disk.bay_label %} · {{ disk.bay_label }}{% endif %}{% if smart.get('temperature_c') is not none %} · {{ smart.temperature_c }} °C{% endif %}</summary>
+<div class="topology-disk"><a href="/servers/{{ row.server.id }}/drive?identity={{ (disk.serial or disk.path)|urlencode }}">{{ disk.model or 'Drive details' }} · {{ disk.serial or disk.path }}</a><span>SMART <span class="badge {{ health[0] }}">{{ health[1] }}</span></span><a href="/disk-io?server_id={{ row.server.id }}&identity={{ (disk.serial or disk.path)|urlencode }}">Disk I/O history</a></div></details>
+{% elif node.size_bytes %}<span class="subtle">Reported size {{ node.size_bytes|human_bytes }}</span>{% endif %}
 </div>{% endif %}
 </li>
 {% endmacro %}
 <section class="pool-topology" aria-label="{{ pool.name }} disk hierarchy">
-<div class="topology-toolbar"><h3>Disk hierarchy</h3>{% if row.topology.sections %}<div><button type="button" class="button" data-topology-toggle="expand">Expand all</button> <button type="button" class="button" data-topology-toggle="collapse">Collapse all</button></div>{% endif %}</div>
-<p class="subtle">{{ pool.name }} → vdev groups → member devices. Read, write and checksum values are error counts from the latest collected status.</p>
-{% if row.topology.root %}<div class="topology-root"><strong>{{ pool.name }} · Pool errors</strong>{{ errors(row.topology.root) }}</div>{% endif %}
+<div class="topology-toolbar"><h3>Device configuration</h3>{% if row.topology.sections %}<div><button type="button" class="button" data-topology-toggle="expand">Expand groups</button> <button type="button" class="button" data-topology-toggle="collapse">Collapse groups</button></div>{% endif %}</div>
+<p class="subtle">Read, write and checksum columns show ZFS error counts.</p>
+{% if row.topology.root %}<div class="topology-root"><strong>{{ pool.name }} · Pool totals</strong>{{ errors(row.topology.root) }}</div>{% endif %}
 {% for section in row.topology.sections %}
 <div class="topology-section"><h4>{{ section.label }} <span class="subtle">· {{ section.nodes|length }} top-level {{ 'vdev' if section.nodes|length == 1 else 'vdevs' }} · {{ section.disk_count }} member devices</span></h4><ul class="topology-tree">{% for node in section.nodes %}{{ render_node(node) }}{% endfor %}</ul></div>
 {% else %}<p class="muted">Disk topology has not been collected for this pool yet.</p>{% endfor %}

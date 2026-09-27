@@ -357,7 +357,7 @@ class SSHCollector:
                 timeout=20,
             )
             raw["zpool_status"][pool] = self.run(
-                f"zpool status -P -L {quoted}", timeout=20
+                f"zpool status -v -p -P -L {quoted}", timeout=20
             )
 
             if json_capability is False:

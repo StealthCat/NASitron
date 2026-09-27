@@ -1100,3 +1100,31 @@ body[data-role=viewer] [data-operator-only],body:not([data-role=admin]) [data-ad
 .io-filters [hidden] { display:none; }
 .io-filters label:has(#io-auto) { display:flex; align-items:center; align-self:center; gap:8px; }
 .io-filters input[type=checkbox] { width:16px; height:16px; min-height:0; margin:0; padding:0; flex:0 0 16px; }
+
+.pool-tabs { margin-top:20px; }
+.pool-tabs button { min-width:170px; text-align:left; }
+.pool-tab-name { display:flex; align-items:center; gap:12px; flex-wrap:wrap; overflow-wrap:anywhere; }
+.pool-tab-server { display:block; font-size:12px; opacity:.85; margin-top:5px; }
+.pool-pane { min-width:0; }
+.pool-status-sections { display:grid; gap:12px; margin-top:16px; }
+.pool-status-block { padding:14px 16px; border:1px solid var(--border, #263447); border-radius:8px; background:#0b121e; }
+.pool-status-block h3 { margin:0 0 8px; font-size:14px; }
+.pool-status-text { white-space:pre-wrap; overflow-wrap:anywhere; margin:0; font:13px/1.65 ui-monospace,monospace; }
+.pool-status-warning { border-left:3px solid #e9ad45; padding-left:14px; }
+.pool-raw { margin:20px 0 12px; }
+.pool-raw pre { padding:16px; }
+.topology-line { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(240px,auto); align-items:center; gap:12px; }
+.topology-identity { min-width:0; display:grid; gap:3px; }
+.topology-line .topology-errors { margin:0; display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.topology-line .topology-errors > span { display:grid; font-size:11px; gap:3px; }
+.topology-line .topology-errors strong { margin:0; font-size:14px; }
+.topology-drive-details { margin-top:6px; font-size:12px; }
+.topology-drive-details summary { cursor:pointer; color:var(--muted, #a9b7cb); }
+.topology-children > .topology-node:nth-child(even) > .topology-device { background:#111b2b; }
+.critical-text { color:#ff718a; }
+@media (max-width:800px) {
+  .topology-line { grid-template-columns:minmax(0,1fr) auto; }
+  .topology-line .topology-errors { grid-column:1 / -1; }
+  .pool-tabs { position:static; }
+  .pool-tabs button { flex:1 1 150px; min-width:0; }
+}
