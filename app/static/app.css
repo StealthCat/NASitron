@@ -1098,3 +1098,5 @@ body[data-role=viewer] [data-operator-only],body:not([data-role=admin]) [data-ad
 .io-filters select, .io-filters input { max-width:100%; }
 .io-filters > label:has(#io-disk) { flex:1; min-width:200px; }
 .io-filters [hidden] { display:none; }
+.io-filters label:has(#io-auto) { display:flex; align-items:center; align-self:center; gap:8px; }
+.io-filters input[type=checkbox] { width:16px; height:16px; min-height:0; margin:0; padding:0; flex:0 0 16px; }
