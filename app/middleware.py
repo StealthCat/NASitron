@@ -20,11 +20,12 @@ class RequestBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        limit = 17 * 1024 * 1024 if scope.get("path") == "/settings/tools/compare" else self.max_bytes
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
         length = headers.get(b"content-length")
         if length is not None:
             try:
-                if int(length) > self.max_bytes:
+                if int(length) > limit:
                     response = PlainTextResponse("Request body too large", status_code=413)
                     await response(scope, receive, send)
                     return
@@ -40,7 +41,7 @@ class RequestBodyLimitMiddleware:
             message = await receive()
             if message["type"] == "http.request":
                 total += len(message.get("body", b""))
-                if total > self.max_bytes:
+                if total > limit:
                     raise RequestTooLarge
             return message
 

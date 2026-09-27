@@ -1,5 +1,12 @@
 # NASitron
 
+> **0.7 preview:** An attention-first dashboard, server tabs, searchable/sortable
+> inventories, viewer/operator/admin roles, live operation tracking, drive labels,
+> snapshot inventory, capacity forecasts, alert snoozing, maintenance windows,
+> tuning comparison, and encrypted offline backup/restore are available on
+> `preview`. See [Preview guide](docs/PREVIEW.md) for usage, upgrades and recovery.
+
+
 NASitron is a Dockerized, agentless monitoring dashboard for Ubuntu servers running OpenZFS. It connects to one or more NAS hosts over SSH, collects ZFS/storage/system telemetry on a configurable schedule, keeps historical metrics, raises health alerts, sends email through a configurable SMTP relay, can produce a compressed diagnostic bundle intended for ZFS tuning analysis, and provides a guarded workflow for replacing failed ZFS drives with available blank disks.
 
 ## What it monitors

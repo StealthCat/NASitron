@@ -338,6 +338,9 @@ class SSHCollector:
         for key, command in commands.items():
             raw[key] = self.run(command, timeout=45 if key == "zpool_iostat" else 20)
 
+        if include_smart:
+            raw["zfs_snapshots"] = self.run(
+                "zfs list -Hp -t snapshot -o name,creation,used,refer -s creation", timeout=45)
         pools = self._strict_pool_names(raw["zpool_list"])
 
         raw["zpool_get"] = {}

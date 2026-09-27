@@ -1,0 +1,102 @@
+{
+  "system": {
+    "hostname": "property-nas",
+    "memory": {
+      "used_pct": 10,
+      "used_bytes": 100,
+      "total_bytes": 1000
+    },
+    "zfs_version": "zfs-2.2",
+    "load1": 0,
+    "uptime_seconds": 100,
+    "services": "zfs.target=active"
+  },
+  "arc": {
+    "hit_rate_pct": 99.0,
+    "size_bytes": 1,
+    "target_bytes": 1,
+    "min_bytes": 1,
+    "max_bytes": 1,
+    "hits": 1,
+    "misses": 0,
+    "l2_size_bytes": 0,
+    "l2_hit_rate_pct": 0
+  },
+  "pools": [
+    {
+      "name": "tank",
+      "size_bytes": 1000,
+      "alloc_bytes": 400,
+      "free_bytes": 600,
+      "fragmentation_pct": 10,
+      "capacity_pct": 40,
+      "dedup_ratio": 1,
+      "compression_ratio": 1.75,
+      "health": "ONLINE",
+      "io": {},
+      "status": {
+        "scan": "",
+        "vdevs": []
+      },
+      "properties": [
+        {
+          "property": "autotrim",
+          "value": "on",
+          "source": "local",
+          "is_set": true
+        },
+        {
+          "property": "comment",
+          "value": "-",
+          "source": "default",
+          "is_set": false
+        }
+      ]
+    }
+  ],
+  "datasets": [
+    {
+      "name": "tank",
+      "type": "filesystem",
+      "used_bytes": 400,
+      "available_bytes": 600,
+      "referenced_bytes": 350,
+      "logical_used_bytes": 700,
+      "snapshot_used_bytes": 25,
+      "compression_ratio": 1.75,
+      "mountpoint": "/tank",
+      "properties": [
+        {
+          "property": "recordsize",
+          "value": "1M",
+          "source": "local",
+          "is_set": true
+        }
+      ]
+    },
+    {
+      "name": "tank/data",
+      "type": "filesystem",
+      "used_bytes": 100,
+      "available_bytes": 900,
+      "referenced_bytes": 100,
+      "logical_used_bytes": 100,
+      "snapshot_used_bytes": 5,
+      "compression_ratio": 1.25,
+      "mountpoint": "/tank/data",
+      "properties": [
+        {
+          "property": "compression",
+          "value": "zstd",
+          "source": "local",
+          "is_set": true
+        }
+      ]
+    }
+  ],
+  "drives": [],
+  "collection": {
+    "stale_subsystems": [],
+    "errors": []
+  }
+}

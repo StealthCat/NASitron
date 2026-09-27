@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from .models import Alert, Server
+from .models import Alert, Server, MaintenanceWindow
 from .settings_store import get_bool, get_int, get_many, get_setting
 
 
@@ -674,7 +674,12 @@ def deliver_pending_notifications(db: Session) -> int:
         return 0
 
     grouped: dict[int, list[Alert]] = {}
+    windows = db.scalars(select(MaintenanceWindow).where(
+        MaintenanceWindow.starts_at <= now, MaintenanceWindow.ends_at > now)).all()
+    muted_servers = {w.server_id for w in windows}
     for alert in pending:
+        if alert.server_id in muted_servers or (alert.snoozed_until and alert.snoozed_until > now):
+            continue
         grouped.setdefault(alert.server_id, []).append(alert)
 
     sent_groups = 0

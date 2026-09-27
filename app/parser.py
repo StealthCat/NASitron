@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -142,6 +142,8 @@ def parse_pool_status(text: str) -> dict[str, Any]:
     state = ""
     scan = ""
     errors = ""
+    scan_lines = []
+    in_scan = False
     config: list[dict[str, Any]] = []
     in_config = False
     role = "data"
@@ -155,10 +157,16 @@ def parse_pool_status(text: str) -> dict[str, Any]:
 
     for line in text.splitlines():
         stripped = line.strip()
+        if in_scan and stripped and not re.match(r"[a-z]+:", stripped):
+            scan_lines.append(stripped)
+        elif re.match(r"[a-z]+:", stripped):
+            in_scan = False
         if stripped.startswith("state:"):
             state = stripped.split(":", 1)[1].strip()
         elif stripped.startswith("scan:"):
             scan = stripped.split(":", 1)[1].strip()
+            scan_lines.append(scan)
+            in_scan = True
         elif stripped.startswith("errors:"):
             errors = stripped.split(":", 1)[1].strip()
         elif stripped == "config:":
@@ -198,6 +206,7 @@ def parse_pool_status(text: str) -> dict[str, Any]:
     return {
         "state": state,
         "scan": scan,
+        "scan_detail": "\n".join(scan_lines),
         "errors": errors,
         "scrub_finished_at": _scrub_finished(scan),
         "vdevs": config,
@@ -291,6 +300,7 @@ def parse_pool_status_json(
     return {
         "state": str(pool.get("state") or fallback.get("state") or ""),
         "scan": fallback.get("scan", ""),
+        "scan_detail": fallback.get("scan_detail", ""),
         "errors": fallback.get("errors", ""),
         "scrub_finished_at": fallback.get("scrub_finished_at"),
         "vdevs": vdevs,
@@ -709,6 +719,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         "arc": parse_arcstats(raw.get("arcstats", {}).get("stdout", "")),
         "pools": pools,
         "datasets": datasets,
+        "snapshot_inventory": parse_snapshot_inventory(raw.get("zfs_snapshots"), sampled_at),
         "drives": disks,
         "collection": {
             "captured_at": sampled_at,
@@ -724,3 +735,21 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         },
         "capabilities": raw.get("capabilities", {}),
     }
+
+
+def parse_snapshot_inventory(result, captured_at):
+    if result is None:
+        return {"fresh": False, "rows": []}
+    if result.get("exit") != 0 or result.get("stdout_truncated"):
+        return {"fresh": False, "rows": [], "error": "Snapshot inventory unavailable or truncated"}
+    rows = []
+    for line in result.get("stdout", "").splitlines():
+        parts = line.split("\t")
+        if len(parts) != 4 or "@" not in parts[0]:
+            return {"fresh": False, "rows": [], "error": "Malformed snapshot inventory"}
+        try:
+            rows.append({"name": parts[0], "created": datetime.fromtimestamp(int(parts[1]), timezone.utc).isoformat(),
+                         "used": int(parts[2]), "referenced": int(parts[3])})
+        except (ValueError, OverflowError):
+            return {"fresh": False, "rows": [], "error": "Malformed snapshot accounting"}
+    return {"fresh": True, "captured_at": captured_at, "rows": rows}

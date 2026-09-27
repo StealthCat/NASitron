@@ -56,7 +56,7 @@
     <section class="panel flush">
       <div class="panel-title" style="padding:16px 16px 0">
         <h2><svg class="section-icon" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3"/><circle cx="12" cy="9" r="3"/><path d="M8 17h8"/></svg>Failed / Offline Devices</h2>
-        <a class="button" href="/servers/{{ server.id }}/replace-drive">↻ Rescan drives</a>
+        <a class="button" href="/servers/{{ server.id }}/replace-drive" data-operator-only>↻ Rescan drives</a>
       </div>
       <div class="scroll">
         <table>
@@ -129,8 +129,8 @@
       </div>
 
       <div class="field">
-        <label>Available replacement drive</label>
-        <select name="new_device" class="replacement-select" required>
+        <label for="replace_drive-field-1-{{ loop.index }}">Available replacement drive</label>
+        <select id="replace_drive-field-1-{{ loop.index }}" name="new_device" class="replacement-select" required>
           <option value="">Select a blank drive…</option>
           {% for disk in inventory.candidates %}
           {% if not failed.size_bytes or disk.size_bytes >= failed.size_bytes %}
@@ -150,8 +150,8 @@
       <label class="checkbox"><input type="checkbox" name="allow_conflicting_operation"> I understand a scrub/resilver is already in progress and explicitly allow the replacement attempt.</label>
       {% endif %}
       <div class="field">
-        <label>Type <code>REPLACE {{ failed.pool }}</code> to confirm this operation</label>
-        <input name="confirm_text" autocomplete="off" required placeholder="REPLACE {{ failed.pool }}">
+        <label for="replace_drive-field-2-{{ loop.index }}">Type <code>REPLACE {{ failed.pool }}</code> to confirm this operation</label>
+        <input id="replace_drive-field-2-{{ loop.index }}" name="confirm_text" autocomplete="off" required placeholder="REPLACE {{ failed.pool }}">
       </div>
       <div class="row between">
         <div class="subtle">The selected disk is inventoried again immediately before NASitron executes the command. NASitron never adds <code>-f</code>.</div>
@@ -163,8 +163,8 @@
 
   <aside class="maintenance-stack">
     <section class="panel">
-      <div class="panel-title"><h2>Replacement Progress</h2><span class="badge">{{ "Ready" if inventory.failed and inventory.candidates else "Not Started" }}</span></div>
-      <div class="maintenance-steps">
+      <div class="panel-title"><h2>Replacement workflow</h2><span class="badge">{{ "Ready" if inventory.failed and inventory.candidates else "Not Started" }}</span></div>
+      <p><a href="/operations">Open live resilver progress and verification →</a></p><div class="maintenance-steps">
         <div class="maintenance-step {{ 'active' if inventory.failed else '' }}">
           <div class="step-number">1</div>
           <div><strong>Identify Drive</strong><div class="step-copy">Detect the failed ZFS leaf and confirm the replacement target.</div></div>
@@ -178,12 +178,12 @@
         <div class="maintenance-step">
           <div class="step-number">3</div>
           <div><strong>Resilver Pool</strong><div class="step-copy">OpenZFS rebuilds redundancy after <code>zpool replace</code>.</div></div>
-          <span class="badge offline">Pending</span>
+          <span class="badge offline">See Operations</span>
         </div>
         <div class="maintenance-step">
           <div class="step-number">4</div>
           <div><strong>Verify Health</strong><div class="step-copy">Confirm pool state, error counters and SMART status after completion.</div></div>
-          <span class="badge offline">Pending</span>
+          <span class="badge offline">See Operations</span>
         </div>
       </div>
     </section>
@@ -198,7 +198,7 @@
             <tr>
               <td>{{ action.created_at|fmt_dt }}</td>
               <td><strong>{{ action.pool }}</strong><div class="subtle">{{ action.old_device }} → {{ action.new_device }}</div></td>
-              <td><span class="badge {{ 'good' if action.success else 'critical' }}">{{ "Completed" if action.success else "Failed" }}</span></td>
+              <td><span class="badge {{ 'good' if action.success else 'critical' }}">{{ action.state|title if action.success else "Command failed" }}</span></td>
             </tr>
             {% if action.output %}
             <tr><td colspan="3"><details><summary class="subtle">Command and output</summary><div style="margin-top:8px">{% if action.command %}<div class="command-box">{{ action.command }}</div>{% endif %}<pre style="margin-top:8px">{{ action.output }}</pre></div></details></td></tr>

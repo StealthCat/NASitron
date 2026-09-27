@@ -16,12 +16,12 @@ from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from sqlalchemy import Integer, cast, func, select
+from sqlalchemy import Integer, cast, func, select, or_
 from sqlalchemy.orm import Session, selectinload
 from starlette.background import BackgroundTask
 
@@ -51,7 +51,7 @@ from .middleware import (
     RequireHTTPSMiddleware,
     SecurityHeadersMiddleware,
 )
-from .models import Alert, CurrentState, MaintenanceAction, Metric, RemoteEnrollment, Server, WebUser
+from .models import Alert, CurrentState, MaintenanceAction, Metric, RemoteEnrollment, Server, WebUser, DriveLabel
 from .scheduler import start_scheduler, stop_scheduler, trigger_now
 from .security import (
     SESSION_COOKIE_NAME,
@@ -69,6 +69,8 @@ from .security import (
     require_secure_maintenance,
     safe_next_url,
 )
+from .experience import server_state, smart_state, pool_state, effective_role, operation_status, alert_target
+from .insights import install as install_insights
 from .service import latest_snapshot
 from .settings_store import ensure_defaults, get_many, get_setting, set_setting
 from .support import sanitize_diagnostics, support_bundle_lock
@@ -156,6 +158,9 @@ def fmt_dt(value) -> str:
 templates.env.filters["human_bytes"] = human_bytes
 templates.env.filters["human_duration"] = human_duration
 templates.env.filters["fmt_dt"] = fmt_dt
+templates.env.globals.update(server_state=server_state, smart_state=smart_state,
+                             pool_state=pool_state, effective_role=effective_role,
+                             operation_status=operation_status, alert_target=alert_target)
 
 
 @asynccontextmanager
@@ -198,6 +203,19 @@ async def require_web_session(request: Request, call_next):
     if public_path:
         return await call_next(request)
     if user is not None:
+        role = effective_role(user)
+        # Deny by default: operators have an explicit action allowlist.
+        admin_page = (path.startswith(("/settings", "/users", "/api/enrollments")) or
+                      path == "/servers/new" or path.endswith(("/edit", "/host-key")))
+        operator_action = bool(re.fullmatch(
+            r"/servers/\d+/(poll|replace-drive|support-bundle|drive-label|maintenance-window)|/alerts/\d+/(ack|snooze)", path))
+        if admin_page and role != "admin":
+            return PlainTextResponse("Administrator access required.", status_code=403)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and path != "/logout":
+            if role != "admin" and not (role == "operator" and operator_action):
+                return PlainTextResponse("This action requires an operator or administrator.", status_code=403)
+        if "replace-drive" in path and role == "viewer":
+            return PlainTextResponse("Operator access required.", status_code=403)
         return await call_next(request)
 
     if path.startswith("/api/"):
@@ -562,9 +580,14 @@ def remote_enrollment_status(
     if enrollment is None:
         raise HTTPException(status_code=404)
     if enrollment.used_at is not None and enrollment.server_id is not None:
+        enrolled_server = db.get(Server, enrollment.server_id)
+        if enrolled_server is None:
+            raise HTTPException(404, "Enrolled server was deleted")
         return {
             "status": "complete",
             "server_id": enrollment.server_id,
+            "phase": ("reporting" if enrolled_server.last_ok_at else
+                      "ssh_error" if enrolled_server.last_error else "verifying"),
         }
     if enrollment.expires_at <= datetime.utcnow():
         return {"status": "expired"}
@@ -594,7 +617,9 @@ def _expected_pools(server: Server) -> set[str]:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
-    servers = db.scalars(select(Server).order_by(Server.name)).all()
+    server_filter = request.query_params.get("server", "")
+    all_servers = db.scalars(select(Server).order_by(Server.name)).all()
+    servers = [s for s in all_servers if not server_filter or str(s.id) == server_filter]
     server_ids = [server.id for server in servers]
     state_rows = (
         db.scalars(select(CurrentState).where(CurrentState.server_id.in_(server_ids))).all()
@@ -629,7 +654,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         active_alerts = alerts_by_server.get(server.id, [])
         cards.append({"server": server, "snapshot": snapshot, "alerts": active_alerts})
 
-        if snapshot and server.last_collection_state != "failed":
+        if server_state(server, snapshot)[0] == "good":
             online_servers += 1
             if "zfs.arc" not in set(
                 snapshot.get("collection", {}).get("stale_subsystems", [])
@@ -640,14 +665,14 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             continue
 
         for pool in snapshot.get("pools", []):
-            pool_rows.append({"server": server, "pool": pool})
+            pool_rows.append({"server": server, "pool": pool, "snapshot": snapshot})
             if str(pool.get("health", "")).upper() != "ONLINE":
                 degraded_pools += 1
                 if maintenance_server is None:
                     maintenance_server = server
 
         for drive in snapshot.get("drives", []):
-            drive_rows.append({"server": server, "drive": drive})
+            drive_rows.append({"server": server, "drive": drive, "snapshot": snapshot})
             smart = drive.get("smart") or {}
             if smart.get("smart_passed") is False:
                 failed_drives += 1
@@ -657,7 +682,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     recent_alerts = db.scalars(
         select(Alert)
         .options(selectinload(Alert.server))
-        .order_by(Alert.last_seen.desc())
+        .where(Alert.active.is_(True), Alert.server_id.in_(server_ids))
+        .order_by((Alert.severity == "critical").desc(), Alert.last_seen.desc())
         .limit(8)
     ).all()
     active_alerts = alert_rows
@@ -669,6 +695,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         overall_status = "critical"
     elif active_alerts or degraded_pools:
         overall_status = "warning"
+    elif not cards or any(server_state(c["server"], c["snapshot"])[0] != "good" for c in cards):
+        overall_status = "unknown"
     else:
         overall_status = "good"
 
@@ -681,9 +709,11 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "failed_drives": failed_drives,
         "active_alerts": len(active_alerts),
         "critical_alerts": critical_alerts,
-        "arc_hit_rate": (sum(arc_rates) / len(arc_rates)) if arc_rates else 0,
+        "arc_hit_rate": (sum(arc_rates) / len(arc_rates)) if arc_rates else None,
         "overall_status": overall_status,
     }
+
+    pool_rows.sort(key=lambda row: row["pool"].get("capacity_pct") or -1, reverse=True)
 
     return templates.TemplateResponse(
         request=request,
@@ -692,6 +722,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "cards": cards,
             "summary": summary,
+            "all_servers": all_servers,
+            "server_filter": server_filter,
             "pool_rows": pool_rows,
             "drive_rows": drive_rows,
             "recent_alerts": recent_alerts,
@@ -767,6 +799,7 @@ def _inventory_rows(db: Session) -> dict:
             dataset_rows.append(
                 {
                     "server": server,
+                    "snapshot": snapshot,
                     "dataset": dataset,
                     "tank_name": tank_name,
                     "is_root": dataset_name in pool_names,
@@ -774,20 +807,25 @@ def _inventory_rows(db: Session) -> dict:
             )
 
         for pool in snapshot.get("pools", []):
-            pool_rows.append({"server": server, "pool": pool})
+            pool_rows.append({"server": server, "pool": pool, "snapshot": snapshot})
             pool_name = str(pool.get("name") or "")
             root_dataset = datasets_by_name.get(pool_name)
             tank_rows.append(
                 {
                     "server": server,
+                    "snapshot": snapshot,
                     "pool": pool,
                     "dataset": root_dataset,
                     "tank_name": pool_name,
                 }
             )
         for drive in snapshot.get("drives", []):
-            drive_rows.append({"server": server, "drive": drive})
+            drive_rows.append({"server": server, "drive": drive, "snapshot": snapshot})
 
+    labels = {(r.server_id, r.identity): r.label for r in db.scalars(select(DriveLabel))}
+    for row in drive_rows:
+        disk = row["drive"]
+        disk["bay_label"] = labels.get((row["server"].id, disk.get("serial")), "")
     pool_rows.sort(
         key=lambda row: (
             row["server"].name.lower(),
@@ -1560,6 +1598,8 @@ def perform_drive_replacement(
             MaintenanceAction(
                 server_id=server.id,
                 action="zpool_replace",
+                actor=_current_user(request).username,
+                state="accepted",
                 pool=request_data.pool,
                 old_device=f"{request_data.old_device} [guid={request_data.old_guid}]",
                 new_device=request_data.new_device,
@@ -1589,6 +1629,8 @@ def perform_drive_replacement(
             MaintenanceAction(
                 server_id=server.id,
                 action="zpool_replace",
+                actor=_current_user(request).username,
+                state="accepted",
                 pool=request_data.pool,
                 old_device=f"{request_data.old_device} [guid={request_data.old_guid}]",
                 new_device=request_data.new_device,
@@ -1672,6 +1714,7 @@ def metric_history(
         "sample_count": sample_count,
         "returned_points": len(points),
         "bucket_seconds": bucket_seconds,
+        "expected_interval_seconds": (db.get(Server, server_id).smart_interval_minutes*60 if name.startswith("drive.") else db.get(Server, server_id).poll_interval_seconds),
         "points": points,
     }
 
@@ -1741,17 +1784,35 @@ def support_bundle(
 
 @app.get("/alerts", response_class=HTMLResponse)
 def alerts_page(request: Request, db: Session = Depends(get_db)):
-    alerts = db.scalars(
-        select(Alert)
-        .options(selectinload(Alert.server))
-        .order_by(Alert.active.desc(), Alert.last_seen.desc())
-        .limit(500)
-    ).all()
-    return templates.TemplateResponse(
-        request=request,
-        name="alerts.html",
-        context={"request": request, "alerts": alerts},
-    )
+    q = request.query_params.get("q", "")[:200]
+    state = request.query_params.get("state", "active")
+    severity = request.query_params.get("severity", "")
+    server_id = request.query_params.get("server", "")
+    try:
+        page = max(1, min(100000, int(request.query_params.get("page", "1"))))
+    except ValueError:
+        page = 1
+    query = select(Alert)
+    if state == "active":
+        query = query.where(Alert.active.is_(True))
+    elif state == "resolved":
+        query = query.where(Alert.active.is_(False))
+    elif state == "acknowledged":
+        query = query.where(Alert.acknowledged.is_(True))
+    if severity in {"critical", "warning", "info"}:
+        query = query.where(Alert.severity == severity)
+    if server_id.isdigit():
+        query = query.where(Alert.server_id == int(server_id))
+    if q:
+        query = query.where(or_(Alert.title.contains(q, autoescape=True), Alert.message.contains(q, autoescape=True)))
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    alerts = db.scalars(query.options(selectinload(Alert.server)).order_by(
+        Alert.active.desc(), Alert.last_seen.desc(), Alert.id.desc()).offset((page-1)*50).limit(50)).all()
+    return templates.TemplateResponse(request=request, name="alerts.html", context={
+        "alerts": alerts, "page": page, "total": total, "pages": max(1, (total+49)//50),
+        "servers": db.scalars(select(Server).order_by(Server.name)).all(),
+        "q": q, "state": state, "severity": severity, "server_filter": server_id,
+    })
 
 
 @app.post("/alerts/{alert_id}/ack")
@@ -1809,11 +1870,15 @@ def create_web_user(
     password: str = Form(...),
     password_confirm: str = Form(...),
     is_admin: bool = Form(False),
+    role: str = Form("viewer"),
     enabled: bool = Form(False),
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ):
     _require_admin(request)
+    if role not in {"viewer", "operator", "admin"}:
+        bad_request("Invalid role")
+    is_admin = is_admin or role == "admin"
     clean_username = _clean_web_username(username)
     clean_password = _validate_web_password(password)
     if clean_password != password_confirm:
@@ -1825,6 +1890,7 @@ def create_web_user(
         username=clean_username,
         password_hash=hash_password(clean_password),
         is_admin=is_admin,
+        role=role,
         enabled=enabled,
         session_version=1,
     )
@@ -1865,6 +1931,7 @@ def update_web_user(
     password: str = Form(""),
     password_confirm: str = Form(""),
     is_admin: bool = Form(False),
+    role: str = Form("viewer"),
     enabled: bool = Form(False),
     _: None = Depends(require_csrf),
     db: Session = Depends(get_db),
@@ -1874,6 +1941,9 @@ def update_web_user(
     if user is None:
         raise HTTPException(status_code=404)
 
+    if role not in {"viewer", "operator", "admin"}:
+        bad_request("Invalid role")
+    is_admin = is_admin or role == "admin"
     clean_username = _clean_web_username(username)
     duplicate = db.scalar(
         select(WebUser.id).where(
@@ -1901,11 +1971,13 @@ def update_web_user(
 
     security_changed = (
         user.username != clean_username
+        or user.role != role
         or user.is_admin != is_admin
         or user.enabled != enabled
     )
 
     user.username = clean_username
+    user.role = role
     user.is_admin = is_admin
     user.enabled = enabled
 
@@ -2319,3 +2391,6 @@ def test_email(
     except Exception as exc:
         result = f"Email test failed: {exc}"
     return RedirectResponse("/settings?tab=smtp&message=" + quote(result), status_code=303)
+
+# Register focused read-only insight pages and monitoring controls.
+install_insights(app, templates)

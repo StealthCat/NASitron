@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .alerts import collection_failed, collection_recovered, evaluate_snapshot
 from .collector import SSHCollector
 from .metrics import store_metrics
+from .experience import update_operations
 from .models import CurrentState, Metric, Server, Snapshot
 from .parser import build_snapshot
 from .settings_store import get_int
@@ -50,6 +51,11 @@ def _merge_previous_subsystems(
     stale = set(collection.get("stale_subsystems", []))
     freshness = dict(previous.get("collection", {}).get("freshness", {}))
     freshness.update(collection.get("freshness", {}))
+    if not snapshot.get("snapshot_inventory", {}).get("fresh"):
+        inventory = dict(previous.get("snapshot_inventory", {}))
+        inventory["fresh"] = False
+        inventory["error"] = snapshot.get("snapshot_inventory", {}).get("error")
+        snapshot["snapshot_inventory"] = inventory
     prev_system = previous.get("system", {})
     system = snapshot.setdefault("system", {})
 
@@ -236,6 +242,7 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
 
             collection_recovered(db, server)
             evaluate_snapshot(db, server, snapshot)
+            update_operations(db, server, snapshot)
             db.commit()
         return snapshot
     except Exception as exc:

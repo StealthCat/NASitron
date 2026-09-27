@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="page-title-wrap">
     <div class="hero-kicker">OpenZFS Storage</div>
-    <h1>Tanks</h1>
+    <h1>Pool &amp; root dataset</h1><a class="button" href="/pools">Pool topology</a>
     <p class="muted">Root ZFS filesystems paired with their backing pools across every monitored server.</p>
   </div>
 </div>
@@ -20,11 +20,11 @@
   </div>
   <div class="metric-card">
     <div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M4 8h16M4 16h16"/><path d="M8 4v16M16 4v16"/></svg></div>
-    <div><div class="metric-label">Average compression</div><div class="metric-value">{{ ("%.2f"|format(average_compression_ratio) ~ "x") if average_compression_ratio is not none else "—" }}</div><div class="metric-sub">Across reporting tanks</div></div>
+    <div><div class="metric-label">Mean compression ratio</div><div class="metric-value">{{ ("%.2f"|format(average_compression_ratio) ~ "x") if average_compression_ratio is not none else "—" }}</div><div class="metric-sub">Unweighted mean across reporting roots</div></div>
   </div>
   <div class="metric-card">
     <div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="8"/></svg></div>
-    <div><div class="metric-label">Explicit properties</div><div class="metric-value">{{ configured_tank_properties }}</div><div class="metric-sub">Pool + root dataset</div></div>
+    <div><div class="metric-label">Configured properties</div><div class="metric-value">{{ configured_tank_properties }}</div><div class="metric-sub">Pool + root dataset</div></div>
   </div>
 </section>
 
@@ -34,11 +34,11 @@
   {% set dataset = row.dataset or {} %}
   {% set cap = pool.get('capacity_pct') or 0 %}
   {% set configured_pool_props = pool.get('properties', [])|selectattr('is_set')|list %}
-  <article class="panel tank-card">
+  <article class="panel tank-card" id="{{ row.server.id }}-{{ row.tank_name|urlencode }}">
     <div class="panel-title tank-card-head">
       <div>
         <div class="hero-kicker">Tank</div>
-        <h2>{{ row.tank_name }}</h2>
+        <h2>{{ row.tank_name }}</h2>{% set freshness=server_state(row.server,row.snapshot) %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>
         <a class="subtle" href="/servers/{{ row.server.id }}">{{ row.server.name }} · {{ row.server.host }}</a>
       </div>
       <div class="row">

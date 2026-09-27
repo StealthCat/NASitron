@@ -18,6 +18,7 @@ class WebUser(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(String(20), default="viewer")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     session_version: Mapped[int] = mapped_column(Integer, default=1)
@@ -142,6 +143,7 @@ class Alert(Base):
     title: Mapped[str] = mapped_column(String(255))
     message: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
     first_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -169,6 +171,9 @@ class MaintenanceAction(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
+    actor: Mapped[str] = mapped_column(String(120), default="")
+    state: Mapped[str] = mapped_column(String(30), default="accepted")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     action: Mapped[str] = mapped_column(String(80))
     pool: Mapped[str] = mapped_column(String(255), default="")
     old_device: Mapped[str] = mapped_column(Text, default="")
@@ -180,3 +185,20 @@ class MaintenanceAction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     server: Mapped[Server] = relationship(back_populates="maintenance_actions")
+
+
+class DriveLabel(Base):
+    __tablename__ = "drive_labels"
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True)
+    identity: Mapped[str] = mapped_column(String(255), primary_key=True)
+    label: Mapped[str] = mapped_column(String(120), default="")
+
+
+class MaintenanceWindow(Base):
+    __tablename__ = "maintenance_windows"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime)
+    ends_at: Mapped[datetime] = mapped_column(DateTime)
+    reason: Mapped[str] = mapped_column(String(255))
+    actor: Mapped[str] = mapped_column(String(120))

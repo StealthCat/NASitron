@@ -4,7 +4,7 @@
 <div class="page-head settings-head">
   <div class="page-title-wrap">
     <div class="hero-kicker">Configuration</div>
-    <h1>Settings</h1>
+    <h1>Settings</h1><a class="button" href="/settings/tools">Backup & tuning comparison</a>
     <p class="muted">Configure notifications, health policy, history retention, host enrollment, and HTTPS independently.</p>
   </div>
 </div>
@@ -53,7 +53,7 @@
 
       <div class="grid two settings-field-grid">
         <div class="field">
-          <label>Email transport</label>
+          <label for="email_transport">Email transport</label>
           <select name="email_transport" id="email_transport">
             <option value="smtp" {{ 'selected' if values.email_transport == 'smtp' else '' }}>SMTP relay</option>
             <option value="mailjet" {{ 'selected' if values.email_transport == 'mailjet' else '' }}>Mailjet-compatible API</option>
@@ -63,17 +63,17 @@
           <label>Delivery</label>
           <label class="checkbox"><input type="checkbox" name="smtp_enabled" {{ 'checked' if values.smtp_enabled == 'true' else '' }}> Enable email alerts</label>
         </div>
-        <div class="field"><label>From address</label><input type="email" name="smtp_from" value="{{ values.smtp_from }}" placeholder="nasitron@example.net"></div>
-        <div class="field"><label>Recipients (comma separated)</label><input name="smtp_to" value="{{ values.smtp_to }}" placeholder="admin@example.net"></div>
+        <div class="field"><label for="settings-field-2">From address</label><input id="settings-field-2" type="email" name="smtp_from" value="{{ values.smtp_from }}" placeholder="nasitron@example.net"></div>
+        <div class="field"><label for="settings-field-3">Recipients (comma separated)</label><input id="settings-field-3" name="smtp_to" value="{{ values.smtp_to }}" placeholder="admin@example.net"></div>
       </div>
 
       <section class="email-transport-panel" data-email-transport-panel="smtp">
         <div class="panel-title email-provider-title"><h3>SMTP Relay</h3><span class="badge">SMTP</span></div>
         <div class="grid two">
-          <div class="field"><label>SMTP host</label><input name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.example.net"></div>
-          <div class="field"><label>Port</label><input type="number" min="1" max="65535" name="smtp_port" value="{{ values.smtp_port }}"></div>
-          <div class="field"><label>Username</label><input name="smtp_username" value="{{ values.smtp_username }}" autocomplete="off"></div>
-          <div class="field"><label>Password {% if values.smtp_password_configured %}(configured; leave blank to preserve){% endif %}</label><input type="password" name="smtp_password" autocomplete="new-password"></div>
+          <div class="field"><label for="settings-field-4">SMTP host</label><input id="settings-field-4" name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.example.net"></div>
+          <div class="field"><label for="settings-field-5">Port</label><input id="settings-field-5" type="number" min="1" max="65535" name="smtp_port" value="{{ values.smtp_port }}"></div>
+          <div class="field"><label for="settings-field-6">Username</label><input id="settings-field-6" name="smtp_username" value="{{ values.smtp_username }}" autocomplete="off"></div>
+          <div class="field"><label for="settings-field-7">Password {% if values.smtp_password_configured %}(configured; leave blank to preserve){% endif %}</label><input id="settings-field-7" type="password" name="smtp_password" autocomplete="new-password"></div>
         </div>
         <div class="row settings-inline-options">
           <label class="checkbox"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls == 'true' else '' }}> STARTTLS</label>
@@ -84,18 +84,18 @@
       <section class="email-transport-panel" data-email-transport-panel="mailjet">
         <div class="panel-title email-provider-title"><h3>Mailjet-Compatible Relay</h3><span class="badge">HTTPS API</span></div>
         <div class="field">
-          <label>Send API URL</label>
-          <input type="url" name="mailjet_api_url" value="{{ values.mailjet_api_url }}" placeholder="https://api.mailjet.com/v3.1/send">
+          <label for="settings-field-8">Send API URL</label>
+          <input id="settings-field-8" type="url" name="mailjet_api_url" value="{{ values.mailjet_api_url }}" placeholder="https://api.mailjet.com/v3.1/send">
           <div class="subtle">Defaults to Mailjet Send API v3.1. You can point this at another HTTPS relay that implements the same request format.</div>
         </div>
         <div class="grid two">
           <div class="field">
-            <label>API key {% if values.mailjet_api_key_configured %}(configured; leave blank to preserve){% endif %}</label>
-            <input type="password" name="mailjet_api_key" autocomplete="new-password">
+            <label for="settings-field-9">API key {% if values.mailjet_api_key_configured %}(configured; leave blank to preserve){% endif %}</label>
+            <input id="settings-field-9" type="password" name="mailjet_api_key" autocomplete="new-password">
           </div>
           <div class="field">
-            <label>Secret key {% if values.mailjet_secret_key_configured %}(configured; leave blank to preserve){% endif %}</label>
-            <input type="password" name="mailjet_secret_key" autocomplete="new-password">
+            <label for="settings-field-10">Secret key {% if values.mailjet_secret_key_configured %}(configured; leave blank to preserve){% endif %}</label>
+            <input id="settings-field-10" type="password" name="mailjet_secret_key" autocomplete="new-password">
           </div>
         </div>
         <p class="subtle">Mailjet-compatible delivery uses HTTPS Basic Authentication with the API key as the username and secret key as the password. Each configured recipient is sent as a separate message object.</p>
@@ -127,14 +127,14 @@
       <p class="muted">Choose when NASitron raises warning and critical health conditions.</p>
 
       <div class="grid two settings-field-grid">
-        <div class="field"><label>Pool capacity warning %</label><input type="number" min="1" max="100" name="pool_capacity_warning" value="{{ values.pool_capacity_warning }}"></div>
-        <div class="field"><label>Pool capacity critical %</label><input type="number" min="1" max="100" name="pool_capacity_critical" value="{{ values.pool_capacity_critical }}"></div>
-        <div class="field"><label>Drive temperature warning °C</label><input type="number" min="1" max="150" name="drive_temp_warning_c" value="{{ values.drive_temp_warning_c }}"></div>
-        <div class="field"><label>Drive temperature critical °C</label><input type="number" min="1" max="150" name="drive_temp_critical_c" value="{{ values.drive_temp_critical_c }}"></div>
-        <div class="field"><label>NVMe endurance warning (% used)</label><input type="number" min="1" max="100" name="nvme_percentage_used_warning" value="{{ values.nvme_percentage_used_warning }}"></div>
-        <div class="field"><label>NVMe endurance critical (% used)</label><input type="number" min="1" max="100" name="nvme_percentage_used_critical" value="{{ values.nvme_percentage_used_critical }}"></div>
-        <div class="field"><label>Scrub age warning (days, 0 disables)</label><input type="number" min="0" max="3650" name="scrub_age_warning_days" value="{{ values.scrub_age_warning_days }}"></div>
-        <div class="field"><label>Collection failures before alert</label><input type="number" min="1" max="100" name="collection_failure_threshold" value="{{ values.collection_failure_threshold }}"></div>
+        <div class="field"><label for="settings-field-11">Pool capacity warning %</label><input id="settings-field-11" type="number" min="1" max="100" name="pool_capacity_warning" value="{{ values.pool_capacity_warning }}"></div>
+        <div class="field"><label for="settings-field-12">Pool capacity critical %</label><input id="settings-field-12" type="number" min="1" max="100" name="pool_capacity_critical" value="{{ values.pool_capacity_critical }}"></div>
+        <div class="field"><label for="settings-field-13">Drive temperature warning °C</label><input id="settings-field-13" type="number" min="1" max="150" name="drive_temp_warning_c" value="{{ values.drive_temp_warning_c }}"></div>
+        <div class="field"><label for="settings-field-14">Drive temperature critical °C</label><input id="settings-field-14" type="number" min="1" max="150" name="drive_temp_critical_c" value="{{ values.drive_temp_critical_c }}"></div>
+        <div class="field"><label for="settings-field-15">NVMe endurance warning (% used)</label><input id="settings-field-15" type="number" min="1" max="100" name="nvme_percentage_used_warning" value="{{ values.nvme_percentage_used_warning }}"></div>
+        <div class="field"><label for="settings-field-16">NVMe endurance critical (% used)</label><input id="settings-field-16" type="number" min="1" max="100" name="nvme_percentage_used_critical" value="{{ values.nvme_percentage_used_critical }}"></div>
+        <div class="field"><label for="settings-field-17">Scrub age warning (days, 0 disables)</label><input id="settings-field-17" type="number" min="0" max="3650" name="scrub_age_warning_days" value="{{ values.scrub_age_warning_days }}"></div>
+        <div class="field"><label for="settings-field-18">Collection failures before alert</label><input id="settings-field-18" type="number" min="1" max="100" name="collection_failure_threshold" value="{{ values.collection_failure_threshold }}"></div>
       </div>
 
       <div class="row between settings-form-footer">
@@ -158,9 +158,9 @@
       <p class="muted">Control how much metric and snapshot history NASitron retains.</p>
 
       <div class="grid three settings-field-grid">
-        <div class="field"><label>Time-series metrics (days)</label><input type="number" min="1" max="3650" name="metric_retention_days" value="{{ values.metric_retention_days }}"></div>
-        <div class="field"><label>Full snapshots (days)</label><input type="number" min="1" max="3650" name="snapshot_retention_days" value="{{ values.snapshot_retention_days }}"></div>
-        <div class="field"><label>Full snapshot interval (minutes)</label><input type="number" min="1" max="1440" name="full_snapshot_interval_minutes" value="{{ values.full_snapshot_interval_minutes }}"></div>
+        <div class="field"><label for="settings-field-19">Time-series metrics (days)</label><input id="settings-field-19" type="number" min="1" max="3650" name="metric_retention_days" value="{{ values.metric_retention_days }}"></div>
+        <div class="field"><label for="settings-field-20">Full snapshots (days)</label><input id="settings-field-20" type="number" min="1" max="3650" name="snapshot_retention_days" value="{{ values.snapshot_retention_days }}"></div>
+        <div class="field"><label for="settings-field-21">Full snapshot interval (minutes)</label><input id="settings-field-21" type="number" min="1" max="1440" name="full_snapshot_interval_minutes" value="{{ values.full_snapshot_interval_minutes }}"></div>
       </div>
 
       <div class="row between settings-form-footer">
@@ -177,7 +177,7 @@
           <div class="hero-kicker">Remote Host Setup</div>
           <h2>Automatic Enrollment</h2>
         </div>
-        <a class="button primary" href="/servers/new">Add Server</a>
+        <a class="button primary" href="/servers/new" data-admin-only>Add Server</a>
       </div>
       <p class="muted">Generate a one-time curl-to-bash enrollment command for a remote NAS. The installer creates the restricted SSH access needed by NASitron and registers the server automatically.</p>
 
@@ -206,16 +206,16 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="grid two settings-field-grid">
           <div class="field">
-            <label>TLS mode</label>
-            <select name="tls_mode">
+            <label for="settings-field-22">TLS mode</label>
+            <select id="settings-field-22" name="tls_mode">
               <option value="internal" {{ 'selected' if values.tls_mode == 'internal' else '' }}>Internal CA / bootstrap</option>
               <option value="manual" {{ 'selected' if values.tls_mode == 'manual' else '' }}>Uploaded certificate</option>
               <option value="acme" {{ 'selected' if values.tls_mode == 'acme' else '' }}>ACME managed certificate</option>
             </select>
           </div>
           <div class="field">
-            <label>TLS hostname or IP</label>
-            <input name="tls_domain" value="{{ values.tls_domain }}" placeholder="nas.example.com">
+            <label for="settings-field-23">TLS hostname or IP</label>
+            <input id="settings-field-23" name="tls_domain" value="{{ values.tls_domain }}" placeholder="nas.example.com">
             <div class="subtle">Required for ACME mode. Internal/bootstrap TLS accepts the IP or hostname you browse to.</div>
           </div>
         </div>
@@ -231,12 +231,12 @@
           {% endif %}
           <div class="grid two" style="margin-top:12px">
             <div class="field">
-              <label>Certificate chain (PEM)</label>
-              <input type="file" name="certificate" accept=".pem,.crt,.cer,application/x-pem-file">
+              <label for="settings-field-24">Certificate chain (PEM)</label>
+              <input id="settings-field-24" type="file" name="certificate" accept=".pem,.crt,.cer,application/x-pem-file">
             </div>
             <div class="field">
-              <label>Private key (unencrypted PEM)</label>
-              <input type="file" name="private_key" accept=".pem,.key,application/x-pem-file">
+              <label for="settings-field-25">Private key (unencrypted PEM)</label>
+              <input id="settings-field-25" type="file" name="private_key" accept=".pem,.key,application/x-pem-file">
             </div>
           </div>
           <div class="subtle">Both files are required together the first time. NASitron verifies the private key matches the leaf certificate.</div>
@@ -246,17 +246,17 @@
           <div class="panel-title"><h3>ACME</h3><span class="badge">Automatic renewal</span></div>
           <div class="grid two">
             <div class="field">
-              <label>ACME account email</label>
-              <input type="email" name="tls_acme_email" value="{{ values.tls_acme_email }}" placeholder="admin@example.com">
+              <label for="settings-field-26">ACME account email</label>
+              <input id="settings-field-26" type="email" name="tls_acme_email" value="{{ values.tls_acme_email }}" placeholder="admin@example.com">
             </div>
             <div class="field">
-              <label>ACME directory URL</label>
-              <input name="tls_acme_ca" value="{{ values.tls_acme_ca }}" placeholder="https://acme.example.com/directory">
+              <label for="settings-field-27">ACME directory URL</label>
+              <input id="settings-field-27" name="tls_acme_ca" value="{{ values.tls_acme_ca }}" placeholder="https://acme.example.com/directory">
             </div>
           </div>
           <div class="field">
-            <label>Optional custom ACME CA root (PEM)</label>
-            <input type="file" name="acme_ca_root" accept=".pem,.crt,.cer,application/x-pem-file">
+            <label for="settings-field-28">Optional custom ACME CA root (PEM)</label>
+            <input id="settings-field-28" type="file" name="acme_ca_root" accept=".pem,.crt,.cer,application/x-pem-file">
             <div class="subtle">Use this when the custom ACME endpoint is signed by a private CA outside Caddy's normal trust store.</div>
           </div>
           <label class="checkbox"><input type="checkbox" name="clear_acme_ca_root"> Remove the currently stored custom ACME CA root</label>

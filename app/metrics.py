@@ -27,6 +27,10 @@ METRIC_NAMES = {
     "pool.write_bps",
     "drive.temperature_c",
     "drive.smart_passed",
+    "drive.reallocated_sectors",
+    "drive.pending_sectors",
+    "drive.media_errors",
+    "drive.percentage_used",
 }
 
 
@@ -98,12 +102,18 @@ def store_metrics(
             continue
         scope = disk.get("serial") or disk.get("path") or disk.get("name") or ""
         _row(rows, server_id, captured_at, "drive.temperature_c", smart.get("temperature_c"), scope)
+        for indicator in ("reallocated_sectors", "pending_sectors", "media_errors", "percentage_used"):
+            _row(rows, server_id, captured_at, f"drive.{indicator}", smart.get(indicator), scope)
         if smart.get("smart_passed") is not None:
             _row(
                 rows,
                 server_id,
                 captured_at,
                 "drive.smart_passed",
+    "drive.reallocated_sectors",
+    "drive.pending_sectors",
+    "drive.media_errors",
+    "drive.percentage_used",
                 1 if smart.get("smart_passed") else 0,
                 scope,
             )

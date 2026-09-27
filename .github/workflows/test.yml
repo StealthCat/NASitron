@@ -77,3 +77,41 @@ jobs:
 
           curl -fsS -b /tmp/nasitron-cookies http://127.0.0.1:18080/ >/dev/null
           curl -fsS http://127.0.0.1:18080/install-remote.sh | bash -s -- --help >/dev/null
+
+  ui:
+    runs-on: ubuntu-latest
+    env:
+      NASITRON_DATA_DIR: /tmp/nasitron-ui
+      NASITRON_SECRET_KEY: ci-secret-0123456789abcdef0123456789abcdef
+      NASITRON_WEB_USERNAME: ci-admin
+      NASITRON_WEB_PASSWORD: ci-password-strong
+      NASITRON_ALLOW_INSECURE_HTTP: "true"
+      WEB_CONCURRENCY: "1"
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements-dev.txt
+      - run: npm install --no-save playwright@1.62.1
+      - run: npx playwright install --with-deps chromium
+      - name: Desktop and mobile interaction checks
+        shell: bash
+        run: |
+          python tests/ui_server.py > /tmp/nasitron-ui.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765/healthz >/dev/null; then break; fi
+            sleep 1
+          done
+          node tests/ui_smoke.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview-ui-screenshots
+          path: test-results/

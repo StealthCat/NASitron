@@ -19,28 +19,27 @@
     </div>
 
     <div class="field">
-      <label>Username</label>
-      <input name="username" maxlength="120" required autocomplete="username" value="{{ user.username if user else '' }}" placeholder="operator">
+      <label for="user_form-field-1">Username</label>
+      <input id="user_form-field-1" name="username" maxlength="120" required autocomplete="username" value="{{ user.username if user else '' }}" placeholder="operator">
       <div class="subtle">Letters, numbers, dot, underscore, @ and hyphen are allowed.</div>
     </div>
 
     <div class="grid two">
       <div class="field">
-        <label>{{ "New password" if user else "Password" }}</label>
-        <input type="password" name="password" autocomplete="new-password" {{ '' if user else 'required' }} minlength="12">
+        <label for="user_form-field-2">{{ "New password" if user else "Password" }}</label>
+        <input id="user_form-field-2" type="password" name="password" autocomplete="new-password" {{ '' if user else 'required' }} minlength="12">
         {% if user %}<div class="subtle">Leave blank to keep the current password.</div>{% else %}<div class="subtle">Minimum 12 characters.</div>{% endif %}
       </div>
       <div class="field">
-        <label>{{ "Confirm new password" if user else "Confirm password" }}</label>
-        <input type="password" name="password_confirm" autocomplete="new-password" {{ '' if user else 'required' }} minlength="12">
+        <label for="user_form-field-3">{{ "Confirm new password" if user else "Confirm password" }}</label>
+        <input id="user_form-field-3" type="password" name="password_confirm" autocomplete="new-password" {{ '' if user else 'required' }} minlength="12">
       </div>
     </div>
 
     <div class="panel-title" style="margin-top:20px"><h2>Access</h2><span class="badge">Authorization</span></div>
-    <label class="checkbox">
-      <input type="checkbox" name="is_admin" {{ 'checked' if user and user.is_admin else '' }}>
-      Administrator — can manage NASitron users
-    </label>
+    <label>Role<select name="role">
+      {% for role in ['viewer','operator','admin'] %}<option value="{{ role }}" {{ 'selected' if user and effective_role(user) == role else '' }}>{{ role|title }}</option>{% endfor %}
+    </select></label><p class="subtle">Viewers read telemetry. Operators can poll, label drives, manage notification windows and replace drives. Administrators also manage credentials, settings, servers and users.</p>
     <label class="checkbox">
       <input type="checkbox" name="enabled" {{ 'checked' if not user or user.enabled else '' }}>
       Enabled — account may sign in

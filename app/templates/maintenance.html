@@ -1,21 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Maintenance · NASitron{% endblock %}
 {% block content %}
-<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">Guarded Operations</div><h1>Maintenance</h1><p class="muted">Review storage health and enter the guarded replacement workflow for a specific server.</p></div></div>
+<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">Guarded Operations</div><h1>Maintenance</h1><a class="button" href="/operations">Live operations & notification windows</a><p class="muted">Review storage health and enter the guarded replacement workflow for a specific server.</p></div></div>
 <section class="grid cards">
 {% for row in maintenance_rows %}{% set server = row.server %}
   <div class="panel {{ 'accent-panel' if row.unhealthy_pools or row.failed_drives else '' }}">
     <div class="panel-title"><div><h2 style="margin-bottom:4px">{{ server.name }}</h2><a class="subtle" href="/servers/{{ server.id }}">{{ server.host }}</a></div>
-    {% if row.unhealthy_pools or row.failed_drives %}<span class="badge critical"><span class="dot"></span>Action recommended</span>{% elif not row.snapshot %}<span class="badge offline">No telemetry</span>{% else %}<span class="badge good"><span class="dot"></span>No failure detected</span>{% endif %}</div>
+    {% set freshness=server_state(server,row.snapshot) %}{% if freshness[0] != 'good' %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>{% elif row.unhealthy_pools or row.failed_drives %}<span class="badge critical"><span class="dot"></span>Action recommended</span>{% elif not row.snapshot %}<span class="badge offline">No telemetry</span>{% else %}<span class="badge good"><span class="dot"></span>No failure detected</span>{% endif %}</div>
     <div class="server-card-metrics"><div class="mini-stat"><span>Unhealthy pools</span><strong>{{ row.unhealthy_pools|length }}</strong></div><div class="mini-stat"><span>SMART failed</span><strong>{{ row.failed_drives|length }}</strong></div><div class="mini-stat"><span>Active alerts</span><strong>{{ row.alerts|length }}</strong></div></div>
-    <a class="button primary" href="/servers/{{ server.id }}/replace-drive">Open drive replacement</a>
+    <a class="button primary" href="/servers/{{ server.id }}/replace-drive" data-operator-only>Open drive replacement</a>
   </div>
 {% else %}<div class="panel"><p class="muted">Add a server before using maintenance tools.</p></div>{% endfor %}
 </section>
 <section class="section-block panel flush">
   <div class="panel-title" style="padding:16px 16px 0"><h2>Maintenance History</h2><span class="badge">{{ actions|length }} recent</span></div>
   <div class="scroll"><table class="readable-table"><thead><tr><th>Time</th><th>Server</th><th>Action</th><th>Pool</th><th>Old device</th><th>New device</th><th>Result</th></tr></thead><tbody>
-  {% for action in actions %}<tr><td>{{ action.created_at|fmt_dt }}</td><td>{{ action.server.name if action.server else "—" }}</td><td>{{ action.action }}</td><td>{{ action.pool or "—" }}</td><td>{{ action.old_device or "—" }}</td><td>{{ action.new_device or "—" }}</td><td><span class="badge {{ 'good' if action.success else 'critical' }}">{{ "Success" if action.success else "Failed" }}</span></td></tr>
+  {% for action in actions %}<tr><td>{{ action.created_at|fmt_dt }}</td><td>{{ action.server.name if action.server else "—" }}</td><td>{{ action.action }}</td><td>{{ action.pool or "—" }}</td><td>{{ action.old_device or "—" }}</td><td>{{ action.new_device or "—" }}</td><td><span class="badge {{ 'good' if action.success else 'critical' }}">{{ action.state|title if action.success else "Failed" }}</span></td></tr>
   {% else %}<tr><td colspan="7" class="muted">No maintenance actions recorded.</td></tr>{% endfor %}
   </tbody></table></div>
 </section>
