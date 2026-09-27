@@ -116,6 +116,8 @@ with SessionLocal() as db:
     db.flush()
     damaged = json.loads(json.dumps(payload))
     damaged["drives"] = []
+    damaged["datasets"] = []
+    damaged["snapshot_inventory"] = {"fresh": True, "rows": []}
     damaged["pools"] = [dict(payload["pools"][0], health="DEGRADED", status=parse_pool_status("""  pool: tank
  state: DEGRADED
 status: One or more devices has experienced an error.
