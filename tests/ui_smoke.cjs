@@ -75,6 +75,16 @@ const fs = require('node:fs');
       const response = await page.goto('http://127.0.0.1:8765' + path);
       assert.equal(response.status(), 200, path);
     }
+    await page.goto('http://127.0.0.1:8765/pools');
+    assert.equal(await page.locator('.topology-group').count(), 3);
+    for (let i = 0; i < 3; i++) {
+      assert.equal(await page.locator(`[data-vdev-name="raidz2-${i}"] .topology-device`).count(), 6);
+    }
+    await page.locator('[data-topology-toggle=collapse]').click();
+    assert.equal(await page.locator('.topology-device:visible').count(), 0);
+    await page.locator('[data-topology-toggle=expand]').click();
+    assert.equal(await page.locator('.topology-device:visible').count(), 18);
+    await page.screenshot({path: 'test-results/pools-desktop.png', fullPage: true});
     await page.setViewportSize({
       width: 390,
       height: 844
@@ -92,6 +102,10 @@ const fs = require('node:fs');
     assert.equal(await page.locator('#nav-toggle').getAttribute('aria-expanded'), 'true');
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#nav-toggle').getAttribute('aria-expanded'), 'false');
+    await page.goto('http://127.0.0.1:8765/pools');
+    assert.equal(await page.locator('.topology-device:visible').count(), 18);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile topology overflows');
+    await page.screenshot({path: 'test-results/pools-mobile.png', fullPage: true});
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

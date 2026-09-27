@@ -156,6 +156,7 @@ def parse_pool_status(text: str) -> dict[str, Any]:
     }
 
     for line in text.splitlines():
+        line = line.expandtabs(8)
         stripped = line.strip()
         if in_scan and stripped and not re.match(r"[a-z]+:", stripped):
             scan_lines.append(stripped)
@@ -182,15 +183,15 @@ def parse_pool_status(text: str) -> dict[str, Any]:
                 (idx for idx, part in enumerate(parts) if part.upper() in _ZFS_STATES),
                 None,
             )
-            if state_index is None or state_index == 0 or len(parts) < state_index + 4:
+            if state_index is None or state_index == 0 or len(parts) < state_index + 1:
                 continue
             config.append(
                 {
                     "name": " ".join(parts[:state_index]),
                     "state": _normalize_vdev_state(parts[state_index]),
-                    "read_errors": _int(parts[state_index + 1]),
-                    "write_errors": _int(parts[state_index + 2]),
-                    "checksum_errors": _int(parts[state_index + 3]),
+                    "read_errors": _int(parts[state_index + 1]) if len(parts) > state_index + 1 else None,
+                    "write_errors": _int(parts[state_index + 2]) if len(parts) > state_index + 2 else None,
+                    "checksum_errors": _int(parts[state_index + 3]) if len(parts) > state_index + 3 else None,
                     "role": role,
                     "indent": len(line) - len(line.lstrip()),
                     "guid": None,
@@ -201,7 +202,8 @@ def parse_pool_status(text: str) -> dict[str, Any]:
 
     for index, entry in enumerate(config):
         next_indent = config[index + 1]["indent"] if index + 1 < len(config) else -1
-        entry["leaf"] = next_indent <= entry["indent"]
+        entry["leaf"] = (next_indent <= entry["indent"] or
+                         (index + 1 < len(config) and config[index + 1]["role"] != entry["role"]))
 
     return {
         "state": state,

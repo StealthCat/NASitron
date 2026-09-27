@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.db import init_db, SessionLocal
+from app.parser import parse_pool_status
 from app.models import Server, CurrentState, Metric, Alert
 from app.security import ensure_bootstrap_admin
 from app.settings_store import ensure_defaults
@@ -49,6 +50,14 @@ payload["pools"][0].update(
     free_bytes=35 * 1024**4,
     capacity_pct=70.8,
 )
+
+topology_lines = ["config:", "  tank ONLINE 0 0 0"]
+for group in range(3):
+    topology_lines.append(f"    raidz2-{group} ONLINE 0 0 0")
+    for member in range(6):
+        topology_lines.append(f"      /dev/sd{chr(97 + group * 6 + member)} ONLINE 0 0 0")
+topology_lines[-1] = "      scsi-SATA_WDC_WD60EFAX-68S_WD-WX31D49KSZTT ONLINE 0 0 0"
+payload["pools"][0]["status"] = parse_pool_status("\n".join(topology_lines))
 with SessionLocal() as db:
     ensure_defaults(db)
     ensure_bootstrap_admin(db)

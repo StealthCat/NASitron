@@ -39,6 +39,7 @@ from .config import (
 from .crypto import decrypt, encrypt
 from .db import SessionLocal, init_db
 from .instance_lock import InstanceLock
+from .topology import pool_topology
 from .maintenance import (
     ReplacementRequest,
     discover_replacement_options,
@@ -874,6 +875,8 @@ def servers_index(request: Request, db: Session = Depends(get_db)):
 @app.get("/pools", response_class=HTMLResponse)
 def pools_index(request: Request, db: Session = Depends(get_db)):
     data = _inventory_rows(db)
+    for row in data["pool_rows"]:
+        row["topology"] = pool_topology(row["pool"], row["snapshot"].get("drives", []))
     degraded = sum(
         1
         for row in data["pool_rows"]

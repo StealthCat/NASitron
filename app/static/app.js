@@ -495,3 +495,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+document.querySelectorAll('[data-topology-toggle]').forEach(button => {
+  button.addEventListener('click', () => {
+    button.closest('.pool-topology').querySelectorAll('details.topology-group').forEach(group => {
+      group.open = button.dataset.topologyToggle === 'expand';
+    });
+  });
+});

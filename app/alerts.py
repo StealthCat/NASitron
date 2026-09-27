@@ -407,9 +407,9 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
             ident = str(vdev.get("guid") or vdev.get("name") or "unknown")
             device = str(vdev.get("name") or ident)
             errs = (
-                int(vdev.get("read_errors", 0))
-                + int(vdev.get("write_errors", 0))
-                + int(vdev.get("checksum_errors", 0))
+                int(vdev.get("read_errors") or 0)
+                + int(vdev.get("write_errors") or 0)
+                + int(vdev.get("checksum_errors") or 0)
             )
             if errs > 0:
                 key = f"vdev.errors:{name}:{ident}"

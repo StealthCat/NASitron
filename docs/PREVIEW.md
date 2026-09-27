@@ -185,3 +185,15 @@ and mobile interaction checks with synthetic telemetry, publishes screenshots,
 and retains the existing Docker and Compose checks. CI fixture hosts are never
 polled. A live ZFS replacement or remote installation is not exercised by these
 synthetic checks.
+
+### Pool disk hierarchy
+
+The Pools page now preserves the collected pool → vdev → device hierarchy,
+including nested replacement groups and separate data, log, cache, special,
+dedup and spare sections. Groups open by default and can be collapsed individually
+or together. Each level shows its reported state and read/write/checksum error
+counts; these are not I/O rates or summed child counters. Matched devices link to
+drive details and show physical capacity, model, serial, location, SMART and
+temperature. Unmatched devices remain visible without guessed drive identities.
+Reported vdev size is shown when supplied by ZFS; usable RAIDZ capacity is not
+estimated from physical drive sizes. No extra remote commands are required.

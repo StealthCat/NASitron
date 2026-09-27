@@ -31,13 +31,8 @@
       </div>
     </details>
     {% endif %}
-    {% if pool.status.vdevs %}
-    <div class="scroll"><table><thead><tr><th>Role</th><th>Vdev / device</th><th>State</th><th>Read</th><th>Write</th><th>Checksum</th></tr></thead><tbody>
-    {% for vdev in pool.status.vdevs %}
-      <tr><td>{{ vdev.role }}</td><td style="padding-left:{{ 11 + ([vdev.indent,30]|min) }}px"><strong>{{ vdev.name }}</strong></td><td><span class="badge {{ 'good' if vdev.state in ['ONLINE','AVAIL'] else 'critical' }}">{{ vdev.state }}</span></td><td>{{ vdev.read_errors }}</td><td>{{ vdev.write_errors }}</td><td>{{ vdev.checksum_errors }}</td></tr>
-    {% endfor %}
-    </tbody></table></div>
-    {% endif %}
+    {% include "pool_topology.html" %}
+
   </div>
 {% else %}<div class="panel"><p class="muted">No pool data has been collected yet.</p></div>{% endfor %}
 </section>
