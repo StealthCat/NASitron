@@ -101,6 +101,14 @@ with SessionLocal() as db:
                     captured_at=now - timedelta(minutes=(96 - i) * 15),
                 )
             )
+    for minutes in range(120):
+        for scope in ["DEMO-000", "DEMO-001"]:
+            for key, value in [("read_bps", 8_000_000 + minutes * 10000),
+                               ("write_bps", 2_000_000), ("read_iops", 120),
+                               ("write_iops", 35), ("read_latency_ms", 4),
+                               ("write_latency_ms", 6), ("busy_pct", 45), ("queue_depth", 0.8)]:
+                db.add(Metric(server_id=sid, name="drive.io." + key, scope=scope,
+                              value=value, captured_at=now - timedelta(minutes=minutes)))
     db.commit()
 
 if __name__ == "__main__":

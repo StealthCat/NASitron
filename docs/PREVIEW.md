@@ -197,3 +197,26 @@ drive details and show physical capacity, model, serial, location, SMART and
 temperature. Unmatched devices remain visible without guessed drive identities.
 Reported vdev size is shown when supplied by ZFS; usable RAIDZ capacity is not
 estimated from physical drive sizes. No extra remote commands are required.
+
+### Disk I/O history and collection fix
+
+Fixed a malformed SMART metric insertion that caused `_row()` argument errors
+and rolled back collection whenever a current SMART pass/fail result was present.
+The next successful poll clears the server's last collection error.
+
+The Disk I/O page provides server/disk selection, 15m, 1h, 6h, 24h, 7d and 30d
+presets, custom start/end times in the browser timezone, and optional auto refresh.
+It charts read/write throughput, read/write IOPS, read/write completion latency,
+busy time and average queue depth. Shared ranges apply to all eight charts and
+are preserved in the page URL. Historical disks remain selectable while their
+metrics remain within the configured retention period.
+
+Collection reads Linux `/proc/diskstats` twice about one second apart on every
+regular poll. It needs neither sysstat nor additional sudo permissions and is
+independent of SMART scheduling. Rates use measured uptime deltas and 512-byte
+sectors per the [Linux diskstats documentation](https://docs.kernel.org/admin-guide/iostats.html).
+Only physical disks from the inventory are stored, avoiding partition double
+counting. Interrupted samples and counter resets create gaps; idle intervals
+record zero throughput/IOPS but no latency when no operations completed. Samples
+do not capture bursts between polls. Busy time is not an NVMe saturation score.
+History starts after upgrade; no historical measurements are backfilled.

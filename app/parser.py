@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .disk_io import parse_disk_io
+
 import json
 import re
 from datetime import datetime, timezone
@@ -512,6 +514,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         "arcstats": "zfs.arc",
         "zpool_iostat": "zfs.iostat",
         "lsblk": "drives.inventory",
+        "disk_io": "drives.io",
         "services": "zfs.services",
     }
     failed_subsystems: set[str] = set()
@@ -632,6 +635,17 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
                 }
             )
     disks = _flatten_disks(block.get("blockdevices", []))
+
+    disk_io = {}
+    if "drives.io" not in failed_subsystems:
+        try:
+            disk_io = parse_disk_io(raw["disk_io"].get("stdout", ""))
+        except (ValueError, IndexError):
+            failed_subsystems.add("drives.io")
+            freshness.pop("drives.io", None)
+            errors.append({"subsystem": "drives.io", "message": "Disk I/O samples were malformed or incomplete."})
+    for disk in disks:
+        disk["io"] = disk_io.get(str(disk.get("kname") or "").removeprefix("/dev/"), {})
 
     smart_map = raw.get("smart", {})
     smart_sampled = bool(raw.get("smart_sampled"))

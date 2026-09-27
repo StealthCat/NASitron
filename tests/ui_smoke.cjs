@@ -85,6 +85,31 @@ const fs = require('node:fs');
     await page.locator('[data-topology-toggle=expand]').click();
     assert.equal(await page.locator('.topology-device:visible').count(), 18);
     await page.screenshot({path: 'test-results/pools-desktop.png', fullPage: true});
+    await page.goto('http://127.0.0.1:8765/disk-io?server_id=1&identity=DEMO-000');
+    await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
+    assert.equal(await page.locator('#io-charts canvas').count(), 8);
+    await page.locator('#io-range').selectOption('0.25');
+    await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
+    assert.ok(page.url().includes('hours=0.25'));
+    await page.locator('#io-range').selectOption('custom');
+    await page.locator('#io-start').fill('2026-01-01T01:00:00');
+    await page.locator('#io-end').fill('2026-01-01T00:00:00');
+    await page.locator('#io-range-form button').click();
+    assert.match(await page.locator('#io-range-error').innerText(), /end after/);
+    const dates = await page.evaluate(() => {
+      const local = d => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+      return [local(new Date(Date.now()-3600000)), local(new Date())];
+    });
+    await page.locator('#io-start').fill(dates[0]);
+    await page.locator('#io-end').fill(dates[1]);
+    await page.locator('#io-range-form button').click();
+    await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
+    assert.ok(page.url().includes('start='));
+    assert.equal(await page.locator('#io-auto').isDisabled(), true);
+    await page.screenshot({path: 'test-results/disk-io-desktop.png', fullPage: true});
+    await page.locator('#io-disk').selectOption('DEMO-001');
+    await page.waitForURL(/identity=DEMO-001/);
+    assert.equal(await page.locator('#io-range').inputValue(), 'custom');
     await page.setViewportSize({
       width: 390,
       height: 844
@@ -106,6 +131,10 @@ const fs = require('node:fs');
     assert.equal(await page.locator('.topology-device:visible').count(), 18);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile topology overflows');
     await page.screenshot({path: 'test-results/pools-mobile.png', fullPage: true});
+    await page.goto('http://127.0.0.1:8765/disk-io?server_id=1&identity=DEMO-000&hours=0.25');
+    await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile disk I/O overflows');
+    await page.screenshot({path: 'test-results/disk-io-mobile.png', fullPage: true});
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

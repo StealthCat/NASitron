@@ -22,13 +22,14 @@ window.NASitronChart = function(canvas, source, options = {}) {
   rangeLabel.textContent = 'Range ';
   const range = document.createElement('select');
   for (const [h, label] of [
+      [0.25, '15 minutes'],
       [1, '1 hour'],
       [6, '6 hours'],
       [24, '24 hours'],
       [168, '7 days'],
       [720, '30 days']
     ]) range.add(new Option(label, h));
-  range.value = '24';
+  range.value = String(options.range?.hours || '24');
   rangeLabel.append(range);
   const refresh = document.createElement('button');
   refresh.type = 'button';
@@ -38,7 +39,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
   auto.type = 'checkbox';
   autoLabel.append(auto, ' Auto refresh (60s)');
   controls.append(rangeLabel, refresh, autoLabel);
-  canvas.before(controls);
+  if (!options.range) canvas.before(controls);
   const status = document.createElement('p');
   status.className = 'chart-status subtle';
   status.setAttribute('role', 'status');
@@ -60,7 +61,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
     gap = 180000,
     loading = false,
     abort, disposed = false,
-    selected = 0;
+    selected = 0, windowStart, windowEnd;
   const ctx = canvas.getContext('2d');
   const format = value => options.bytes ? (() => {
     let i = 0,
@@ -94,8 +95,8 @@ window.NASitronChart = function(canvas, source, options = {}) {
       right = 14,
       top = 12,
       bottom = 40,
-      end = Date.now(),
-      start = end - Number(range.value) * 3600000;
+      end = windowEnd || Date.now(),
+      start = windowStart || end - Number(range.value) * 3600000;
     const x = t => left + (t - start) / (end - start) * (width - left - right),
       y = v => top + (hi - v) / (hi - lo) * (height - top - bottom);
     ctx.font = '11px system-ui';
@@ -154,13 +155,17 @@ window.NASitronChart = function(canvas, source, options = {}) {
     const timeout = setTimeout(() => abort.abort(), 15000);
     try {
       const url = new URL(source, location.origin);
-      url.searchParams.set('hours', range.value);
+      if (options.range) {
+        for (const [key, value] of Object.entries(options.range)) url.searchParams.set(key, value);
+      } else url.searchParams.set('hours', range.value);
       const response = await fetch(url, {
         cache: 'no-store',
         signal: abort.signal
       });
       if (!response.ok) throw new Error(response.status === 401 ? 'Session expired; sign in again.' : 'History unavailable (' + response.status + ').');
       const data = await response.json();
+      windowStart = Date.parse(data.start || options.range?.start) || undefined;
+      windowEnd = Date.parse(data.end || options.range?.end) || undefined;
       if (disposed) return;
       points = (data.points || []).map(p => ({
         t: Date.parse(p.t),

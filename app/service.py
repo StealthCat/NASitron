@@ -123,6 +123,7 @@ def _merge_previous_subsystems(
         snapshot["drives"] = []
         for old in prev_drives:
             carried = dict(old)
+            carried.pop("io", None)
             if old.get("smart"):
                 carried["smart"] = _mark_smart_stale(old["smart"])
             snapshot["drives"].append(carried)

@@ -70,6 +70,27 @@ async def read_bundle(upload):
 
 
 def install(app, templates):
+    @app.get("/disk-io")
+    def disk_io_page(request: Request, server_id: int | None = None,
+                     identity: str = "", db: Session = Depends(session)):
+        servers = db.scalars(select(Server).order_by(Server.name)).all()
+        server = db.get(Server, server_id) if server_id is not None else (servers[0] if servers else None)
+        if server_id is not None and server is None:
+            raise HTTPException(404)
+        snapshot = latest_snapshot(db, server.id) or {} if server else {}
+        disks = {d.get("serial") or d.get("path"): d for d in snapshot.get("drives", [])}
+        if server:
+            historical = db.scalars(select(Metric.scope).where(
+                Metric.server_id == server.id, Metric.name == "drive.io.read_bps"
+            ).distinct()).all()
+            for scope in historical:
+                disks.setdefault(scope, {"path": scope, "model": "Historical device"})
+        selected = identity if identity in disks else next(iter(disks), "")
+        return templates.TemplateResponse(request=request, name="disk_io.html", context={
+            "servers": servers, "server": server, "disks": disks, "identity": selected,
+            "snapshot": snapshot, "freshness": server_state(server, snapshot) if server else None,
+        })
+
     @app.get("/operations")
     def operations(request: Request, db: Session = Depends(session)):
         rows = []

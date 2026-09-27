@@ -10,7 +10,7 @@ import secrets
 import shlex
 import tempfile
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
@@ -1657,7 +1657,9 @@ def metric_history(
     server_id: int,
     name: str = Query(..., min_length=1, max_length=100),
     scope: str = Query("", max_length=255),
-    hours: int = Query(24, ge=1, le=24 * 365),
+    hours: float = Query(24, ge=0.25, le=24 * 365),
+    start: datetime | None = Query(None),
+    end: datetime | None = Query(None),
     db: Session = Depends(get_db),
 ):
     if name not in METRIC_NAMES:
@@ -1665,14 +1667,26 @@ def metric_history(
     if db.get(Server, server_id) is None:
         raise HTTPException(404)
 
-    since = datetime.utcnow() - timedelta(hours=hours)
+    if (start is None) != (end is None):
+        raise HTTPException(400, "Provide both start and end.")
+    until = datetime.utcnow()
+    since = until - timedelta(hours=hours)
+    if start is not None and end is not None:
+        if start.tzinfo is None or end.tzinfo is None:
+            raise HTTPException(400, "Start and end must include a timezone offset.")
+        since = start.astimezone(timezone.utc).replace(tzinfo=None)
+        until = end.astimezone(timezone.utc).replace(tzinfo=None)
+        if not timedelta(0) < until - since <= timedelta(days=365):
+            raise HTTPException(400, "Choose an end after start and a range of at most 365 days.")
+    duration = (until - since).total_seconds()
     filters = (
         Metric.server_id == server_id,
         Metric.name == name,
         Metric.scope == scope,
         Metric.captured_at >= since,
+        Metric.captured_at <= until,
     )
-    bucket_seconds = max(1, (hours * 3600 + MAX_METRIC_POINTS - 1) // MAX_METRIC_POINTS)
+    bucket_seconds = max(1, int((duration + MAX_METRIC_POINTS - 1) // MAX_METRIC_POINTS))
     epoch = cast(func.strftime("%s", Metric.captured_at), Integer)
     bucket = cast(epoch / bucket_seconds, Integer).label("bucket")
 
@@ -1717,7 +1731,9 @@ def metric_history(
         "sample_count": sample_count,
         "returned_points": len(points),
         "bucket_seconds": bucket_seconds,
-        "expected_interval_seconds": (db.get(Server, server_id).smart_interval_minutes*60 if name.startswith("drive.") else db.get(Server, server_id).poll_interval_seconds),
+        "start": since.isoformat() + "Z",
+        "end": until.isoformat() + "Z",
+        "expected_interval_seconds": (db.get(Server, server_id).smart_interval_minutes*60 if name.startswith("drive.") and not name.startswith("drive.io.") else db.get(Server, server_id).poll_interval_seconds),
         "points": points,
     }
 

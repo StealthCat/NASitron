@@ -16,6 +16,8 @@ from typing import Any, Iterator
 
 import paramiko
 
+from .disk_io import DISK_IO_COMMAND
+
 from .config import (
     KNOWN_HOSTS_PATH,
     MAX_DIAGNOSTIC_OUTPUT_BYTES,
@@ -332,6 +334,7 @@ class SSHCollector:
             "zfs_get": "zfs get -H -p -o name,property,value,source -s local,received all",
             "arcstats": "cat /proc/spl/kstat/zfs/arcstats 2>/dev/null",
             "zpool_iostat": "zpool iostat -H -p 1 2 2>/dev/null",
+            "disk_io": DISK_IO_COMMAND,
             "lsblk": "lsblk -J -b -o NAME,KNAME,PATH,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL,FSTYPE,UUID,PTTYPE,PARTTYPE,MOUNTPOINTS",
             "services": "printf 'zfs.target='; systemctl is-active zfs.target 2>/dev/null || true; printf 'zfs-zed.service='; systemctl is-active zfs-zed.service 2>/dev/null || true",
         }
