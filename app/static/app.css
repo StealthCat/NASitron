@@ -1068,3 +1068,5 @@ body[data-role=viewer] [data-operator-only],body:not([data-role=admin]) [data-ad
 
 .overview-metric { display:block; min-width:0; }
 .overview-metric .metric-value { white-space:nowrap; }
+
+.chart-controls label { display:flex; align-items:center; gap:6px; }

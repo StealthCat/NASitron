@@ -27,6 +27,15 @@ const fs = require('node:fs');
     await page.locator('.chart-status').filter({
       hasText: 'Updated'
     }).waitFor();
+    const plottedPixels = await page.locator('#dashboard-arc').evaluate(canvas => {
+      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      let count = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i] > 220 && pixels[i + 1] < 70 && pixels[i + 2] > 60 && pixels[i + 2] < 130 && pixels[i + 3] > 100) count++;
+      }
+      return count;
+    });
+    assert.ok(plottedPixels > 50, 'Sparse observations must produce visible markers');
     await page.screenshot({
       path: 'test-results/dashboard-desktop.png',
       fullPage: true

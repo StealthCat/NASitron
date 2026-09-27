@@ -121,12 +121,17 @@ window.NASitronChart = function(canvas, source, options = {}) {
       else ctx.lineTo(x(p.t), y(p.v));
     });
     ctx.stroke();
-    if (points.length === 1) {
-      ctx.beginPath();
-      ctx.arc(x(points[0].t), y(points[0].v), 3, 0, Math.PI * 2);
-      ctx.fillStyle = '#FC1859';
-      ctx.fill();
-    }
+    // Isolated observations must remain visible without drawing across gaps.
+    points.forEach((p, i) => {
+      const beforeGap = i === 0 || p.t - points[i - 1].t > gap;
+      const afterGap = i === points.length - 1 || points[i + 1].t - p.t > gap;
+      if (beforeGap && afterGap) {
+        ctx.beginPath();
+        ctx.arc(x(p.t), y(p.v), 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#FC1859';
+        ctx.fill();
+      }
+    });
     ctx.restore();
     const time = t => new Date(t).toLocaleString([], {
       month: 'short',
