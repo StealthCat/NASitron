@@ -1129,3 +1129,20 @@ body[data-role=viewer] [data-operator-only],body:not([data-role=admin]) [data-ad
   .pool-tabs { position:static; }
   .pool-tabs button { flex:1 1 150px; min-width:0; }
 }
+
+.pool-capacity { min-width:0; }
+.capacity-scroll { max-width:100%; border:1px solid var(--border, #263447); border-radius:9px; }
+.capacity-table { min-width:1100px; border-collapse:separate; border-spacing:0; }
+.capacity-table caption { text-align:left; padding:12px; }
+.capacity-table td { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.capacity-table th { text-align:right; }
+.capacity-table th:first-child { text-align:left; min-width:240px; max-width:360px; overflow-wrap:anywhere; }
+.capacity-table tbody th:first-child { position:sticky; left:0; z-index:1; background:#0d1522; }
+.capacity-table th .subtle { display:block; margin-top:4px; font-size:11px; font-weight:normal; }
+.capacity-table tbody tr:nth-child(even) > * { background:#111c2d; }
+.capacity-table .capacity-root > * { background:#192b40 !important; font-weight:700; }
+.capacity-table .capacity-group > * { border-top:2px solid #33465c; }
+.capacity-table meter { display:block; width:70px; height:6px; margin:6px 0 0 auto; accent-color:#FC1859; }
+.pool-datasets { margin-top:16px; }
+@media(max-width:600px) { .capacity-table th:first-child { min-width:150px; max-width:190px; } }
+.capacity-table thead th:first-child { position:sticky; left:0; z-index:2; background:#111c2d; }

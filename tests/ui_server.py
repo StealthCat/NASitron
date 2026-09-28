@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.db import init_db, SessionLocal
 from app.parser import parse_pool_status
+from app.pool_capacity import parse_capacity
 from app.models import Server, CurrentState, Metric, Alert
 from app.security import ensure_bootstrap_admin
 from app.settings_store import ensure_defaults
@@ -59,6 +60,12 @@ for group in range(3):
 topology_lines[-1] = "      scsi-SATA_WDC_WD60EFAX-68S_WD-WX31D49KSZTT ONLINE 0 0 0"
 topology_lines.append("errors: No known data errors")
 payload["pools"][0]["status"] = parse_pool_status("\n".join(topology_lines))
+capacity_lines = ["tank\t131941395333120\t93458488360960\t38482906972160\t-\t-\t12\t70.8\t1.00x\tONLINE\t-"]
+for group in range(3):
+    capacity_lines.append(f"\traidz2-{group}\t43980465111040\t31152829453653\t12827635657387\t0\t0\t12\t70.8\t-\tONLINE\t-")
+    for member in range(6):
+        capacity_lines.append(f"\t/dev/sd{chr(97 + group * 6 + member)}\t-\t-\t-\t-\t0\t-\t-\t-\tONLINE\t-")
+payload["pools"][0]["capacity_detail"] = {"fresh": True, "captured_at": now.isoformat()+"Z", "rows": parse_capacity("\n".join(capacity_lines), "tank")}
 with SessionLocal() as db:
     ensure_defaults(db)
     ensure_bootstrap_admin(db)
@@ -136,6 +143,7 @@ errors: Permanent errors have been detected in the following files:
         /tank/photos/family photo.jpg
         tank/data:<0xdeadbeef>
 """))]
+    damaged["pools"][0].pop("capacity_detail", None)
     db.add(CurrentState(server_id=other.id, payload_json=json.dumps(damaged)))
     db.commit()
 

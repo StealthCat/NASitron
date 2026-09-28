@@ -17,6 +17,7 @@ from typing import Any, Iterator
 import paramiko
 
 from .disk_io import DISK_IO_COMMAND
+from .pool_capacity import PROPERTIES as POOL_CAPACITY_PROPERTIES
 
 from .config import (
     KNOWN_HOSTS_PATH,
@@ -346,12 +347,15 @@ class SSHCollector:
                 "zfs list -Hp -t snapshot -o name,creation,used,refer -s creation", timeout=45)
         pools = self._strict_pool_names(raw["zpool_list"])
 
+        raw["zpool_list_verbose"] = {}
         raw["zpool_get"] = {}
         raw["zpool_status"] = {}
         raw["zpool_status_json"] = {}
         json_capability = self.server.zpool_status_json_supported
         for index, pool in enumerate(pools):
             quoted = shlex.quote(pool)
+            raw["zpool_list_verbose"][pool] = self.run(
+                f"zpool list -H -p -v -P -L -o {POOL_CAPACITY_PROPERTIES} {quoted}", timeout=20)
             raw["zpool_get"][pool] = self.run(
                 f"zpool get -H -p -o name,property,value,source all {quoted}",
                 timeout=20,

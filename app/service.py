@@ -101,6 +101,10 @@ def _merge_previous_subsystems(
         old = prev_pools.get(name)
         if not old:
             continue
+        capacity_key = f"pool.capacity:{name}"
+        if capacity_key in errors:
+            pool["capacity_detail"] = dict(old.get("capacity_detail") or {}, fresh=False)
+            stale.add(capacity_key)
         status_key = f"pool.status:{name}"
         if status_key in errors:
             pool["status"] = old.get("status", pool.get("status", {}))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .disk_io import parse_disk_io
+from .pool_capacity import parse_capacity
 
 import json
 import re
@@ -563,6 +564,20 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
     pool_status_ok: list[str] = []
     for pool in pools:
         name = pool["name"]
+        capacity_result = raw.get("zpool_list_verbose", {}).get(name, {})
+        capacity_key = f"pool.capacity:{name}"
+        pool["capacity_detail"] = {"fresh": False, "rows": []}
+        try:
+            if (capacity_result.get("exit") != 0 or capacity_result.get("stdout_truncated")
+                    or capacity_result.get("stderr_truncated")):
+                raise ValueError("Verbose pool capacity collection failed or was truncated.")
+            capacity = parse_capacity(capacity_result.get("stdout", ""), name)
+            pool["capacity_detail"] = {"fresh": True, "rows": capacity, "captured_at": sampled_at}
+            freshness[capacity_key] = sampled_at
+        except (ValueError, OverflowError):
+            errors.append({"subsystem": capacity_key,
+                           "message": "Verbose pool capacity was unavailable, truncated or malformed."})
+            failed_subsystems.add(capacity_key)
         text_result = text_statuses.get(name, {})
         json_result = json_statuses.get(name, {})
         text = text_result.get("stdout", "")

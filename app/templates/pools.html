@@ -24,6 +24,7 @@
       </section>
     {% else %}<p class="muted">Detailed status has not been collected yet.</p>{% endfor %}
     </div>
+    {% include "pool_capacity.html" %}
     {% include "pool_topology.html" %}
     <details class="property-drawer pool-raw"><summary><strong>Full zpool status -v output</strong></summary><pre class="pool-status-text">{{ pool.status.raw or 'No text status has been collected yet.' }}</pre></details>
     {% set configured_pool_props = pool.properties|selectattr('is_set')|list %}

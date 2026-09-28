@@ -234,3 +234,21 @@ the device configuration. Incomplete verbose collection is explicitly labeled.
 Device rows show aligned state and error counters; drive identity and SMART
 information are expandable. Verbose file lists become available after the next
 successful poll following deployment.
+
+### Capacity tables in pool tabs
+
+Each pool tab includes all default `zpool list -v` columns: name, size, allocated,
+free, checkpoint, expandable space, fragmentation, capacity, dedup ratio, health,
+and alternate root. Collection uses explicit properties, exact numbers and
+resolved full device paths. Status supplies indentation; rows stay in the command's
+order, with pool totals emphasized and alternating device rows. Parent/child
+allocations overlap and are not summed. Missing/not-applicable values remain dashes;
+zero is shown as zero. Byte values have exact-byte tooltips. Failed polls retain
+previous capacity rows with a stale label and their original timestamp. Narrow
+screens scroll the table horizontally while the name column stays visible.
+
+`zfs list` has no `-v` flag. A separate expandable table shows each pool's root
+and child filesystems/zvols with used, available, referenced, compression and
+mountpoint data from the existing dataset collection. Pool physical allocation
+and dataset accounting remain separate. New verbose capacity measurements appear
+after deployment and the next successful poll.

@@ -1,0 +1,29 @@
+{% macro bytes(value) %}{% if value is not none %}<span title="{{ value }} bytes">{{ value|human_bytes }}</span>{% else %}<span class="subtle">—</span>{% endif %}{% endmacro %}
+<section class="pool-capacity section-block">
+<div class="panel-title"><h3>Pool & vdev capacity</h3><span class="subtle">zpool list -v</span></div>
+<p class="subtle">Pool, vdev and device measurements in configuration order. — means not reported or not applicable. Parent and child rows overlap; do not add them together.</p>
+{% set detail=pool.get('capacity_detail') or {} %}
+{% if detail.get('captured_at') %}<p class="subtle">Sampled {{ detail.captured_at|fmt_dt }}{% if not detail.get('fresh') %} · <strong class="critical-text">Stale — latest collection failed</strong>{% endif %}</p>{% endif %}
+{% if row.capacity_rows %}
+<div class="scroll capacity-scroll" tabindex="0" role="region" aria-label="{{ pool.name }} capacity table, scroll horizontally for all columns">
+<table class="capacity-table"><caption class="subtle">Capacity, allocation and health for {{ pool.name }}</caption>
+<thead><tr><th scope="col">Pool / vdev / device</th><th scope="col">Size</th><th scope="col">Allocated</th><th scope="col">Free</th><th scope="col">Checkpoint</th><th scope="col">Expandable</th><th scope="col">Fragmentation</th><th scope="col">Capacity</th><th scope="col">Dedup</th><th scope="col">Health</th><th scope="col">Alternate root</th></tr></thead>
+<tbody>{% for item in row.capacity_rows %}
+<tr class="{{ 'capacity-root' if item.root else ('capacity-group' if item.group else '') }}" data-capacity-name="{{ item.name }}">
+<th scope="row"><div style="padding-left:{{ [item.depth * 16,96]|min }}px"><strong>{{ item.name }}</strong><span class="subtle">{{ 'Pool total' if item.root else item.role|title }}</span></div></th>
+{% for key in ['size','allocated','free','checkpoint','expandsize'] %}<td>{{ bytes(item[key]) }}</td>{% endfor %}
+<td>{{ ('%.1f'|format(item.fragmentation) ~ '%') if item.fragmentation is not none else '—' }}</td>
+<td>{% if item.capacity is not none %}<span>{{ '%.1f'|format(item.capacity) }}%</span><meter min="0" max="100" value="{{ item.capacity }}" aria-label="{{ item.name }} capacity">{{ item.capacity }}%</meter>{% else %}—{% endif %}</td>
+<td>{{ ('%.2f'|format(item.dedupratio) ~ '×') if item.dedupratio is not none else '—' }}</td>
+<td>{% if item.health %}<span class="badge {{ 'good' if item.health in ['ONLINE','HEALTHY','AVAIL'] else ('warning' if item.health == 'INUSE' else 'critical') }}">{{ item.health }}</span>{% else %}—{% endif %}</td><td>{{ item.altroot or '—' }}</td>
+</tr>{% endfor %}</tbody></table>
+</div>
+{% else %}<p class="muted">Detailed capacity has not been collected yet. It becomes available after a successful poll with this version.</p>{% endif %}
+<details class="property-drawer pool-datasets"><summary><strong>Datasets in this pool</strong><span class="badge">{{ row.pool_datasets|length }}</span><span class="subtle">zfs list</span></summary>
+{% if 'zfs.datasets' in row.snapshot.get('collection', {}).get('stale_subsystems', []) %}<p class="critical-text">Dataset measurements are stale; the latest collection failed.</p>{% endif %}
+<div class="scroll capacity-scroll" tabindex="0" role="region" aria-label="{{ pool.name }} dataset space usage">
+<table class="capacity-table"><thead><tr><th scope="col">Dataset</th><th scope="col">Type</th><th scope="col">Used</th><th scope="col">Available</th><th scope="col">Referenced</th><th scope="col">Compression</th><th scope="col">Mountpoint</th></tr></thead><tbody>
+{% for dataset in row.pool_datasets %}<tr><th scope="row">{{ dataset.name }}</th><td>{{ dataset.type }}</td><td>{{ bytes(dataset.get('used_bytes')) }}</td><td>{{ bytes(dataset.get('available_bytes')) }}</td><td>{{ bytes(dataset.get('referenced_bytes')) }}</td><td>{{ ('%.2f'|format(dataset.compression_ratio) ~ '×') if dataset.get('compression_ratio') is not none else '—' }}</td><td>{{ dataset.mountpoint }}</td></tr>
+{% else %}<tr><td colspan="7">No dataset information collected for this pool.</td></tr>{% endfor %}
+</tbody></table></div></details>
+</section>
