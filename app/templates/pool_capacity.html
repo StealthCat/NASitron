@@ -19,6 +19,7 @@
 </tr>{% endfor %}</tbody></table>
 </div>
 {% else %}<p class="muted">Detailed capacity has not been collected yet. It becomes available after a successful poll with this version.</p>{% endif %}
+{% if detail.get('raw') %}<details class="property-drawer"><summary><strong>Collected zpool list -v output</strong></summary><pre class="pool-status-text">{{ detail.raw }}</pre></details>{% endif %}
 <details class="property-drawer pool-datasets"><summary><strong>Datasets in this pool</strong><span class="badge">{{ row.pool_datasets|length }}</span><span class="subtle">zfs list</span></summary>
 {% if 'zfs.datasets' in row.snapshot.get('collection', {}).get('stale_subsystems', []) %}<p class="critical-text">Dataset measurements are stale; the latest collection failed.</p>{% endif %}
 <div class="scroll capacity-scroll" tabindex="0" role="region" aria-label="{{ pool.name }} dataset space usage">

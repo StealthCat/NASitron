@@ -85,10 +85,14 @@ const fs = require('node:fs');
     await page.locator('[data-topology-toggle=expand]:visible').click();
     assert.equal(await page.locator('.topology-device:visible').count(), 18);
     const capacity = page.locator('.pool-pane:visible .pool-capacity');
-    assert.equal(await capacity.locator('[data-capacity-name]').count(), 22);
+    assert.equal(await capacity.locator('[data-capacity-name]').count(), 23);
     assert.match(await capacity.innerText(), /Checkpoint/);
     assert.match(await capacity.innerText(), /Expandable/);
     assert.match(await capacity.innerText(), /70.8%/);
+    const elementStats = page.locator('[data-vdev-name="raidz2-0"] > details > summary .element-capacity');
+    assert.match(await elementStats.innerText(), /40.0 TiB/);
+    assert.match(await elementStats.innerText(), /70.8%/);
+
     await capacity.locator('.pool-datasets summary').click();
     assert.match(await capacity.locator('.pool-datasets').innerText(), /tank\/data/);
     await page.screenshot({path: 'test-results/pools-desktop.png', fullPage: true});

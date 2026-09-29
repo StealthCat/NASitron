@@ -41,7 +41,7 @@ from .db import SessionLocal, init_db
 from .instance_lock import InstanceLock
 from .topology import pool_topology
 from .parser import parse_status_sections
-from .pool_capacity import capacity_rows
+from .pool_capacity import capacity_rows, attach_capacity
 from .maintenance import (
     ReplacementRequest,
     discover_replacement_options,
@@ -880,6 +880,7 @@ def pools_index(request: Request, db: Session = Depends(get_db)):
     for row in data["pool_rows"]:
         row["topology"] = pool_topology(row["pool"], row["snapshot"].get("drives", []))
         row["capacity_rows"] = capacity_rows(row["pool"], row["topology"])
+        attach_capacity(row["topology"], row["capacity_rows"])
         pool_name = row["pool"]["name"]
         row["pool_datasets"] = [d for d in row["snapshot"].get("datasets", [])
                                 if d.get("name") == pool_name or d.get("name", "").startswith(pool_name + "/")]

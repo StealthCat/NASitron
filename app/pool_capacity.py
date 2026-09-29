@@ -1,5 +1,6 @@
 """Exact zpool list -v measurements, separate from status and dataset accounting."""
 import math
+import re
 
 PROPERTIES = ('name,size,allocated,free,checkpoint,expandsize,fragmentation,'
               'capacity,dedupratio,health,altroot')
@@ -14,6 +15,12 @@ def parse_capacity(text, pool_name):
     role = 'data'
     for line in text.splitlines():
         if not line.strip():
+            continue
+        # OpenZFS 2.2 emits allocation-class headings using a fixed-width
+        # printf even under -H. Recognize only heading + dash placeholders.
+        marker = re.fullmatch(r"\s*(logs|special|dedup|cache|spares?)\s+(?:-\s*)+", line)
+        if rows and marker:
+            role = ROLES[marker[1]]
             continue
         # Script mode prefixes vdev rows with a tab, but does not retain depth.
         parts = line.lstrip('\t').split('\t')
@@ -65,3 +72,17 @@ def capacity_rows(pool, topology):
         row.update(depth=depth, group=group, root=root)
         result.append(row)
     return result
+
+
+def attach_capacity(topology, rows):
+    """Attach only the same element's measurements, never pool-wide substitutes."""
+    measurements = {(r['role'], r['name']): r for r in rows}
+
+    def walk(nodes, role):
+        for node in nodes:
+            node['capacity'] = measurements.get((role, node['name']))
+            walk(node['children'], role)
+
+    for section in topology['sections']:
+        if section['nodes']:
+            walk(section['nodes'], section['nodes'][0].get('role', 'data'))

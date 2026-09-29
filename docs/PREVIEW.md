@@ -252,3 +252,12 @@ and child filesystems/zvols with used, available, referenced, compression and
 mountpoint data from the existing dataset collection. Pool physical allocation
 and dataset accounting remain separate. New verbose capacity measurements appear
 after deployment and the next successful poll.
+
+Fixed compatibility with OpenZFS 2.2 verbose-list output: allocation-class headings
+are space-padded even under `-H`, while vdev rows use tabs and omit alternate root.
+Previously a log/cache/special/dedup/spare heading could reject the whole result.
+Regression tests now cover that mixed format. Size, allocated, free, fragmentation,
+capacity and dedup values also appear directly on matching hierarchy elements.
+Only each element's own reported values are used; unsupported per-device or dedup
+measurements remain dashes. Successful polls retain the raw verbose-list output
+in a disclosure so displayed measurements can be compared with the command output.

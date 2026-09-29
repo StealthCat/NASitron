@@ -9,6 +9,13 @@
 <li class="topology-node" data-vdev-name="{{ node.name }}">
 {% if node.children %}<details open class="topology-group"><summary>{% else %}<div class="topology-device">{% endif %}
 <div class="topology-line"><div class="topology-identity"><strong class="topology-name">{{ node.name }}</strong>{% if node.children %}<span class="subtle">{{ node.kind }} · {{ node.disk_count }} member devices{% if node.size_bytes %} · {{ node.size_bytes|human_bytes }} reported{% endif %}</span>{% endif %}</div><span class="badge {{ node.tone }}">{{ node.state }}</span>{{ errors(node) }}</div>
+{% if node.get('capacity') %}{% set capdata=node.capacity %}
+<dl class="element-capacity" aria-label="{{ node.name }} capacity statistics">
+{% for key,label in [('size','Size'),('allocated','Allocated'),('free','Free'),('fragmentation','Fragmentation'),('capacity','Capacity'),('dedupratio','Dedup')] %}
+<div><dt>{{ label }}</dt><dd>{% set value=capdata[key] %}{% if value is none %}<span class="subtle" title="Not reported by ZFS for this element">—</span>{% elif key in ['size','allocated','free'] %}<span title="{{ value }} bytes">{{ value|human_bytes }}</span>{% elif key == 'dedupratio' %}{{ '%.2f'|format(value) }}×{% else %}{{ '%.1f'|format(value) }}%{% endif %}</dd></div>
+{% endfor %}
+</dl>
+{% endif %}
 {% if node.get('detail') %}<p class="subtle">{{ node.detail }}</p>{% endif %}
 {% if node.children %}</summary><ul class="topology-children">{% for child in node.children %}{{ render_node(child) }}{% endfor %}</ul></details>
 {% else %}
@@ -21,7 +28,8 @@
 {% endmacro %}
 <section class="pool-topology" aria-label="{{ pool.name }} disk hierarchy">
 <div class="topology-toolbar"><h3>Device configuration</h3>{% if row.topology.sections %}<div><button type="button" class="button" data-topology-toggle="expand">Expand groups</button> <button type="button" class="button" data-topology-toggle="collapse">Collapse groups</button></div>{% endif %}</div>
-<p class="subtle">Read, write and checksum columns show ZFS error counts.</p>
+<p class="subtle">Read, write and checksum columns show ZFS error counts. Capacity values are reported for each element; — means ZFS did not report that value.</p>
+{% if row.capacity_rows and not (pool.get("capacity_detail") or {}).get("fresh") %}<p class="critical-text">Capacity measurements are stale; the latest collection failed.</p>{% endif %}
 {% if row.topology.root %}<div class="topology-root"><strong>{{ pool.name }} · Pool totals</strong>{{ errors(row.topology.root) }}</div>{% endif %}
 {% for section in row.topology.sections %}
 <div class="topology-section"><h4>{{ section.label }} <span class="subtle">· {{ section.nodes|length }} top-level {{ 'vdev' if section.nodes|length == 1 else 'vdevs' }} · {{ section.disk_count }} member devices</span></h4><ul class="topology-tree">{% for node in section.nodes %}{{ render_node(node) }}{% endfor %}</ul></div>

@@ -1146,3 +1146,7 @@ body[data-role=viewer] [data-operator-only],body:not([data-role=admin]) [data-ad
 .pool-datasets { margin-top:16px; }
 @media(max-width:600px) { .capacity-table th:first-child { min-width:150px; max-width:190px; } }
 .capacity-table thead th:first-child { position:sticky; left:0; z-index:2; background:#111c2d; }
+.element-capacity { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin:10px 0 0; padding-top:10px; border-top:1px solid #263447; }
+.element-capacity dt { font-size:11px; color:var(--muted, #a9b7cb); }
+.element-capacity dd { margin:4px 0 0; font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; }
+@media(max-width:800px) { .element-capacity { grid-template-columns:repeat(3,minmax(0,1fr)); } }

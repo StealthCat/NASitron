@@ -56,3 +56,28 @@ def test_failed_capacity_collection_retains_previous_rows_marked_stale():
     assert detail['fresh'] is False and len(detail['rows']) == 5
     assert detail['captured_at'] == '2026-09-27T12:00:00Z'
     assert 'pool.capacity:tank' in current['collection']['stale_subsystems']
+
+
+@pytest.mark.parametrize('heading,role', [('logs','log'), ('cache','cache'),
+                                        ('special','special'), ('dedup','dedup'), ('spare','spare')])
+def test_openzfs_22_mixed_whitespace_class_headers_and_ten_column_vdevs(heading, role):
+    root = TEXT.splitlines()[0]
+    vdev = '\traidz2-0\t1000000\t400000\t600000\t-\t-\t12\t40\t-\tONLINE'
+    marker = heading.ljust(45) + '      -      -      -        -         -      -      -      -         -'
+    rows = parse_capacity('\n'.join([root, vdev, marker,
+        '\t/dev/sdz\t2000\t500\t1500\t-\t-\t5\t25\t-\tONLINE']), 'tank')
+    assert len(rows) == 3
+    assert rows[1]['size'] == 1000000 and rows[1]['capacity'] == 40
+    assert rows[2]['role'] == role and rows[2]['allocated'] == 500
+    assert rows[2]['health'] == 'ONLINE' and rows[2]['altroot'] is None
+
+
+def test_hierarchy_capacity_is_per_element_not_inherited_from_pool():
+    from app.pool_capacity import attach_capacity
+    topology = {'sections': [{'nodes': [{'name': 'raidz2-0', 'role': 'data', 'children': [
+        {'name': '/dev/disk with space', 'children': []}, {'name': 'missing', 'children': []}]}]}]}
+    attach_capacity(topology, parse_capacity(TEXT, 'tank'))
+    group = topology['sections'][0]['nodes'][0]
+    assert group['capacity']['allocated'] == 400000
+    assert group['children'][0]['capacity']['size'] is None
+    assert group['children'][1]['capacity'] is None

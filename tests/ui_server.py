@@ -65,6 +65,7 @@ for group in range(3):
     capacity_lines.append(f"\traidz2-{group}\t43980465111040\t31152829453653\t12827635657387\t0\t0\t12\t70.8\t-\tONLINE\t-")
     for member in range(6):
         capacity_lines.append(f"\t/dev/sd{chr(97 + group * 6 + member)}\t-\t-\t-\t-\t0\t-\t-\t-\tONLINE\t-")
+capacity_lines.extend(["cache                   -      -      -      -      -      -      -      -      -", "\t/dev/cache-test\t1000\t400\t600\t-\t-\t0\t40\t-\tONLINE"])
 payload["pools"][0]["capacity_detail"] = {"fresh": True, "captured_at": now.isoformat()+"Z", "rows": parse_capacity("\n".join(capacity_lines), "tank")}
 with SessionLocal() as db:
     ensure_defaults(db)

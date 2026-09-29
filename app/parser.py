@@ -572,7 +572,8 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
                     or capacity_result.get("stderr_truncated")):
                 raise ValueError("Verbose pool capacity collection failed or was truncated.")
             capacity = parse_capacity(capacity_result.get("stdout", ""), name)
-            pool["capacity_detail"] = {"fresh": True, "rows": capacity, "captured_at": sampled_at}
+            pool["capacity_detail"] = {"fresh": True, "rows": capacity, "captured_at": sampled_at,
+                                       "raw": capacity_result.get("stdout", "")}
             freshness[capacity_key] = sampled_at
         except (ValueError, OverflowError):
             errors.append({"subsystem": capacity_key,
