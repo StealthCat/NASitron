@@ -12,7 +12,8 @@
 {% elif node.size_bytes %}<span class="subtle">Reported size {{ node.size_bytes|human_bytes }}</span>{% endif %}
 {% endif %}
 </div></th>
-<td><span class="badge {{ node.tone }}">{{ node.state }}</span></td>
+{% set state=node.get('state') or 'UNKNOWN' %}
+<td><span class="badge {{ node.get('tone') or ('good' if state in ['ONLINE','AVAIL'] else ('offline' if state == 'UNKNOWN' else 'critical')) }}">{{ state }}</span></td>
 {% for key in ['read_errors','write_errors','checksum_errors'] %}<td class="{{ 'critical-text' if node.get(key) else '' }}">{{ node.get(key) if node.get(key) is not none else '—' }}</td>{% endfor %}
 {% set capdata=(row.capacity_rows|selectattr('root')|first) if root else node.get('capacity') %}
 {% for key in ['size','allocated','free','fragmentation','capacity','dedupratio'] %}
