@@ -1,37 +1,39 @@
-{% macro errors(node) %}
-<div class="topology-errors" aria-label="ZFS error counts">
-{% for key, label in [('read_errors','Read'),('write_errors','Write'),('checksum_errors','Checksum')] %}
-<span class="{{ 'critical-text' if node.get(key) else '' }}">{{ label }} <strong>{{ node.get(key) if node.get(key) is not none else '—' }}</strong></span>
-{% endfor %}
-</div>
-{% endmacro %}
-{% macro render_node(node) %}
-<li class="topology-node" data-vdev-name="{{ node.name }}">
-{% if node.children %}<details open class="topology-group"><summary>{% else %}<div class="topology-device">{% endif %}
-<div class="topology-line"><div class="topology-identity"><strong class="topology-name">{{ node.name }}</strong>{% if node.children %}<span class="subtle">{{ node.kind }} · {{ node.disk_count }} member devices{% if node.size_bytes %} · {{ node.size_bytes|human_bytes }} reported{% endif %}</span>{% endif %}</div><span class="badge {{ node.tone }}">{{ node.state }}</span>{{ errors(node) }}</div>
-{% if node.get('capacity') %}{% set capdata=node.capacity %}
-<dl class="element-capacity" aria-label="{{ node.name }} capacity statistics">
-{% for key,label in [('size','Size'),('allocated','Allocated'),('free','Free'),('fragmentation','Fragmentation'),('capacity','Capacity'),('dedupratio','Dedup')] %}
-<div><dt>{{ label }}</dt><dd>{% set value=capdata[key] %}{% if value is none %}<span class="subtle" title="Not reported by ZFS for this element">—</span>{% elif key in ['size','allocated','free'] %}<span title="{{ value }} bytes">{{ value|human_bytes }}</span>{% elif key == 'dedupratio' %}{{ '%.2f'|format(value) }}×{% else %}{{ '%.1f'|format(value) }}%{% endif %}</dd></div>
-{% endfor %}
-</dl>
-{% endif %}
-{% if node.get('detail') %}<p class="subtle">{{ node.detail }}</p>{% endif %}
-{% if node.children %}</summary><ul class="topology-children">{% for child in node.children %}{{ render_node(child) }}{% endfor %}</ul></details>
-{% else %}
+{% macro render_node(node, depth=0, root=false) %}
+<tr class="{{ 'capacity-root' if root else ('capacity-group topology-group' if node.children else 'topology-device') }}" data-vdev-name="{{ node.name }}" data-depth="{{ depth }}">
+<th scope="row"><div class="topology-label" style="padding-left:{{ [depth * 16,96]|min }}px">
+{% if node.children and not root %}<button type="button" class="topology-disclosure" aria-expanded="true" aria-label="Toggle {{ node.name }} members"><span aria-hidden="true">⌄</span></button>{% endif %}
+<strong>{{ node.name }}</strong>
+<span class="subtle">{% if root %}Pool totals{% elif node.children %}{{ node.kind }} · {{ node.disk_count }} member devices{% endif %}</span>
+{% if node.get('detail') %}<span class="subtle">{{ node.detail }}</span>{% endif %}
+{% if not root and not node.children %}
 {% if node.disk %}{% set disk=node.disk %}{% set smart=disk.get('smart') or {} %}{% set health=smart_state(smart) %}
-<details class="topology-drive-details"><summary>Drive details · {{ disk.size_bytes|human_bytes }}{% if disk.bay_label %} · {{ disk.bay_label }}{% endif %}{% if smart.get('temperature_c') is not none %} · {{ smart.temperature_c }} °C{% endif %}</summary>
-<div class="topology-disk"><a href="/servers/{{ row.server.id }}/drive?identity={{ (disk.serial or disk.path)|urlencode }}">{{ disk.model or 'Drive details' }} · {{ disk.serial or disk.path }}</a><span>SMART <span class="badge {{ health[0] }}">{{ health[1] }}</span></span><a href="/disk-io?server_id={{ row.server.id }}&identity={{ (disk.serial or disk.path)|urlencode }}">Disk I/O history</a></div></details>
+<details class="topology-drive-details"><summary>Drive details</summary>
+<div class="topology-disk"><span>{{ disk.size_bytes|human_bytes }}{% if disk.bay_label %} · {{ disk.bay_label }}{% endif %}{% if smart.get('temperature_c') is not none %} · {{ smart.temperature_c }} °C{% endif %}</span><a href="/servers/{{ row.server.id }}/drive?identity={{ (disk.serial or disk.path)|urlencode }}">{{ disk.model or 'Drive details' }} · {{ disk.serial or disk.path }}</a><span>SMART <span class="badge {{ health[0] }}">{{ health[1] }}</span></span><a href="/disk-io?server_id={{ row.server.id }}&identity={{ (disk.serial or disk.path)|urlencode }}">Disk I/O history</a></div></details>
 {% elif node.size_bytes %}<span class="subtle">Reported size {{ node.size_bytes|human_bytes }}</span>{% endif %}
-</div>{% endif %}
-</li>
+{% endif %}
+</div></th>
+<td><span class="badge {{ node.tone }}">{{ node.state }}</span></td>
+{% for key in ['read_errors','write_errors','checksum_errors'] %}<td class="{{ 'critical-text' if node.get(key) else '' }}">{{ node.get(key) if node.get(key) is not none else '—' }}</td>{% endfor %}
+{% set capdata=(row.capacity_rows|selectattr('root')|first) if root else node.get('capacity') %}
+{% for key in ['size','allocated','free','fragmentation','capacity','dedupratio'] %}
+<td>{% set value=capdata.get(key) if capdata else none %}{% if value is none %}<span class="subtle" title="Not reported by ZFS for this element">—</span>{% elif key in ['size','allocated','free'] %}<span title="{{ value }} bytes">{{ value|human_bytes }}</span>{% elif key == 'dedupratio' %}{{ '%.2f'|format(value) }}×{% else %}{{ '%.1f'|format(value) }}%{% endif %}</td>
+{% endfor %}
+</tr>
+{% if not root %}{% for child in node.children %}{{ render_node(child, depth + 1) }}{% endfor %}{% endif %}
 {% endmacro %}
 <section class="pool-topology" aria-label="{{ pool.name }} disk hierarchy">
 <div class="topology-toolbar"><h3>Device configuration</h3>{% if row.topology.sections %}<div><button type="button" class="button" data-topology-toggle="expand">Expand groups</button> <button type="button" class="button" data-topology-toggle="collapse">Collapse groups</button></div>{% endif %}</div>
-<p class="subtle">Read, write and checksum columns show ZFS error counts. Capacity values are reported for each element; — means ZFS did not report that value.</p>
-{% if row.capacity_rows and not (pool.get("capacity_detail") or {}).get("fresh") %}<p class="critical-text">Capacity measurements are stale; the latest collection failed.</p>{% endif %}
-{% if row.topology.root %}<div class="topology-root"><div class="topology-root-label"><strong>Pool totals</strong><span class="subtle">{{ pool.name }}</span></div>{{ errors(row.topology.root) }}</div>{% endif %}
+<p class="subtle">Read, write and checksum columns show ZFS error counts. — means ZFS did not report that value.</p>
+{% if row.capacity_rows and not (pool.get('capacity_detail') or {}).get('fresh') %}<p class="critical-text">Capacity measurements are stale; the latest collection failed.</p>{% endif %}
+{% if row.topology.root or row.topology.sections %}
+<div class="scroll capacity-scroll" tabindex="0" role="region" aria-label="{{ pool.name }} device configuration table, scroll horizontally for all columns">
+<table class="capacity-table topology-table"><caption class="subtle">Pool totals, vdevs and devices for {{ pool.name }}</caption>
+<thead><tr>{% for label in ['Pool / vdev / device','State','Read','Write','Checksum','Size','Allocated','Free','Fragmentation','Capacity','Dedup'] %}<th scope="col">{{ label }}</th>{% endfor %}</tr></thead>
+{% if row.topology.root %}<tbody>{{ render_node(row.topology.root, 0, true) }}</tbody>{% endif %}
 {% for section in row.topology.sections %}
-<div class="topology-section"><h4>{{ section.label }} <span class="subtle">{{ section.nodes|length }} top-level {{ 'vdev' if section.nodes|length == 1 else 'vdevs' }} · {{ section.disk_count }} member devices</span></h4><ul class="topology-tree">{% for node in section.nodes %}{{ render_node(node) }}{% endfor %}</ul></div>
-{% else %}<p class="muted">Disk topology has not been collected for this pool yet.</p>{% endfor %}
+<tbody class="topology-section"><tr class="topology-section-heading"><th scope="rowgroup" colspan="11">{{ section.label }} <span class="subtle">{{ section.nodes|length }} top-level {{ 'vdev' if section.nodes|length == 1 else 'vdevs' }} · {{ section.disk_count }} member devices</span></th></tr>
+{% for node in section.nodes %}{{ render_node(node) }}{% endfor %}</tbody>
+{% endfor %}
+</table></div>
+{% else %}<p class="muted">Disk topology has not been collected for this pool yet.</p>{% endif %}
 </section>

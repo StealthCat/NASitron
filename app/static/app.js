@@ -501,10 +501,31 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-document.querySelectorAll('[data-topology-toggle]').forEach(button => {
-  button.addEventListener('click', () => {
-    button.closest('.pool-topology').querySelectorAll('details.topology-group').forEach(group => {
-      group.open = button.dataset.topologyToggle === 'expand';
+document.querySelectorAll('.pool-topology').forEach(topology => {
+  function updateRows() {
+    topology.querySelectorAll('.topology-section').forEach(section => {
+      const ancestors = [];
+      section.querySelectorAll('tr[data-depth]').forEach(row => {
+        const depth = Number(row.dataset.depth);
+        while (ancestors.length && ancestors[ancestors.length - 1].depth >= depth) ancestors.pop();
+        row.hidden = ancestors.some(parent => !parent.expanded);
+        const toggle = row.querySelector('.topology-disclosure');
+        if (toggle) ancestors.push({depth, expanded: toggle.getAttribute('aria-expanded') === 'true'});
+      });
+    });
+  }
+  topology.querySelectorAll('.topology-disclosure').forEach(button => {
+    button.addEventListener('click', () => {
+      button.setAttribute('aria-expanded', String(button.getAttribute('aria-expanded') !== 'true'));
+      updateRows();
+    });
+  });
+  topology.querySelectorAll('[data-topology-toggle]').forEach(button => {
+    button.addEventListener('click', () => {
+      topology.querySelectorAll('.topology-disclosure').forEach(toggle => {
+        toggle.setAttribute('aria-expanded', String(button.dataset.topologyToggle === 'expand'));
+      });
+      updateRows();
     });
   });
 });

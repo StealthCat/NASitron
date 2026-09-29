@@ -78,18 +78,25 @@ const fs = require('node:fs');
     await page.goto('http://127.0.0.1:8765/pools');
     assert.equal(await page.locator('.topology-group:visible').count(), 3);
     for (let i = 0; i < 3; i++) {
-      assert.equal(await page.locator(`[data-vdev-name="raidz2-${i}"] .topology-device`).count(), 6);
+      assert.equal(await page.locator(`.pool-pane:visible .topology-section .topology-group[data-vdev-name="raidz2-${i}"] ~ .topology-device`).count(), (3 - i) * 6);
     }
     await page.locator('[data-topology-toggle=collapse]:visible').click();
     assert.equal(await page.locator('.topology-device:visible').count(), 0);
     await page.locator('[data-topology-toggle=expand]:visible').click();
+    assert.equal(await page.locator('.topology-device:visible').count(), 18);
+    const firstGroup = page.locator('.pool-pane:visible .topology-disclosure').first();
+    await firstGroup.click();
+    assert.equal(await firstGroup.getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('.topology-device:visible').count(), 12);
+    await firstGroup.focus();
+    await page.keyboard.press('Enter');
     assert.equal(await page.locator('.topology-device:visible').count(), 18);
     const capacity = page.locator('.pool-pane:visible .pool-capacity');
     assert.equal(await capacity.locator('[data-capacity-name]').count(), 23);
     assert.match(await capacity.innerText(), /Checkpoint/);
     assert.match(await capacity.innerText(), /Expandable/);
     assert.match(await capacity.innerText(), /70.8%/);
-    const elementStats = page.locator('[data-vdev-name="raidz2-0"] > details > summary .element-capacity');
+    const elementStats = page.locator('.pool-pane:visible .topology-table [data-vdev-name="raidz2-0"]');
     assert.match(await elementStats.innerText(), /40.0 TiB/);
     assert.match(await elementStats.innerText(), /70.8%/);
 
