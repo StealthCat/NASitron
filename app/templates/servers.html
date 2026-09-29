@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'components.html' import rack_mark, server_capacity, empty_state with context %}
 {% block title %}Servers · NASitron{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -10,13 +11,14 @@
   <a class="button primary" href="/servers/new">+ Add server</a>
 </div>
 {% if not cards %}
-<section class="panel accent-panel"><h2>No monitored servers</h2><p class="muted">Add an Ubuntu/OpenZFS host to begin collecting storage telemetry.</p><a class="button primary" href="/servers/new">Add server</a></section>
+<section class="panel accent-panel">{{ empty_state('No monitored servers', 'Connect your first Ubuntu / OpenZFS host to begin collecting storage telemetry.', '/servers/new', '+ Add server') }}</section>
 {% else %}
 <section class="grid cards">
 {% for card in cards %}
   {% set server = card.server %}
   {% set snap = card.snapshot %}
-  <a class="panel card-link" href="/servers/{{ server.id }}">
+  <a class="panel card-link server-card" href="/servers/{{ server.id }}">
+    <div class="server-card-identity">{{ rack_mark() }}<span class="subtle">MONITORED HOST</span><span class="server-arrow" aria-hidden="true">↗</span></div>
     <div class="server-card-head">
       <div><h2 style="margin-bottom:4px">{{ server.name }}</h2><div class="subtle">{{ server.username }}@{{ server.host }}:{{ server.port }}</div></div>
       {% if server.last_error and server.consecutive_failures %}<span class="badge critical"><span class="dot"></span>Collection error</span>
@@ -24,6 +26,7 @@
       {% elif card.alerts %}<span class="badge warning"><span class="dot"></span>{{ card.alerts|length }} active alert{{ '' if card.alerts|length == 1 else 's' }}</span>
       {% else %}<span class="badge good"><span class="dot"></span>Healthy</span>{% endif %}
     </div>
+    {{ server_capacity(snap) }}
     {% if snap %}
     <div class="server-card-metrics">
       <div class="mini-stat"><span>Pools</span><strong>{{ snap.pools|length }}</strong></div>

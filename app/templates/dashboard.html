@@ -1,34 +1,33 @@
 {% extends "base.html" %}
+{% from 'components.html' import rack_mark, server_capacity, empty_state with context %}
 {% block title %}NASitron Dashboard{% endblock %}
 {% block content %}
-<section class="page-hero dashboard-art">
+<section class="page-hero overview-hero">
   <div class="hero-copy">
     <div class="hero-kicker">Storage Intelligence</div>
-    <h1>Agentless ZFS Health Monitoring</h1>
-    <p>Complete visibility into pools, drives, cache efficiency, capacity, alerts and guarded maintenance across every monitored NAS.</p>
-    <div class="hero-pills">
-      <span class="hero-pill"><span class="mini-dot"></span>Ubuntu</span>
-      <span class="hero-pill"><span class="mini-dot"></span>OpenZFS</span>
-      <span class="hero-pill"><span class="mini-dot"></span>Agentless SSH</span>
-      <span class="hero-pill"><span class="mini-dot"></span>Historical telemetry</span>
-    </div>
-  </div>
-  <div style="position:absolute;right:22px;top:18px">
-    {% if summary.overall_status == 'good' %}
+    <h1>Storage overview</h1>
+    <p>Your infrastructure, at a glance. Pool health, capacity and performance across every monitored host.</p>
+    <div class="overview-status">
+    {% if not cards %}
+      <span class="badge offline">Ready to connect</span>
+    {% elif summary.online_servers < summary.server_count and summary.overall_status == 'good' %}
+      <span class="badge offline">Waiting for telemetry</span>
+    {% elif summary.overall_status == 'good' %}
       <span class="badge good"><span class="dot"></span>All Systems Operational</span>
     {% elif summary.overall_status == 'warning' %}
       <span class="badge warning"><span class="dot"></span>Attention Recommended</span>
     {% else %}
       <span class="badge critical"><span class="dot"></span>Action Required</span>
     {% endif %}
+      <span class="subtle">{{ summary.server_count }} hosts · {{ summary.drive_count }} physical drives</span>
+    </div>
   </div>
+  <img class="overview-art" src="/static/storage-fabric.svg" width="520" height="340" alt="" fetchpriority="high">
 </section>
 
 {% if not cards %}
 <section class="panel accent-panel">
-  <div class="panel-title"><h2>Add your first ZFS server</h2></div>
-  <p class="muted">NASitron connects outbound over SSH and requires no monitoring agent on the storage host.</p>
-  <a class="button primary" href="/servers/new">Add server</a>
+  {{ empty_state('Add your first ZFS server', 'Connect an Ubuntu / OpenZFS host to start exploring storage health and performance.', '/servers/new', '+ Add server') }}
 </section>
 {% else %}
 
@@ -62,15 +61,39 @@
   </div>
 </section>
 
-<section class="grid two section-block">
+<section class="overview-insights section-block">
+  {% set storage = namespace(size=0, used=0, pools=0) %}
+  {% for row in pool_rows %}
+    {% if row.pool.get('size_bytes') and row.pool.get('alloc_bytes') is not none %}
+      {% set storage.size = storage.size + row.pool.size_bytes %}
+      {% set storage.used = storage.used + row.pool.alloc_bytes %}
+      {% set storage.pools = storage.pools + 1 %}
+    {% endif %}
+  {% endfor %}
+  {% set used_pct = [100, [0, storage.used / storage.size * 100]|max]|min if storage.size else 0 %}
+  <div class="panel capacity-panel">
+    <div class="panel-title"><h2>Storage footprint</h2><a class="subtle" href="/pools">Explore pools ›</a></div>
+    <div class="capacity-visual">
+      <div class="capacity-ring {{ 'critical' if used_pct >= 90 else ('warning' if used_pct >= 80 else '') }}" style="--usage:{{ used_pct }}%">
+        <div><strong>{{ '%.0f'|format(used_pct) ~ '%' if storage.size else '—' }}</strong><span>{{ 'allocated' if storage.size else 'no capacity data' }}</span></div>
+      </div>
+      <div class="capacity-legend">
+        <div><span class="legend-key allocated"></span><span>Allocated</span><strong>{{ storage.used|human_bytes if storage.size else '—' }}</strong></div>
+        <div><span class="legend-key available"></span><span>Unallocated</span><strong>{{ [0, storage.size - storage.used]|max|human_bytes if storage.size else '—' }}</strong></div>
+      </div>
+    </div>
+    <div class="capacity-total"><span>Total pool capacity</span><strong>{{ storage.size|human_bytes if storage.size else '—' }}</strong></div>
+    <p class="subtle capacity-note">Reported pool allocation · {{ storage.pools }} of {{ pool_rows|length }} pools</p>
+  </div>
   <div class="panel chart-wrap">
     <div class="panel-title">
       <h2><svg class="section-icon" viewBox="0 0 24 24"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg>ARC Hit Rate</h2>
       <span class="badge">24h</span>
     </div>
-    {% set first = cards[0] %}
+    {% set first = (cards|selectattr('snapshot')|list or cards)[0] %}
+    <p class="chart-caption subtle">{{ first.server.name }} · cache efficiency</p>
     {% if first.snapshot %}
-      <canvas class="chart" id="dashboard-arc"></canvas>
+      <canvas class="chart" id="dashboard-arc" role="img" aria-label="ARC hit rate over the last 24 hours for {{ first.server.name }}">ARC hit rate history for {{ first.server.name }}.</canvas>
       <script>
         document.addEventListener("DOMContentLoaded", () => NASitronChart(
           document.getElementById("dashboard-arc"),
@@ -79,10 +102,12 @@
         ));
       </script>
     {% else %}
-      <div class="muted">Waiting for historical ARC samples.</div>
+      <div class="chart-empty muted">Waiting for historical ARC samples.</div>
     {% endif %}
   </div>
 
+</section>
+<section class="section-block">
   <div class="panel" id="pools">
     <div class="panel-title">
       <h2><svg class="section-icon" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Pool Capacity</h2>
@@ -92,7 +117,7 @@
       {% set pool = row.pool %}
       {% set cap = pool.capacity_pct or 0 %}
       <div class="pool-cap-row">
-        <strong>{{ pool.name }}</strong>
+        <a href="/servers/{{ row.server.id }}" class="pool-cap-name"><strong>{{ pool.name }}</strong><span class="subtle">{{ row.server.name }}</span></a>
         <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else 'good') }}"><span style="width:{{ [cap,100]|min }}%"></span></div>
         <span class="pool-bytes subtle">{{ pool.alloc_bytes|human_bytes }} / {{ pool.size_bytes|human_bytes }}</span>
         <span class="badge">{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</span>
@@ -113,7 +138,8 @@
   {% for card in cards %}
     {% set server = card.server %}
     {% set snap = card.snapshot %}
-    <a class="panel card-link" href="/servers/{{ server.id }}">
+    <a class="panel card-link server-card" href="/servers/{{ server.id }}">
+      <div class="server-card-identity">{{ rack_mark() }}<span class="subtle">MONITORED HOST</span><span class="server-arrow" aria-hidden="true">↗</span></div>
       <div class="server-card-head">
         <div>
           <h2 style="margin-bottom:4px">{{ server.name }}</h2>
@@ -129,6 +155,7 @@
           <span class="badge good"><span class="dot"></span>Healthy</span>
         {% endif %}
       </div>
+      {{ server_capacity(snap) }}
       {% if snap %}
       <div class="server-card-metrics">
         <div class="mini-stat"><span>Pools</span><strong>{{ snap.pools|length }}</strong></div>
@@ -144,7 +171,7 @@
   </div>
 </section>
 
-<section class="grid two section-block">
+<section class="grid two section-block overview-tables">
   <div class="panel flush" id="pools-table">
     <div class="panel-title" style="padding:16px 16px 0">
       <h2>ZFS Pools &amp; Topology</h2>
@@ -190,7 +217,7 @@
           <tr>
             <td><strong>{{ drive.path }}</strong><div class="subtle">{{ drive.model or "Unknown model" }}</div></td>
             <td>{{ row.server.name }}</td>
-            <td>{% if smart.get('smart_passed') is sameas false %}<span class="badge critical">Attention</span>{% else %}<span class="badge good">OK</span>{% endif %}</td>
+            <td>{% if smart.get('smart_passed') is sameas false %}<span class="badge critical">Attention</span>{% elif smart.get('smart_passed') is sameas true %}<span class="badge good">OK</span>{% else %}<span class="badge offline">Unknown</span>{% endif %}</td>
             <td>{{ (smart.get('temperature_c') ~ "°C") if smart.get('temperature_c') is not none else "—" }}</td>
             <td>{% if smart.get('smart_passed') is sameas true %}<span class="badge good">Passed</span>{% elif smart.get('smart_passed') is sameas false %}<span class="badge critical">Failed</span>{% else %}<span class="badge offline">Unknown</span>{% endif %}</td>
           </tr>
@@ -203,7 +230,7 @@
   </div>
 </section>
 
-<section class="grid two section-block">
+<section class="grid two section-block overview-tables">
   <div class="panel flush">
     <div class="panel-title" style="padding:16px 16px 0">
       <h2>Recent Alerts</h2>

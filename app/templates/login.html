@@ -7,9 +7,17 @@
   <title>Sign in · NASitron</title>
   <link rel="icon" href="/static/nasitron-logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/ui.css">
 </head>
 <body class="login-page">
   <main class="login-shell">
+    <section class="login-intro">
+      <div class="hero-kicker">Storage Intelligence</div>
+      <h2>A clearer view of<br>your storage.</h2>
+      <p>One console for the health, capacity and performance of your OpenZFS infrastructure.</p>
+      <img src="/static/storage-fabric.svg" width="520" height="340" alt="">
+      <div class="login-features"><span>Pool health</span><span>Historical telemetry</span><span>Drive insights</span></div>
+    </section>
     <section class="login-card">
       <img class="login-logo" src="/static/nasitron-logo.svg" alt="NASitron">
       <div class="hero-kicker">Secure Console</div>
@@ -32,7 +40,7 @@
       </form>
       <div class="login-security">
         <span class="status-orb"></span>
-        <span>HTTP Basic authentication is disabled. Sessions use a signed, HttpOnly cookie.</span>
+        <span>Your storage workspace. Access with your local account.</span>
       </div>
     </section>
   </main>

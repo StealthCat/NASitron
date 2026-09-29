@@ -1,0 +1,38 @@
+{% macro rack_mark() -%}
+<svg class="rack-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <path d="m32 3 26 15v28L32 61 6 46V18Z" fill="currentColor" opacity=".06"/>
+  <path d="m32 3 26 15v28L32 61 6 46V18Z" stroke="currentColor" opacity=".2"/>
+  <rect x="16" y="17" width="32" height="12" rx="3" stroke="currentColor" stroke-width="1.5"/>
+  <rect x="16" y="35" width="32" height="12" rx="3" stroke="currentColor" stroke-width="1.5"/>
+  <path d="M29 23h12M29 41h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="22" cy="23" r="2" fill="currentColor"/><circle cx="22" cy="41" r="2" fill="currentColor"/>
+</svg>
+{%- endmacro %}
+
+{% macro server_capacity(snapshot) -%}
+{% if snapshot %}
+  {% set capacity = namespace(size=0, used=0) %}
+  {% for pool in snapshot.pools %}
+    {% if pool.get('size_bytes') and pool.get('alloc_bytes') is not none %}
+      {% set capacity.size = capacity.size + pool.size_bytes %}
+      {% set capacity.used = capacity.used + pool.alloc_bytes %}
+    {% endif %}
+  {% endfor %}
+  {% if capacity.size %}
+  {% set pct = [100, [0, capacity.used / capacity.size * 100]|max]|min %}
+  <div class="server-capacity">
+    <div class="row between"><span>Pool capacity</span><strong>{{ '%.0f'|format(pct) }}% used</strong></div>
+    <div class="progress {{ 'critical' if pct >= 90 else ('warning' if pct >= 80 else '') }}"><span style="width:{{ pct }}%"></span></div>
+    <div class="subtle">{{ capacity.used|human_bytes }} of {{ capacity.size|human_bytes }}</div>
+  </div>
+  {% endif %}
+{% endif %}
+{%- endmacro %}
+
+{% macro empty_state(title, message, action_url='', action_label='') -%}
+<div class="empty-state">
+  <img src="/static/storage-fabric.svg" width="220" height="150" alt="">
+  <h2>{{ title }}</h2><p class="muted">{{ message }}</p>
+  {% if action_url %}<a class="button primary" href="{{ action_url }}">{{ action_label }}</a>{% endif %}
+</div>
+{%- endmacro %}
