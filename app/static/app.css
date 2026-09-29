@@ -1075,7 +1075,8 @@ body[data-role=viewer] [data-operator-only],body:not([data-role=admin]) [data-ad
 .pool-topology { margin-top: 24px; min-width: 0; }
 .topology-toolbar, .topology-heading, .topology-root { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .topology-toolbar h3 { margin:0; }
-.topology-tree, /* A connected list keeps large pools readable without nested cards. */
+/* A connected list keeps large pools readable without nested cards. */
+.topology-tree, .topology-children { list-style:none; margin:0; padding:0; }
 .topology-children { margin:0 0 8px 10px; padding-left:14px; border-left:1px solid #334155; }
 .topology-node { min-width:0; }
 .topology-group { border-top:1px solid #334155; }
