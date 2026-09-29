@@ -30,8 +30,8 @@
 <div class="topology-toolbar"><h3>Device configuration</h3>{% if row.topology.sections %}<div><button type="button" class="button" data-topology-toggle="expand">Expand groups</button> <button type="button" class="button" data-topology-toggle="collapse">Collapse groups</button></div>{% endif %}</div>
 <p class="subtle">Read, write and checksum columns show ZFS error counts. Capacity values are reported for each element; — means ZFS did not report that value.</p>
 {% if row.capacity_rows and not (pool.get("capacity_detail") or {}).get("fresh") %}<p class="critical-text">Capacity measurements are stale; the latest collection failed.</p>{% endif %}
-{% if row.topology.root %}<div class="topology-root"><strong>{{ pool.name }} · Pool totals</strong>{{ errors(row.topology.root) }}</div>{% endif %}
+{% if row.topology.root %}<div class="topology-root"><div class="topology-root-label"><strong>Pool totals</strong><span class="subtle">{{ pool.name }}</span></div>{{ errors(row.topology.root) }}</div>{% endif %}
 {% for section in row.topology.sections %}
-<div class="topology-section"><h4>{{ section.label }} <span class="subtle">· {{ section.nodes|length }} top-level {{ 'vdev' if section.nodes|length == 1 else 'vdevs' }} · {{ section.disk_count }} member devices</span></h4><ul class="topology-tree">{% for node in section.nodes %}{{ render_node(node) }}{% endfor %}</ul></div>
+<div class="topology-section"><h4>{{ section.label }} <span class="subtle">{{ section.nodes|length }} top-level {{ 'vdev' if section.nodes|length == 1 else 'vdevs' }} · {{ section.disk_count }} member devices</span></h4><ul class="topology-tree">{% for node in section.nodes %}{{ render_node(node) }}{% endfor %}</ul></div>
 {% else %}<p class="muted">Disk topology has not been collected for this pool yet.</p>{% endfor %}
 </section>
