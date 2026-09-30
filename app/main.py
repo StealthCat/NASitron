@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from sqlalchemy import Integer, cast, func, select, or_
+from sqlalchemy import func, select, or_
 from sqlalchemy.orm import Session, selectinload
 from starlette.background import BackgroundTask
 
@@ -31,7 +31,6 @@ from .config import (
     ALLOW_INSECURE_HTTP,
     APP_NAME,
     APP_VERSION,
-    MAX_METRIC_POINTS,
     SESSION_TTL_SECONDS,
     TIMEZONE,
     validate_runtime_config,
@@ -54,7 +53,7 @@ from .middleware import (
     RequireHTTPSMiddleware,
     SecurityHeadersMiddleware,
 )
-from .models import Alert, CurrentState, MaintenanceAction, Metric, RemoteEnrollment, Server, WebUser, DriveLabel
+from .models import Alert, CurrentState, MaintenanceAction, RemoteEnrollment, Server, WebUser, DriveLabel
 from .scheduler import start_scheduler, stop_scheduler, trigger_now
 from .security import (
     SESSION_COOKIE_NAME,
@@ -74,8 +73,9 @@ from .security import (
 )
 from .experience import server_state, smart_state, pool_state, effective_role, operation_status, alert_target
 from .insights import install as install_insights
+from .observability import install as install_observability
 from .service import latest_snapshot
-from .settings_store import ensure_defaults, get_many, get_setting, set_setting
+from .settings_store import ensure_defaults, get_many, get_setting, set_setting, get_int
 from .support import sanitize_diagnostics, support_bundle_lock
 from .tls_manager import (
     ACME_CA_ROOT_PATH,
@@ -662,7 +662,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             if "zfs.arc" not in set(
                 snapshot.get("collection", {}).get("stale_subsystems", [])
             ):
-                arc_rates.append(float(snapshot.get("arc", {}).get("hit_rate_pct") or 0))
+                value = snapshot.get("arc", {}).get("hit_rate_pct")
+                if value is not None:
+                    arc_rates.append(float(value))
 
         if not snapshot:
             continue
@@ -712,6 +714,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "failed_drives": failed_drives,
         "active_alerts": len(active_alerts),
         "critical_alerts": critical_alerts,
+        "arc_reporting": len(arc_rates),
         "arc_hit_rate": (sum(arc_rates) / len(arc_rates)) if arc_rates else None,
         "overall_status": overall_status,
     }
@@ -731,6 +734,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "drive_rows": drive_rows,
             "recent_alerts": recent_alerts,
             "maintenance_server": maintenance_server,
+            "capacity_warning": get_int(db, "pool_capacity_warning", 80),
+            "capacity_critical": get_int(db, "pool_capacity_critical", 90),
             "app_version": APP_VERSION,
         },
     )
@@ -867,6 +872,7 @@ def _inventory_rows(db: Session) -> dict:
 @app.get("/servers", response_class=HTMLResponse)
 def servers_index(request: Request, db: Session = Depends(get_db)):
     data = _inventory_rows(db)
+    data.update(capacity_warning=get_int(db,"pool_capacity_warning",80), capacity_critical=get_int(db,"pool_capacity_critical",90))
     return templates.TemplateResponse(
         request=request,
         name="servers.html",
@@ -1691,64 +1697,32 @@ def metric_history(
         until = end.astimezone(timezone.utc).replace(tzinfo=None)
         if not timedelta(0) < until - since <= timedelta(days=365):
             raise HTTPException(400, "Choose an end after start and a range of at most 365 days.")
-    duration = (until - since).total_seconds()
-    filters = (
-        Metric.server_id == server_id,
-        Metric.name == name,
-        Metric.scope == scope,
-        Metric.captured_at >= since,
-        Metric.captured_at <= until,
-    )
-    bucket_seconds = max(1, int((duration + MAX_METRIC_POINTS - 1) // MAX_METRIC_POINTS))
-    epoch = cast(func.strftime("%s", Metric.captured_at), Integer)
-    bucket = cast(epoch / bucket_seconds, Integer).label("bucket")
+    from .history import history_series
+    return history_series(db, db.get(Server, server_id), [name], [scope], since, until)[0]
 
-    rows = db.execute(
-        select(
-            bucket,
-            func.max(Metric.captured_at).label("captured_at"),
-            func.avg(Metric.value).label("value"),
-            func.count(Metric.id).label("sample_count"),
-        )
-        .where(*filters)
-        .group_by(bucket)
-        .order_by(bucket)
-    ).all()
-    if not rows:
-        return {
-            "name": name,
-            "scope": scope,
-            "sample_count": 0,
-            "returned_points": 0,
-            "points": [],
-        }
 
-    latest = db.execute(
-        select(Metric.captured_at, Metric.value)
-        .where(*filters)
-        .order_by(Metric.captured_at.desc(), Metric.id.desc())
-        .limit(1)
-    ).first()
-    points = [{"t": row.captured_at.isoformat() + "Z", "v": float(row.value)} for row in rows]
-    if latest:
-        latest_point = {"t": latest[0].isoformat() + "Z", "v": latest[1]}
-        if points[-1]["t"] == latest_point["t"]:
-            points[-1] = latest_point
-        else:
-            points.append(latest_point)
-    sample_count = sum(int(row.sample_count) for row in rows)
-
-    return {
-        "name": name,
-        "scope": scope,
-        "sample_count": sample_count,
-        "returned_points": len(points),
-        "bucket_seconds": bucket_seconds,
-        "start": since.isoformat() + "Z",
-        "end": until.isoformat() + "Z",
-        "expected_interval_seconds": (db.get(Server, server_id).smart_interval_minutes*60 if name.startswith("drive.") and not name.startswith("drive.io.") else db.get(Server, server_id).poll_interval_seconds),
-        "points": points,
-    }
+@app.get("/api/servers/{server_id}/metrics/batch")
+def metric_batch(server_id: int, names: list[str] = Query(...), scopes: list[str] = Query(...),
+                 hours: float = Query(24, ge=0.25, le=8760), start: datetime | None = Query(None),
+                 end: datetime | None = Query(None), db: Session = Depends(get_db)):
+    server = db.get(Server, server_id)
+    if server is None:
+        raise HTTPException(404)
+    if not 1 <= len(names) <= 8 or not 1 <= len(scopes) <= 4 or any(n not in METRIC_NAMES for n in names) or any(len(s)>255 for s in scopes):
+        raise HTTPException(400, "Select up to eight known metrics and four drives.")
+    until = datetime.utcnow()
+    since = until - timedelta(hours=hours)
+    if (start is None) != (end is None):
+        raise HTTPException(400, "Provide both start and end.")
+    if start is not None:
+        if start.tzinfo is None or end.tzinfo is None:
+            raise HTTPException(400, "Start and end must include a timezone offset.")
+        since = start.astimezone(timezone.utc).replace(tzinfo=None)
+        until = end.astimezone(timezone.utc).replace(tzinfo=None)
+        if not timedelta(0) < until-since <= timedelta(days=365):
+            raise HTTPException(400, "Choose a range of at most 365 days.")
+    from .history import history_series
+    return {"series": history_series(db, server, list(dict.fromkeys(names)), list(dict.fromkeys(scopes)), since, until)}
 
 
 @app.post("/servers/{server_id}/support-bundle")
@@ -2426,3 +2400,4 @@ def test_email(
 
 # Register focused read-only insight pages and monitoring controls.
 install_insights(app, templates)
+install_observability(app, templates)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from typing import Any
 
 from sqlalchemy import insert
@@ -50,6 +51,8 @@ def _row(
     try:
         number = float(value)
     except (TypeError, ValueError):
+        return
+    if not math.isfinite(number):
         return
     rows.append(
         {

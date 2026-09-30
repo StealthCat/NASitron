@@ -40,7 +40,8 @@ def test_health_does_not_confuse_unknown_stale_and_disabled_with_healthy():
         poll_interval_seconds=60,
     )
     assert smart_state({})[0] == "unknown"
-    assert smart_state({"smart_passed": True, "stale": True})[0] == "warning"
+    assert smart_state({"smart_passed": True, "stale": True})[0] == "good"
+    assert smart_state({"smart_passed": False, "stale": True})[0] == "critical"
     assert smart_state({"smart_passed": True, "pending_sectors": 3})[0] == "warning"
     assert server_state(server, {})[0] == "unknown"
     snapshot = {
@@ -171,6 +172,7 @@ def test_roles_guard_backend_and_new_pages_render():
             login(client, "preview-viewer", "preview-password")
             for path in [
                 "/settings",
+                "/settings/database",
                 "/users",
                 "/servers/new",
                 "/servers/1/replace-drive",
@@ -188,7 +190,8 @@ def test_roles_guard_backend_and_new_pages_render():
                     client.post(path, data={"csrf_token": csrf_token()}).status_code
                     == 403
                 )
-            assert client.get("/operations").status_code == 200
+            for path in ["/operations", "/drive-bays", "/diagnostics", "/timeline"]:
+                assert client.get(path).status_code == 200
             with SessionLocal() as db:
                 db.get(WebUser, uid).role = "operator"
                 db.commit()

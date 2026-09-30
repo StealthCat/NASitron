@@ -23,12 +23,13 @@
       <div><h2 style="margin-bottom:4px">{{ server.name }}</h2><div class="subtle">{{ server.username }}@{{ server.host }}:{{ server.port }}</div></div>
       {% set state=server_state(server,snap) %}<span class="badge {{ state[0] }}">{{ state[1] }}</span>{% if card.alerts %}<span class="badge warning">{{ card.alerts|length }} alerts</span>{% endif %}
     </div>
-    {{ server_capacity(snap) }}
+    {% if snap %}{% set unhealthy=snap.pools|rejectattr('health','equalto','ONLINE')|list %}<div class="row"><span class="badge {{ 'critical' if unhealthy else ('good' if snap.pools else 'unknown') }}">{{ (unhealthy|length|string ~ ' pools need attention') if unhealthy else ('Pools last ONLINE' if snap.pools else 'No pool data') }}</span><span class="subtle">Last reported storage health</span></div>{% endif %}
+      {{ server_capacity(snap) }}
     {% if snap %}
     <div class="server-card-metrics">
       <div class="mini-stat"><span>Pools</span><strong>{{ snap.pools|length }}</strong></div>
       <div class="mini-stat"><span>Physical drives</span><strong>{{ snap.drives|length }}</strong></div>
-      <div class="mini-stat"><span>ARC hit</span><strong>{{ "%.1f"|format(snap.arc.hit_rate_pct or 0) }}%</strong></div>
+      <div class="mini-stat"><span>ARC hit</span><strong>{{ ("%.1f"|format(snap.arc.get("hit_rate_pct")) ~ "%") if snap.arc.get("hit_rate_pct") is not none else "—" }}</strong></div>
     </div>
     <div class="subtle">Last successful poll · {{ server.last_ok_at|fmt_dt }}</div>
     {% else %}<p class="muted">No successful collection has completed yet.</p>{% endif %}

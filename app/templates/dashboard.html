@@ -72,7 +72,7 @@
     <div class="metric-icon">
       <svg viewBox="0 0 24 24"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg>
     </div>
-    <div><div class="metric-label">Mean ARC Hit Rate</div><div class="metric-value">{{ ("%.1f"|format(summary.arc_hit_rate) ~ "%") if summary.arc_hit_rate is not none else "—" }}</div><div class="metric-sub">Unweighted mean of fresh reporting servers</div></div>
+    <div><div class="metric-label">Mean ARC Hit Rate</div><div class="metric-value">{{ ("%.1f"|format(summary.arc_hit_rate) ~ "%") if summary.arc_hit_rate is not none else "—" }}</div><div class="metric-sub">{{ summary.arc_reporting }} of {{ summary.server_count }} servers · unweighted mean</div></div>
   </div>
 </section>
 
@@ -89,7 +89,7 @@
   <div class="panel capacity-panel">
     <div class="panel-title"><h2>Storage footprint</h2><a class="subtle" href="/pools">Explore pools ›</a></div>
     <div class="capacity-visual">
-      <div class="capacity-ring {{ 'critical' if used_pct >= 90 else ('warning' if used_pct >= 80 else '') }}" style="--usage:{{ used_pct }}%">
+      <div class="capacity-ring {{ 'critical' if used_pct >= capacity_critical else ('warning' if used_pct >= capacity_warning else '') }}" style="--usage:{{ used_pct }}%">
         <div><strong>{{ '%.0f'|format(used_pct) ~ '%' if storage.size else '—' }}</strong><span>{{ 'allocated' if storage.size else 'no capacity data' }}</span></div>
       </div>
       <div class="capacity-legend">
@@ -130,10 +130,10 @@
       {% set cap = pool.capacity_pct %}
       <div class="pool-cap-row">
         <a href="/servers/{{ row.server.id }}" class="pool-cap-name"><strong>{{ pool.name }}</strong><span class="subtle">{{ row.server.name }}</span></a>
-        <div class="progress {{ 'unknown' if cap is none else ('critical' if cap >= 90 else ('warning' if cap is not none and cap >= 80 else 'good')) }}"><span style="width:{{ [cap or 0,100]|min }}%"></span></div>
+        <div class="progress {{ 'unknown' if cap is none else ('critical' if cap >= capacity_critical else ('warning' if cap is not none and cap >= capacity_warning else 'good')) }}"><span style="width:{{ [cap or 0,100]|min }}%"></span></div>
         <span class="pool-bytes subtle">{{ pool.alloc_bytes|human_bytes }} / {{ pool.size_bytes|human_bytes }}</span>
         <span class="badge">{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</span>
-        <strong style="color:{{ 'var(--accent-bright)' if cap is not none and cap >= 80 else 'var(--text)' }}">{{ ("%.0f"|format(cap) ~ "%") if cap is not none else "—" }}</strong>
+        <strong style="color:{{ 'var(--accent-bright)' if cap is not none and cap >= capacity_warning else 'var(--text)' }}">{{ ("%.0f"|format(cap) ~ "%") if cap is not none else "—" }}</strong>
       </div>
     {% else %}
       <div class="muted">No pools have reported yet.</div>
@@ -161,12 +161,13 @@
         <span class="badge {{ state[0] }}">{{ state[1] }}</span>
         {% if card.alerts %}<span class="badge warning">{{ card.alerts|length }} alerts</span>{% endif %}
       </div>
+      {% if snap %}{% set unhealthy=snap.pools|rejectattr('health','equalto','ONLINE')|list %}<div class="row"><span class="badge {{ 'critical' if unhealthy else ('good' if snap.pools else 'unknown') }}">{{ (unhealthy|length|string ~ ' pools need attention') if unhealthy else ('Pools last ONLINE' if snap.pools else 'No pool data') }}</span><span class="subtle">Last reported storage health</span></div>{% endif %}
       {{ server_capacity(snap) }}
       {% if snap %}
       <div class="server-card-metrics">
         <div class="mini-stat"><span>Pools</span><strong>{{ snap.pools|length }}</strong></div>
-        <div class="mini-stat"><span>ARC hit</span><strong>{{ "%.1f"|format(snap.arc.hit_rate_pct or 0) }}%</strong></div>
-        <div class="mini-stat"><span>Memory</span><strong>{{ "%.1f"|format(snap.system.memory.used_pct or 0) }}%</strong></div>
+        <div class="mini-stat"><span>ARC hit</span><strong>{{ ("%.1f"|format(snap.arc.get("hit_rate_pct")) ~ "%") if snap.arc.get("hit_rate_pct") is not none else "—" }}</strong></div>
+        <div class="mini-stat"><span>Memory</span><strong>{{ ("%.1f"|format(snap.system.memory.get("used_pct")) ~ "%") if snap.system.memory.get("used_pct") is not none else "—" }}</strong></div>
       </div>
       <div class="subtle">Last successful poll · {{ server.last_ok_at|fmt_dt }}</div>
       {% else %}
@@ -178,7 +179,7 @@
 </section>
 
 <section class="grid two section-block overview-tables">
-  <div class="panel flush" id="pools-table">
+  <details class="panel flush" id="pools-table"><summary>Pool details · health and compression</summary>
     <div class="panel-title" style="padding:16px 16px 0">
       <h2>ZFS Pools &amp; Topology</h2>
       <span class="subtle">All servers</span>
@@ -206,9 +207,9 @@
         </tbody>
       </table>
     </div>
-  </div>
+  </details>
 
-  <div class="panel flush" id="drives">
+  <details class="panel flush" id="drives"><summary>Drive inventory · {{ summary.drive_count }} drives</summary>
     <div class="panel-title" style="padding:16px 16px 0">
       <h2>Drive Health Preview</h2>
       <a class="subtle" href="/drives">View all {{ summary.drive_count }} drives ›</a>
@@ -223,9 +224,9 @@
           <tr>
             <td><a href="/servers/{{ row.server.id }}/drive?identity={{ (drive.serial or drive.path)|urlencode }}"><strong>{{ drive.path }}</strong></a><div class="subtle">{{ drive.model or "Unknown model" }}</div></td>
             <td>{{ row.server.name }}</td>
-            <td><span class="badge {{ health[0] }}">{{ health[1] }}</span></td>
+            <td><span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
             <td>{{ (smart.get('temperature_c') ~ "°C") if smart.get('temperature_c') is not none else "—" }}</td>
-            <td><span class="badge {{ health[0] }}">{{ health[1] }}</span></td>
+            <td><span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
           </tr>
         {% else %}
           <tr><td colspan="5" class="muted">No drive data available.</td></tr>
@@ -233,13 +234,13 @@
         </tbody>
       </table>
     </div>
-  </div>
+  </details>
 </section>
 
 <section class="grid two section-block overview-tables">
   <div class="panel flush">
     <div class="panel-title" style="padding:16px 16px 0">
-      <h2>Recent Alerts</h2>
+      <h2>Alert details</h2>
       <a class="subtle" href="/alerts">View all ›</a>
     </div>
     <div class="scroll">

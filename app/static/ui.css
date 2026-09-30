@@ -252,3 +252,26 @@ body[data-density=comfortable] .metric-card { padding-block: 25px; }
   .table-toolbar > label { flex: 1 1 140px; }
   .chart-controls { align-items: flex-start; }
 }
+
+/* Shared storage intelligence pages */
+.forecast-spark { width:100%; height:90px; margin:14px 0; background:linear-gradient(180deg,rgba(252,24,89,.07),transparent); border-bottom:1px solid var(--border); }
+.forecast-spark polyline { fill:none; stroke:var(--accent); stroke-width:2; vector-effect:non-scaling-stroke; }
+.bay-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:14px; }
+.bay-tile { position:relative; display:flex; flex-direction:column; align-items:flex-start; gap:9px; min-width:0; padding:20px; border:1px solid var(--border); border-radius:14px; background:linear-gradient(135deg,var(--panel),var(--bg)); overflow-wrap:anywhere; }
+.bay-tile:hover { border-color:var(--accent); transform:translateY(-2px); }
+.bay-light { position:absolute; right:15px; top:20px; width:7px; height:7px; border-radius:50%; background:var(--muted); }
+.bay-tile.good .bay-light { background:var(--good); box-shadow:0 0 10px var(--good-soft); }
+.bay-tile.critical .bay-light { background:var(--accent); }
+.bay-tile.warning .bay-light { background:var(--warn); }
+.timeline-event { display:grid; grid-template-columns:110px minmax(0,1fr); gap:18px; padding:20px 0; border-bottom:1px solid var(--border); }
+.timeline-event>.badge { align-self:start; justify-self:start; }
+.timeline-event p { white-space:pre-wrap; overflow-wrap:anywhere; margin:8px 0; }
+.pagination { display:flex; align-items:center; gap:14px; margin:18px 0; }
+.panel>summary { cursor:pointer; padding:16px; font-weight:600; }
+.statlist dd { overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.readable-table td { font-variant-numeric:tabular-nums; }
+.chart-status,.chart-tooltip,.chart-wrap>details { font-size:.78rem; }
+.panel progress { width:100%; height:12px; accent-color:var(--accent); }
+.io-comparison-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:18px; }
+.comparison-heading { padding-top:12px; }
+@media(max-width:600px) { .timeline-event { grid-template-columns:1fr; gap:8px; } .bay-grid { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); } }

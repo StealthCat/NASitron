@@ -8,7 +8,8 @@ from urllib.parse import quote
 
 from fastapi import Depends, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, func
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import Session
 
 from .db import SessionLocal
@@ -17,12 +18,13 @@ from .models import (
     Alert,
     Server,
     Metric,
+    MetricRollup,
     DriveLabel,
     MaintenanceWindow,
     MaintenanceAction,
 )
 from .security import require_csrf
-from .service import latest_snapshot
+from .service import latest_snapshot, current_states
 from .support import sanitize_diagnostics
 from .settings_store import get_int
 
@@ -69,6 +71,14 @@ async def read_bundle(upload):
     return bundle_values(json.loads(raw))
 
 
+def sparkline(points):
+    if len(points) < 2:
+        return ''
+    values = [float(v) for _,v in points]
+    lo,hi = min(values),max(values)
+    return ' '.join(f"{i*240/(len(values)-1):.1f},{48-(v-lo)*40/(hi-lo or 1):.1f}" for i,v in enumerate(values))
+
+
 def install(app, templates):
     @app.get("/disk-io")
     def disk_io_page(request: Request, server_id: int | None = None,
@@ -82,12 +92,13 @@ def install(app, templates):
         if server:
             historical = db.scalars(select(Metric.scope).where(
                 Metric.server_id == server.id, Metric.name == "drive.io.read_bps"
-            ).distinct()).all()
+            ).union(select(MetricRollup.scope).where(MetricRollup.server_id == server.id, MetricRollup.name == "drive.io.read_bps"))).all()
             for scope in historical:
                 disks.setdefault(scope, {"path": scope, "model": "Historical device"})
         selected = identity if identity in disks else next(iter(disks), "")
         return templates.TemplateResponse(request=request, name="disk_io.html", context={
             "servers": servers, "server": server, "disks": disks, "identity": selected,
+            "busiest": sorted([d for d in snapshot.get("drives", []) if (d.get("io") or {}).get("busy_pct") is not None], key=lambda d:d["io"]["busy_pct"], reverse=True)[:10],
             "snapshot": snapshot, "freshness": server_state(server, snapshot) if server else None,
         })
 
@@ -95,8 +106,9 @@ def install(app, templates):
     def operations(request: Request, db: Session = Depends(session)):
         rows = []
         servers = db.scalars(select(Server).order_by(Server.name)).all()
+        states = current_states(db, servers)
         for server in servers:
-            snapshot = latest_snapshot(db, server.id)
+            snapshot = states.get(server.id)
             for pool in (snapshot or {}).get("pools", []):
                 rows.append(
                     {
@@ -112,7 +124,7 @@ def install(app, templates):
             .order_by(MaintenanceWindow.starts_at)
         ).all()
         actions = db.scalars(
-            select(MaintenanceAction)
+            select(MaintenanceAction).options(selectinload(MaintenanceAction.server))
             .order_by(MaintenanceAction.created_at.desc())
             .limit(100)
         ).all()
@@ -247,17 +259,38 @@ def install(app, templates):
 
     @app.get("/snapshots")
     def snapshots(request: Request, db: Session = Depends(session)):
+        params = request.query_params
+        q = params.get("q", "")[:200].strip()
+        sort = params.get("sort", "name")
+        if sort not in {"name", "created", "used", "referenced"}:
+            sort = "name"
+        descending = params.get("direction") == "desc"
+        try:
+            page = max(1, min(100000, int(params.get("page", "1"))))
+            size = int(params.get("size", "50"))
+        except ValueError:
+            page, size = 1, 50
+        if size not in {25,50,100,250}:
+            size = 50
         rows, inventories = [], []
-        for server in db.scalars(select(Server).order_by(Server.name)):
-            snapshot = latest_snapshot(db, server.id) or {}
+        servers = db.scalars(select(Server).order_by(Server.name)).all()
+        states = current_states(db, servers)
+        for server in servers:
+            snapshot = states.get(server.id) or {}
             inventory = snapshot.get("snapshot_inventory", {})
             inventories.append({"server": server, "inventory": inventory})
             for row in inventory.get("rows", []):
                 rows.append({"server": server, **row})
+        rows = [r for r in rows if not q or q.casefold() in (r.get('name','')+' '+r['server'].name).casefold()]
+        rows.sort(key=lambda r: (r.get(sort) is None, r.get(sort) if r.get(sort) is not None else ('' if sort=='name' else 0)), reverse=descending)
+        total = len(rows)
+        pages = max(1,(total+size-1)//size)
+        page = min(page,pages)
+        rows = rows[(page-1)*size:page*size]
         return templates.TemplateResponse(
             request=request,
             name="snapshots.html",
-            context={"rows": rows, "inventories": inventories},
+            context={"rows": rows, "inventories": inventories, "q":q,"sort":sort,"direction":"desc" if descending else "asc","page":page,"pages":pages,"size":size,"total":total},
         )
 
     @app.get("/forecasts")
@@ -265,26 +298,23 @@ def install(app, templates):
         rows = []
         warning = get_int(db, "pool_capacity_warning", 80)
         critical = get_int(db, "pool_capacity_critical", 90)
-        for server in db.scalars(select(Server).order_by(Server.name)):
-            snapshot = latest_snapshot(db, server.id) or {}
+        servers = db.scalars(select(Server).order_by(Server.name)).all()
+        states = current_states(db, servers)
+        for server in servers:
+            snapshot = states.get(server.id) or {}
+            from .history import history_series
+            now = datetime.utcnow()
+            scopes = [p["name"] for p in snapshot.get("pools", [])]
+            history = history_series(db, server, ["pool.capacity_pct"], scopes, now-timedelta(days=30), now, bucket_seconds=86400, latest_exact=False) if scopes else []
+            history_by_pool = {h["scope"]: [(datetime.fromisoformat(p["t"].removesuffix("Z")), p["v"]) for p in h["points"]] for h in history}
             for pool in snapshot.get("pools", []):
-                # Aggregate in SQL to keep a month of high-frequency samples bounded.
-                points = db.execute(
-                    select(func.min(Metric.captured_at), func.avg(Metric.value))
-                    .where(
-                        Metric.server_id == server.id,
-                        Metric.name == "pool.capacity_pct",
-                        Metric.scope == pool["name"],
-                        Metric.captured_at >= datetime.utcnow() - timedelta(days=30),
-                    )
-                    .group_by(func.date(Metric.captured_at))
-                    .order_by(func.min(Metric.captured_at))
-                ).all()
+                points = history_by_pool.get(pool["name"], [])
                 rows.append(
                     {
                         "server": server,
                         "pool": pool,
                         "warning": forecast(points, warning),
+                        "trend": sparkline(points),
                         "critical": forecast(points, critical),
                         "freshness": server_state(server, snapshot),
                     }

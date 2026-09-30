@@ -22,7 +22,7 @@
   {% set pct = [100, [0, capacity.used / capacity.size * 100]|max]|min %}
   <div class="server-capacity">
     <div class="row between"><span>Pool capacity</span><strong>{{ '%.0f'|format(pct) }}% used</strong></div>
-    <div class="progress {{ 'critical' if pct >= 90 else ('warning' if pct >= 80 else '') }}"><span style="width:{{ pct }}%"></span></div>
+    <div class="progress {{ 'critical' if pct >= capacity_critical|default(90) else ('warning' if pct >= capacity_warning|default(80) else '') }}"><span style="width:{{ pct }}%"></span></div>
     <div class="subtle">{{ capacity.used|human_bytes }} of {{ capacity.size|human_bytes }}</div>
   </div>
   {% endif %}

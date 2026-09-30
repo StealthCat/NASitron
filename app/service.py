@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .alerts import collection_failed, collection_recovered, evaluate_snapshot
 from .collector import SSHCollector
 from .metrics import store_metrics
 from .experience import update_operations
-from .models import CurrentState, Metric, Server, Snapshot
+from .models import CurrentState, Metric, Server, Snapshot, MetricRollup, MonitorEvent
 from .parser import build_snapshot
-from .settings_store import get_int
+from .settings_store import get_int, set_setting
+from .history import compact_history, delete_chunks
 
 _db_write_lock = threading.Lock()
 
@@ -188,6 +190,8 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
     if server is None:
         raise RuntimeError(f"Server {server_id} not found")
 
+    started = time.monotonic()
+    previous_state = server.last_collection_state
     now = datetime.utcnow()
     include_smart = (
         server.last_smart_at is None
@@ -245,6 +249,16 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
                 if attempted > 0 or not snapshot.get("drives"):
                     server.last_smart_at = now
 
+            server.last_collection_seconds = time.monotonic() - started
+            if previous_state != server.last_collection_state:
+                db.add(MonitorEvent(server_id=server.id, kind="collection", severity="info" if server.last_collection_state == "ok" else "warning", message="Collection " + server.last_collection_state))
+            old_pools = _pool_map(previous)
+            for pool in snapshot.get("pools", []):
+                from .experience import operation_status
+                current_scan = operation_status(pool)
+                old_scan = operation_status(old_pools.get(pool["name"], {}))
+                if current_scan["active"] != old_scan["active"] or (not current_scan["active"] and current_scan["scan"] != old_scan["scan"]):
+                    db.add(MonitorEvent(server_id=server.id, kind="scan", message=pool["name"] + ": " + current_scan["scan"]))
             collection_recovered(db, server)
             evaluate_snapshot(db, server, snapshot)
             update_operations(db, server, snapshot)
@@ -257,6 +271,9 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
             if server is None:
                 raise
             server.last_poll_at = now
+            server.last_collection_seconds = time.monotonic() - started
+            if previous_state != "failed":
+                db.add(MonitorEvent(server_id=server.id, kind="collection", severity="critical", message="Collection failed: " + str(exc)))
             server.last_error = str(exc)
             server.last_collection_state = "failed"
             server.consecutive_failures = (server.consecutive_failures or 0) + 1
@@ -303,14 +320,25 @@ def prune_history(db: Session, now: datetime | None = None) -> tuple[int, int]:
     now = now or datetime.utcnow()
     metric_days = max(1, min(3650, get_int(db, "metric_retention_days", 90)))
     snapshot_days = max(1, min(3650, get_int(db, "snapshot_retention_days", 30)))
+    metrics = delete_chunks(db, _db_write_lock, Metric, Metric.captured_at < now - timedelta(days=metric_days))
+    delete_chunks(db, _db_write_lock, MetricRollup, MetricRollup.captured_at < now - timedelta(days=metric_days))
+    snapshots = delete_chunks(db, _db_write_lock, Snapshot, Snapshot.captured_at < now - timedelta(days=snapshot_days))
+    delete_chunks(db, _db_write_lock, MonitorEvent, MonitorEvent.captured_at < now - timedelta(days=metric_days))
+    rolled = compact_history(db, _db_write_lock, now)
     with _db_write_lock:
-        metric_result = db.execute(
-            delete(Metric).where(Metric.captured_at < now - timedelta(days=metric_days))
-        )
-        snapshot_result = db.execute(
-            delete(Snapshot).where(
-                Snapshot.captured_at < now - timedelta(days=snapshot_days)
-            )
-        )
+        set_setting(db, "history_housekeeping_at", now.isoformat())
+        set_setting(db, "history_housekeeping_result", f"Removed {metrics} raw samples and {snapshots} snapshots; wrote {rolled} summary buckets")
         db.commit()
-    return int(metric_result.rowcount or 0), int(snapshot_result.rowcount or 0)
+    return metrics, snapshots
+
+
+def current_states(db, servers):
+    ids = [s.id for s in servers]
+    rows = db.scalars(select(CurrentState).where(CurrentState.server_id.in_(ids))).all() if ids else []
+    result = {}
+    for row in rows:
+        try:
+            result[row.server_id] = json.loads(row.payload_json)
+        except (ValueError, TypeError):
+            result[row.server_id] = {}
+    return result

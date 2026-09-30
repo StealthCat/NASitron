@@ -22,6 +22,7 @@
   </div>
 </div>
 
+<p class="row"><a href="/diagnostics">Collection diagnostics</a><a href="/timeline?server={{ server.id }}">Event timeline</a><a href="/drive-bays?server={{ server.id }}">Drive bay map</a></p>
 <nav class="page-tabs" role="tablist" aria-label="Server sections">{% for key,label in [('overview','Overview'),('pools','Pools'),('drives','Drives'),('datasets','Datasets'),('performance','Performance'),('events','Events'),('settings','Settings')] %}<button type="button" role="tab" data-page-tab="{{ key }}" {{ 'data-admin-only' if key == 'settings' else '' }}>{{ label }}</button>{% endfor %}</nav>
 {% if server.last_collection_state == 'partial' and snapshot %}
 <div class="message"><strong>Partial collection:</strong> some telemetry sources did not refresh. Stale values are retained and marked until a successful refresh.</div>
@@ -169,7 +170,7 @@
         <td>{{ disk.model or "—" }}<div class="subtle">{{ disk.serial or "No serial" }}</div></td>
         <td>{{ disk.size_bytes|human_bytes }}</td>
         <td>{{ disk.transport or "—" }}</td>
-        <td>{% set health=smart_state(smart) %}<span class="badge {{ health[0] }}">{{ health[1] }}</span></td>
+        <td>{% set health=smart_state(smart) %}<span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
         <td>{{ (smart.get('temperature_c') ~ "°C") if smart.get('temperature_c') is not none else "—" }}</td>
         <td>{{ (smart.get('power_on_hours') ~ " h") if smart.get('power_on_hours') is not none else "—" }}</td>
         <td class="subtle">R {{ smart.get('reallocated_sectors', "—") }} · P {{ smart.get('pending_sectors', "—") }} · U {{ smart.get('offline_uncorrectable', "—") }}{% if smart.get('percentage_used') is not none %}<br>NVMe used {{ smart.get('percentage_used') }}% · media {{ smart.get('media_errors', 0) }}{% endif %}</td>

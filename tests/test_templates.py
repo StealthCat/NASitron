@@ -37,3 +37,12 @@ def test_server_capacity_uses_reported_allocation(pools, expected):
         assert "server-capacity" not in rendered
     else:
         assert expected in rendered
+
+
+def test_server_capacity_respects_configured_thresholds():
+    from app.main import templates
+    components = templates.env.get_template("components.html").make_module(
+        {"capacity_warning":85,"capacity_critical":95})
+    rendered = components.server_capacity({"pools":[{"size_bytes":100,"alloc_bytes":90}]})
+    assert 'progress warning' in rendered
+    assert 'progress critical' not in rendered

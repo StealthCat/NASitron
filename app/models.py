@@ -52,6 +52,7 @@ class Server(Base):
     last_smart_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_full_snapshot_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_collection_state: Mapped[str] = mapped_column(String(20), default="never")
+    last_collection_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -202,3 +203,35 @@ class MaintenanceWindow(Base):
     ends_at: Mapped[datetime] = mapped_column(DateTime)
     reason: Mapped[str] = mapped_column(String(255))
     actor: Mapped[str] = mapped_column(String(120))
+
+
+class MetricRollup(Base):
+    __tablename__ = 'metric_rollups'
+    __table_args__ = (
+        UniqueConstraint('server_id', 'name', 'scope', 'captured_at', 'resolution'),
+        Index('ix_rollup_lookup', 'server_id', 'name', 'scope', 'captured_at'),
+        Index('ix_rollup_time', 'resolution', 'captured_at'),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey('servers.id', ondelete='CASCADE'))
+    name: Mapped[str] = mapped_column(String(100))
+    scope: Mapped[str] = mapped_column(String(255), default='')
+    captured_at: Mapped[datetime] = mapped_column(DateTime)
+    resolution: Mapped[int] = mapped_column(Integer)
+    sample_count: Mapped[int] = mapped_column(Integer)
+    total: Mapped[float] = mapped_column(Float)
+    minimum: Mapped[float] = mapped_column(Float)
+    maximum: Mapped[float] = mapped_column(Float)
+    last_at: Mapped[datetime] = mapped_column(DateTime)
+    last_value: Mapped[float] = mapped_column(Float)
+
+
+class MonitorEvent(Base):
+    __tablename__ = 'monitor_events'
+    __table_args__ = (Index('ix_event_time', 'captured_at'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey('servers.id', ondelete='CASCADE'), index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    kind: Mapped[str] = mapped_column(String(40))
+    severity: Mapped[str] = mapped_column(String(20), default='info')
+    message: Mapped[str] = mapped_column(Text)

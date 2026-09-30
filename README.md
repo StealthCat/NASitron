@@ -1,10 +1,10 @@
 # NASitron
 
-> **0.7:** An attention-first dashboard, server tabs, searchable/sortable
-> inventories, viewer/operator/admin roles, live operation tracking, drive labels,
-> snapshot inventory, capacity forecasts, alert snoozing, maintenance windows,
-> tuning comparison, and encrypted offline backup/restore are available on
-> `main` with the polished dark navy and pink interface. See [Preview guide](docs/PREVIEW.md) for usage, upgrades and recovery.
+> **0.8:** Polished navy/pink UI, physical drive-bay labels, synchronized disk
+> comparisons, event timeline, collection diagnostics and database health.
+> History now retains recent raw samples and compact older summaries with peaks
+> and worst health states. See [Storage intelligence](docs/STORAGE_INTELLIGENCE.md)
+> and the [monitoring guide](docs/PREVIEW.md) for usage and upgrade details.
 
 
 NASitron is a Dockerized, agentless monitoring dashboard for Ubuntu servers running OpenZFS. It connects to one or more NAS hosts over SSH, collects ZFS/storage/system telemetry on a configurable schedule, keeps historical metrics, raises health alerts, sends email through a configurable SMTP relay, can produce a compressed diagnostic bundle intended for ZFS tuning analysis, and provides a guarded workflow for replacing failed ZFS drives with available blank disks.
@@ -47,7 +47,7 @@ NASitron is a Dockerized, agentless monitoring dashboard for Ubuntu servers runn
 
 ## History and alerts
 
-NASitron stores frequent numeric samples separately from recent full snapshots. Defaults are 90 days of time-series metrics and 30 days of full snapshots; both are configurable. SQLite runs in WAL mode and is persisted in the Docker volume.
+NASitron stores numeric history separately from full snapshots. Defaults are 90 days of metric history and 30 days of full snapshots; both are configurable. The latest 7 days retain raw samples, days 8–30 use hourly summaries, and older history uses daily summaries. Summaries retain counts, averages, minima, maxima and the last reading; SMART pass/fail uses the worst observed state. Compaction runs gradually during hourly housekeeping. SQLite runs in WAL mode and is persisted in the Docker volume.
 
 Built-in alert conditions include:
 

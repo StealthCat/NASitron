@@ -51,8 +51,6 @@ def server_state(server, snapshot=None):
 
 def smart_state(smart):
     smart = smart or {}
-    if smart.get("stale"):
-        return "warning", "Stale SMART"
     if smart.get("smart_passed") is False:
         return "critical", "Failed"
     if any(

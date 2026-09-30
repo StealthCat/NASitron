@@ -59,6 +59,7 @@ const fs = require('node:fs');
     });
     await page.goto('http://127.0.0.1:8765/datasets');
     await page.locator('#dataset-search').fill('tank/data');
+    await page.waitForFunction(() => document.querySelectorAll('[data-dataset-row]:not([hidden])').length === 1);
     assert.equal(await page.locator('[data-dataset-row]:visible').count(), 1);
     await page.reload();
     assert.equal(await page.locator('#dataset-search').inputValue(), 'tank/data');
@@ -66,6 +67,7 @@ const fs = require('node:fs');
     await page.goto('http://127.0.0.1:8765/drives');
     assert.equal(await page.locator('tbody tr:visible').count(), 25);
     await page.locator('input[type=search]').fill('DEMO-024');
+    await page.waitForFunction(() => document.querySelectorAll('tbody tr:not([hidden])').length === 1);
     assert.equal(await page.locator('tbody tr:visible').count(), 1);
     await page.screenshot({
       path: 'test-results/drives-filter.png',
@@ -93,9 +95,9 @@ const fs = require('node:fs');
     assert.equal(await page.locator('.topology-device:visible').count(), 18);
     const capacity = page.locator('.pool-pane:visible .pool-capacity');
     assert.equal(await capacity.locator('[data-capacity-name]').count(), 23);
-    assert.match(await capacity.innerText(), /Checkpoint/);
-    assert.match(await capacity.innerText(), /Expandable/);
-    assert.match(await capacity.innerText(), /70.8%/);
+    assert.match(await capacity.textContent(), /Checkpoint/);
+    assert.match(await capacity.textContent(), /Expandable/);
+    assert.match(await capacity.textContent(), /70.8%/);
     const elementStats = page.locator('.pool-pane:visible .topology-table [data-vdev-name="raidz2-0"]');
     assert.match(await elementStats.innerText(), /40.0 TiB/);
     assert.match(await elementStats.innerText(), /70.8%/);
@@ -177,6 +179,23 @@ const fs = require('node:fs');
     await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile disk I/O overflows');
     await page.screenshot({path: 'test-results/disk-io-mobile.png', fullPage: true});
+    await page.setViewportSize({width:1440,height:1000});
+    await page.goto('http://127.0.0.1:8765/disk-io?server_id=1&identity=DEMO-000');
+    await page.locator('#io-compare').evaluate(el => el.closest('details').open=true);
+    await page.locator('#io-compare').selectOption(['DEMO-001','DEMO-002']);
+    await page.waitForFunction(() => document.querySelectorAll('#io-comparisons canvas').length===3);
+    assert.equal(await page.locator('#io-comparisons .chart-status').filter({hasText:'Updated'}).count(),2);
+    assert.equal(await page.locator('#io-comparisons .chart-status').filter({hasText:'No samples'}).count(),1);
+    await page.screenshot({path:'test-results/disk-comparison.png',fullPage:true});
+    for (const width of [1440,390,320]) {
+      await page.setViewportSize({width,height:1000});
+      for (const path of ['drive-bays','diagnostics','timeline','settings/database','forecasts','snapshots','operations']) {
+        const response=await page.goto('http://127.0.0.1:8765/'+path);
+        assert.equal(response.status(),200,path);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${path} overflows at ${width}`);
+        await page.screenshot({path:`test-results/${path.replace('/','-')}-${width}.png`,fullPage:true});
+      }
+    }
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

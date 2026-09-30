@@ -59,7 +59,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
   canvas.tabIndex = 0;
   let points = [],
     gap = 180000,
-    loading = false,
+    generation = 0,
     abort, disposed = false,
     selected = 0, windowStart, windowEnd;
   const ctx = canvas.getContext('2d');
@@ -83,8 +83,9 @@ window.NASitronChart = function(canvas, source, options = {}) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     if (!points.length) return;
-    let lo = Math.min(...points.map(p => p.v)),
-      hi = Math.max(...points.map(p => p.v));
+    let lo = Math.min(...points.map(p => p.low)),
+      hi = Math.max(...points.map(p => p.high));
+    if (options.bounds) {lo = options.bounds[0]; hi = options.bounds[1];}
     if (options.minZero) lo = Math.min(0, lo);
     if (options.max100) hi = Math.max(100, hi);
     if (lo === hi) {
@@ -133,6 +134,10 @@ window.NASitronChart = function(canvas, source, options = {}) {
       }
       segmentStart = i + 1;
     }
+    // Preserve bucket extremes without connecting missing intervals.
+    ctx.strokeStyle = 'rgba(252,24,89,.25)';
+    ctx.lineWidth = Math.max(2, (width-left-right)/Math.max(1, points.length));
+    points.forEach(p => {ctx.beginPath();ctx.moveTo(x(p.t),y(p.low));ctx.lineTo(x(p.t),y(p.high));ctx.stroke();});
     ctx.strokeStyle = '#FC1859';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -166,40 +171,41 @@ window.NASitronChart = function(canvas, source, options = {}) {
     canvas._timeAt = px => start + Math.max(0, Math.min(1, (px - left) / (width - left - right))) * (end - start);
   }
   async function load() {
-    if (loading || disposed) return;
-    loading = true;
+    if (disposed) return;
+    abort?.abort();
+    const requestId = ++generation;
     refresh.disabled = true;
     status.textContent = 'Loading history…';
     abort = new AbortController();
-    const timeout = setTimeout(() => abort.abort(), 15000);
+    const controller = abort;
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const url = new URL(source, location.origin);
       if (options.range) {
         for (const [key, value] of Object.entries(options.range)) url.searchParams.set(key, value);
       } else url.searchParams.set('hours', range.value);
-      const response = await fetch(url, {
+      const response = options.data ? null : await fetch(url, {
         cache: 'no-store',
         signal: abort.signal
       });
-      if (!response.ok) throw new Error(response.status === 401 ? 'Session expired; sign in again.' : 'History unavailable (' + response.status + ').');
-      const data = await response.json();
+      if (response && !response.ok) throw new Error(response.status === 401 ? 'Session expired; sign in again.' : 'History unavailable (' + response.status + ').');
+      const data = options.data || await response.json();
+      if (disposed || requestId !== generation) return;
       windowStart = Date.parse(data.start || options.range?.start) || undefined;
       windowEnd = Date.parse(data.end || options.range?.end) || undefined;
-      if (disposed) return;
       points = (data.points || []).filter(p => p.v !== null).map(p => ({
         t: Date.parse(p.t),
-        v: Number(p.v)
+        v: Number(p.v), low: Number(p.min ?? p.v), high: Number(p.max ?? p.v)
       })).filter(p => Number.isFinite(p.t) && Number.isFinite(p.v)).sort((a, b) => a.t - b.t);
-      gap = Math.max(data.expected_interval_seconds || 60, data.bucket_seconds || 1) * 3000;
-      status.textContent = points.length ? 'Updated ' + new Date().toLocaleTimeString() + ' · ' + points.length + ' samples · times shown in your browser timezone' : 'No samples in this time range.';
-      summaryText.textContent = points.length ? `Minimum ${format(Math.min(...points.map(p=>p.v)))}; maximum ${format(Math.max(...points.map(p=>p.v)))}; latest ${format(points[points.length-1].v)} at ${new Date(points[points.length-1].t).toLocaleString()}. Missing intervals are gaps. Use left/right arrows on the chart for individual samples.` : 'No data available.';
+      gap = Math.max(data.expected_interval_seconds || 60, data.bucket_seconds || 1, data.retained_resolution_seconds || 1) * 3000;
+      status.textContent = points.length ? 'Updated ' + new Date().toLocaleTimeString() + ' · ' + (data.sample_count ?? points.length) + ' readings / ' + points.length + ' buckets · times shown in your browser timezone' + (data.retained_resolution_seconds > 1 ? ' · retained resolution ' + (data.retained_resolution_seconds / 3600) + 'h' : '') : 'No samples in this time range.';
+      summaryText.textContent = points.length ? `Minimum ${format(Math.min(...points.map(p=>p.low)))}; maximum ${format(Math.max(...points.map(p=>p.high)))}; latest ${format(points[points.length-1].v)} at ${new Date(points[points.length-1].t).toLocaleString()}. Missing intervals are gaps. Use left/right arrows on the chart for individual samples.` : 'No data available.';
       draw();
     } catch (error) {
-      if (!disposed) status.textContent = (error.name === 'AbortError' ? 'Request timed out.' : error.message) + ' Select Refresh to retry.';
+      if (!disposed && requestId === generation) status.textContent = (error.name === 'AbortError' ? 'Request timed out.' : error.message) + ' Select Refresh to retry.';
     } finally {
       clearTimeout(timeout);
-      loading = false;
-      refresh.disabled = false;
+      if (requestId === generation) refresh.disabled = false;
     }
   }
 
@@ -207,13 +213,12 @@ window.NASitronChart = function(canvas, source, options = {}) {
     if (!points.length) return;
     selected = Math.max(0, Math.min(points.length - 1, index));
     const p = points[selected];
-    tooltip.textContent = new Date(p.t).toLocaleString() + ' · ' + format(p.v);
+    tooltip.textContent = new Date(p.t).toLocaleString() + ' · ' + format(p.v) + (p.low !== p.high ? ' · range ' + format(p.low) + '–' + format(p.high) : '');
     tooltip.hidden = false;
   }
 
-  function pointer(e) {
-    if (!points.length || !canvas._timeAt) return;
-    const t = canvas._timeAt(e.clientX - canvas.getBoundingClientRect().left);
+  function nearest(t) {
+    if (!points.length) return;
     let index = 0;
     points.forEach((p, i) => {
       if (Math.abs(p.t - t) < Math.abs(points[index].t - t)) index = i;
@@ -221,10 +226,20 @@ window.NASitronChart = function(canvas, source, options = {}) {
     show(index);
   }
 
+  function pointer(e) {
+    if (!canvas._timeAt) return;
+    const t = canvas._timeAt(e.clientX-canvas.getBoundingClientRect().left);
+    nearest(t);
+    if (options.syncGroup) document.dispatchEvent(new CustomEvent("chart-inspect", {detail:{group:options.syncGroup,t}}));
+  }
+  const synchronized = e => {if (e.detail.group === options.syncGroup) nearest(e.detail.t);};
+  if (options.syncGroup) document.addEventListener("chart-inspect", synchronized);
+
   function key(e) {
     if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
       e.preventDefault();
       show(e.key === 'Home' ? 0 : e.key === 'End' ? points.length - 1 : selected + (e.key === 'ArrowRight' ? 1 : -1));
+      if (options.syncGroup && points[selected]) document.dispatchEvent(new CustomEvent('chart-inspect', {detail:{group:options.syncGroup,t:points[selected].t}}));
     }
   }
   canvas.addEventListener('pointermove', pointer);
@@ -233,7 +248,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
   refresh.addEventListener('click', load);
   const observer = new ResizeObserver(draw);
   observer.observe(canvas);
-  const timer = setInterval(() => {
+  const timer = options.data ? null : setInterval(() => {
     if (auto.checked && !document.hidden && canvas.getClientRects().length) load();
   }, 60000);
   canvas._dispose = () => {
@@ -241,6 +256,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
     abort?.abort();
     clearInterval(timer);
     observer.disconnect();
+    document.removeEventListener("chart-inspect", synchronized);
     controls.remove();
     status.remove();
     tooltip.remove();
@@ -288,6 +304,7 @@ function inventory(table, index) {
   if (!rows.length) return;
   const key = 'table:' + location.pathname + ':' + (table.dataset.table || index),
     saved = preference.read(key, {});
+  const searchText = new Map(rows.map(r => [r, r.textContent.toLowerCase()]));
   const headers = [...table.tHead.rows[0].cells],
     wrapper = table.closest('.scroll') || table;
   const toolbar = document.createElement('div');
@@ -370,7 +387,7 @@ function inventory(table, index) {
 
   function render() {
     const query = search.value.toLowerCase().trim();
-    const matching = rows.filter(r => r.textContent.toLowerCase().includes(query) && selectors.every(([key, select]) => !select.value || r.dataset[key] === select.value) && (!type || type.value === 'all' || r.dataset.datasetType === type.value || (type.value === 'root' && r.dataset.root === 'true')));
+    const matching = rows.filter(r => searchText.get(r).includes(query) && selectors.every(([key, select]) => !select.value || r.dataset[key] === select.value) && (!type || type.value === 'all' || r.dataset.datasetType === type.value || (type.value === 'root' && r.dataset.root === 'true')));
     matching.sort((a, b) => {
       const x = value(a.cells[sort]),
         y = value(b.cells[sort]);
@@ -380,10 +397,9 @@ function inventory(table, index) {
     });
     page = Math.max(0, Math.min(page, Math.ceil(matching.length / Number(pageSize.value)) - 1));
     rows.forEach(r => r.hidden = true);
-    matching.forEach((r, i) => {
-      table.tBodies[0].append(r);
-      r.hidden = i < page * Number(pageSize.value) || i >= (page + 1) * Number(pageSize.value);
-    });
+    const fragment = document.createDocumentFragment();
+    matching.slice(page * Number(pageSize.value), (page + 1) * Number(pageSize.value)).forEach(r => {r.hidden = false; fragment.append(r);});
+    table.tBodies[0].append(fragment);
     headers.forEach((h, i) => {
       h.hidden = !visible.includes(i);
       h.setAttribute('aria-sort', i === sort ? (descending ? 'descending' : 'ascending') : 'none');
@@ -419,9 +435,11 @@ function inventory(table, index) {
       render();
     });
   });
+  let searchTimer;
   [search, type, pageSize, ...selectors.map(x => x[1])].filter(Boolean).forEach(e => e.addEventListener(e === search ? 'input' : 'change', () => {
     page = 0;
-    render();
+    clearTimeout(searchTimer);
+    if (e === search) searchTimer = setTimeout(render, 150); else render();
   }));
   reset.addEventListener('click', () => {
     search.value = '';
@@ -556,6 +574,7 @@ document.querySelectorAll('.pool-topology').forEach(topology => {
 
 // Keep off-canvas navigation out of the keyboard order when closed.
 document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.nav-item.active').forEach(link => link.setAttribute('aria-current', 'page'));
   const sidebar = document.getElementById('sidebar');
   const mobile = window.matchMedia('(max-width: 900px)');
   function syncNavigation() {

@@ -33,6 +33,7 @@ def init_db() -> None:
 
     # Additive upgrades for existing installations; retain legacy administrator flags.
     additions = {
+        "servers": {"last_collection_seconds": "FLOAT"},
         "web_users": {"role": "VARCHAR(20) NOT NULL DEFAULT 'viewer'"},
         "alerts": {"snoozed_until": "DATETIME"},
         "maintenance_actions": {"actor": "VARCHAR(120) NOT NULL DEFAULT ''",

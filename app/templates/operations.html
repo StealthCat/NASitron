@@ -1,10 +1,10 @@
 {% extends 'base.html' %}{% block title %}Operations · NASitron{% endblock %}{% block content %}
-<div class="page-head"><div><h1>Storage operations</h1><p class="muted">Scrubs, resilvers and scheduled notification windows. Refresh follows the server's collection cadence.</p></div><div class="row"><button onclick="location.reload()">Refresh</button><label>Auto refresh<select data-page-refresh><option value="0">Off</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label></div></div>
+<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">Storage intelligence</div><h1>Storage operations</h1><p class="muted">Scrubs, resilvers and scheduled notification windows. Refresh follows the server's collection cadence.</p></div><div class="row"><button onclick="location.reload()">Refresh</button><label>Auto refresh<select data-page-refresh><option value="0">Off</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label></div></div>
 <section class="grid cards">
 {% for row in rows %}<article class="panel"><div class="panel-title"><h2>{{ row.pool.name }} · {{ row.server.name }}</h2><span class="badge {{ row.freshness[0] }}">{{ row.freshness[1] }}</span></div>
 <h3>{{ row.status.kind }} · {{ 'In progress' if row.status.active else 'Idle / last result' }}</h3>
 {% if row.status.percent is not none %}<progress max="100" value="{{ row.status.percent }}" aria-label="Scan progress"></progress><strong>{{ row.status.percent }}%</strong>{% endif %}
-<p>Rate: {{ row.status.rate or 'Not reported' }} · Remaining: {{ row.status.eta or 'Not reported' }}</p><pre>{{ row.status.scan }}</pre>
+<p>Rate: {{ row.status.rate or 'Not reported' }} · Remaining: {{ row.status.eta or 'Not reported' }}</p><details><summary>Full scan report</summary><pre>{{ row.status.scan }}</pre></details>
 <p class="subtle">Last completed scrub: {{ row.status.last_scrub|fmt_dt }}</p><a href="/servers/{{ row.server.id }}#pools">View pool health →</a></article>
 {% else %}<div class="panel">No pool telemetry yet.</div>{% endfor %}</section>
 <section class="panel section-block"><h2>Replacement lifecycle</h2><p class="subtle">Accepted means the command succeeded. Completion requires a subsequent zero-error resilver result and healthy vdevs. Historical actions may remain unverified.</p><div class="scroll"><table class="readable-table"><thead><tr><th>Started</th><th>Server / pool</th><th>Actor</th><th>State</th><th>Completed</th></tr></thead><tbody>

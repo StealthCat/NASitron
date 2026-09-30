@@ -7,7 +7,7 @@ from pathlib import Path
 from app.db import init_db, SessionLocal
 from app.parser import parse_pool_status
 from app.pool_capacity import parse_capacity
-from app.models import Server, CurrentState, Metric, Alert
+from app.models import Server, CurrentState, Metric, Alert, DriveLabel, MonitorEvent
 from app.security import ensure_bootstrap_admin
 from app.settings_store import ensure_defaults
 
@@ -118,6 +118,14 @@ with SessionLocal() as db:
                                ("write_latency_ms", 6), ("busy_pct", 45), ("queue_depth", 0.8)]:
                 db.add(Metric(server_id=sid, name="drive.io." + key, scope=scope,
                               value=value, captured_at=now - timedelta(minutes=minutes)))
+    for i in range(25):
+        db.add(DriveLabel(server_id=sid, identity=f"DEMO-{i:03}", label=f"Enclosure A · Bay {i+1}"))
+    for day in range(1,11):
+        db.add(Metric(server_id=sid,name="pool.capacity_pct",scope="tank",captured_at=now-timedelta(days=day),value=71-day*1.2))
+    db.add(MonitorEvent(server_id=sid,kind="collection",message="Collection recovered",captured_at=now-timedelta(minutes=20)))
+    db.add(MonitorEvent(server_id=sid,kind="scan",message="tank: scrub completed with 0 errors",captured_at=now-timedelta(hours=2)))
+    db.get(Server,sid).last_collection_seconds=2.4
+    db.get(Server,sid).last_smart_at=now
     other = Server(name="Boreas Demo", host="192.0.2.11", username="nasitron", enabled=True,
                    last_collection_state="ok", last_ok_at=now, last_poll_at=now)
     db.add(other)
