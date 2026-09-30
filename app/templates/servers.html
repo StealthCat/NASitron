@@ -8,7 +8,7 @@
     <h1>Servers</h1>
     <p class="muted">Every monitored host, its collection state, storage summary, and current alerts.</p>
   </div>
-  <a class="button primary" href="/servers/new">+ Add server</a>
+  <a class="button primary" href="/servers/new" data-admin-only>+ Add server</a>
 </div>
 {% if not cards %}
 <section class="panel accent-panel">{{ empty_state('No monitored servers', 'Connect your first Ubuntu / OpenZFS host to begin collecting storage telemetry.', '/servers/new', '+ Add server') }}</section>
@@ -21,10 +21,7 @@
     <div class="server-card-identity">{{ rack_mark() }}<span class="subtle">MONITORED HOST</span><span class="server-arrow" aria-hidden="true">↗</span></div>
     <div class="server-card-head">
       <div><h2 style="margin-bottom:4px">{{ server.name }}</h2><div class="subtle">{{ server.username }}@{{ server.host }}:{{ server.port }}</div></div>
-      {% if server.last_error and server.consecutive_failures %}<span class="badge critical"><span class="dot"></span>Collection error</span>
-      {% elif not snap %}<span class="badge offline"><span class="dot"></span>Waiting</span>
-      {% elif card.alerts %}<span class="badge warning"><span class="dot"></span>{{ card.alerts|length }} active alert{{ '' if card.alerts|length == 1 else 's' }}</span>
-      {% else %}<span class="badge good"><span class="dot"></span>Healthy</span>{% endif %}
+      {% set state=server_state(server,snap) %}<span class="badge {{ state[0] }}">{{ state[1] }}</span>{% if card.alerts %}<span class="badge warning">{{ card.alerts|length }} alerts</span>{% endif %}
     </div>
     {{ server_capacity(snap) }}
     {% if snap %}

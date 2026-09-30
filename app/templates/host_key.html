@@ -28,8 +28,8 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="fingerprint" value="{{ candidate.fingerprint }}">
     <div class="field">
-      <label>Type the fingerprint exactly to confirm</label>
-      <input name="confirm_text" autocomplete="off" maxlength="128" required>
+      <label for="host_key-field-1">Type the fingerprint exactly to confirm</label>
+      <input id="host_key-field-1" name="confirm_text" autocomplete="off" maxlength="128" required>
     </div>
     <button class="primary" type="submit">Enroll and enable strict verification</button>
   </form>

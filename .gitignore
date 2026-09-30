@@ -9,3 +9,7 @@ data/
 *.sqlite
 *.sqlite3
 .DS_Store
+
+node_modules/
+test-results/
+package-lock.json

@@ -48,7 +48,7 @@
           <strong>{{ user.username }}</strong>
           {% if user.id == request.state.current_user.id %}<span class="badge">You</span>{% endif %}
         </td>
-        <td><span class="badge {{ 'good' if user.is_admin else '' }}">{{ "Administrator" if user.is_admin else "User" }}</span></td>
+        <td><span class="badge {{ 'good' if user.is_admin else '' }}">{{ effective_role(user)|title }}</span></td>
         <td><span class="badge {{ 'good' if user.enabled else 'offline' }}">{{ "Enabled" if user.enabled else "Disabled" }}</span></td>
         <td>{{ user.last_login_at|fmt_dt if user.last_login_at else "Never" }}</td>
         <td>{{ user.created_at|fmt_dt }}</td>

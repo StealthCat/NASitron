@@ -1,6 +1,7 @@
 # UI preview
 
-The `ui-preview` branch refines NASitron's shared interface while retaining the
+The interface originally developed on `ui-preview` is now merged into `main`,
+alongside all features from `preview`. It refines NASitron's shared interface while retaining the
 existing dark navy palette, `#FC1859` accent, and health-status colors.
 
 - Cleaner navigation, page headings, typography, cards, forms, tabs, and tables.
@@ -15,13 +16,13 @@ existing dark navy palette, `#FC1859` accent, and health-status colors.
 - Responsive layouts, keyboard-accessible table scrolling, skip navigation,
   mobile-menu focus management, and reduced-motion support.
 
-## Try the branch
+## Run the merged interface
 
-Use the normal setup in the [README](../README.md), then build this branch:
+Use the normal setup in the [README](../README.md), then build `main`:
 
 ```bash
 git fetch origin
-git switch ui-preview
+git switch main
 docker compose up -d --build
 ```
 

@@ -7,6 +7,7 @@ from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from .models import Metric
+from .disk_io import IO_KEYS
 
 METRIC_NAMES = {
     "system.load1",
@@ -27,7 +28,13 @@ METRIC_NAMES = {
     "pool.write_bps",
     "drive.temperature_c",
     "drive.smart_passed",
+    "drive.reallocated_sectors",
+    "drive.pending_sectors",
+    "drive.media_errors",
+    "drive.percentage_used",
 }
+
+METRIC_NAMES.update(f"drive.io.{key}" for key in IO_KEYS)
 
 
 def _row(
@@ -93,11 +100,18 @@ def store_metrics(
                 _row(rows, server_id, captured_at, f"pool.{key}", io.get(key), scope)
 
     for disk in snapshot.get("drives", []):
+        scope = disk.get("serial") or disk.get("path") or disk.get("name") or ""
+        if not {"drives.io", "drives.inventory"}.intersection(stale):
+            for key in IO_KEYS:
+                _row(rows, server_id, captured_at, f"drive.io.{key}",
+                     (disk.get("io") or {}).get(key), scope)
         smart = disk.get("smart") or {}
         if smart.get("stale") or not smart.get("data_available"):
             continue
         scope = disk.get("serial") or disk.get("path") or disk.get("name") or ""
         _row(rows, server_id, captured_at, "drive.temperature_c", smart.get("temperature_c"), scope)
+        for indicator in ("reallocated_sectors", "pending_sectors", "media_errors", "percentage_used"):
+            _row(rows, server_id, captured_at, f"drive.{indicator}", smart.get(indicator), scope)
         if smart.get("smart_passed") is not None:
             _row(
                 rows,

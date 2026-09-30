@@ -24,7 +24,7 @@
   </div>
   <div class="metric-card">
     <div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M4 8h16M4 16h16"/><path d="M8 4v16M16 4v16"/></svg></div>
-    <div><div class="metric-label">Average compression</div><div class="metric-value">{{ ("%.2f"|format(average_dataset_compression) ~ "x") if average_dataset_compression is not none else "—" }}</div><div class="metric-sub">{{ configured_dataset_properties }} explicit properties</div></div>
+    <div><div class="metric-label">Mean compression ratio</div><div class="metric-value">{{ ("%.2f"|format(average_dataset_compression) ~ "x") if average_dataset_compression is not none else "—" }}</div><div class="metric-sub">Unweighted; includes roots and children</div></div>
   </div>
 </section>
 
@@ -47,7 +47,7 @@
   </div>
 
   <div class="scroll dataset-table-wrap">
-    <table class="dataset-table readable-table">
+    <table class="dataset-table readable-table" data-table="datasets" data-default-columns="0,1,4,5,9,11">
       <thead>
         <tr>
           <th>Dataset</th>
@@ -75,11 +75,11 @@
           data-search="{{ (ds.get('name','') ~ ' ' ~ row.server.name ~ ' ' ~ row.server.host ~ ' ' ~ row.tank_name ~ ' ' ~ ds.get('mountpoint',''))|lower }}"
         >
           <td>
-            <strong>{{ ds.get('name') }}</strong>
+            <strong>{{ ds.get('name') }}</strong>{% set freshness=server_state(row.server,row.snapshot) %}{% if freshness[0] != 'good' %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>{% endif %}
             {% if row.is_root %}<div><span class="badge good">Root dataset</span></div>{% endif %}
           </td>
           <td><a href="/servers/{{ row.server.id }}">{{ row.server.name }}</a><div class="subtle">{{ row.server.host }}</div></td>
-          <td><a href="/tanks"><strong>{{ row.tank_name }}</strong></a></td>
+          <td><a href="/tanks#{{ row.server.id }}-{{ row.tank_name|urlencode }}"><strong>{{ row.tank_name }}</strong></a></td>
           <td><span class="badge">{{ "Filesystem" if dataset_type == "filesystem" else ("Zvol" if dataset_type == "volume" else dataset_type) }}</span></td>
           <td>{{ ds.get('used_bytes')|human_bytes }}</td>
           <td>{{ ds.get('available_bytes')|human_bytes }}</td>
@@ -116,39 +116,4 @@
   <div id="dataset-empty-filter" class="muted dataset-empty-filter" hidden>No datasets match the current filters.</div>
 </section>
 
-<script>
-(function initDatasetFilters() {
-  const search = document.getElementById("dataset-search");
-  const type = document.getElementById("dataset-type-filter");
-  const rows = Array.from(document.querySelectorAll("[data-dataset-row]"));
-  const count = document.getElementById("dataset-visible-count");
-  const empty = document.getElementById("dataset-empty-filter");
-
-  if (!search || !type || !count || !empty) return;
-
-  function applyFilters() {
-    const query = search.value.trim().toLowerCase();
-    const selectedType = type.value;
-    let visible = 0;
-
-    rows.forEach((row) => {
-      const matchesSearch = !query || row.dataset.search.includes(query);
-      const matchesType =
-        selectedType === "all" ||
-        row.dataset.datasetType === selectedType ||
-        (selectedType === "root" && row.dataset.root === "true");
-      const show = matchesSearch && matchesType;
-      row.hidden = !show;
-      if (show) visible += 1;
-    });
-
-    count.textContent = String(visible);
-    empty.hidden = visible !== 0 || rows.length === 0;
-  }
-
-  search.addEventListener("input", applyFilters);
-  type.addEventListener("change", applyFilters);
-  applyFilters();
-})();
-</script>
 {% endblock %}

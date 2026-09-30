@@ -33,6 +33,6 @@
 <div class="empty-state">
   <img src="/static/storage-fabric.svg" width="220" height="150" alt="">
   <h2>{{ title }}</h2><p class="muted">{{ message }}</p>
-  {% if action_url %}<a class="button primary" href="{{ action_url }}">{{ action_label }}</a>{% endif %}
+  {% if action_url %}<a class="button primary" href="{{ action_url }}" data-admin-only>{{ action_label }}</a>{% endif %}
 </div>
 {%- endmacro %}

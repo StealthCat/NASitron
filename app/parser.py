@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from .disk_io import parse_disk_io
+from .pool_capacity import parse_capacity
+
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -138,10 +141,28 @@ def _normalize_vdev_state(value: Any) -> str:
     return "ONLINE" if state == "HEALTHY" else state
 
 
+def parse_status_sections(text: str) -> list[dict[str, str]]:
+    """Keep all human-readable status sections, including verbose error paths."""
+    sections = []
+    current = None
+    for line in text.expandtabs(8).splitlines():
+        header = re.match(r"^ {0,6}([a-z][a-z0-9_ ]*):\s*(.*)$", line)
+        if header:
+            key, value = header.groups()
+            current = {"key": key, "text": value}
+            if key not in {"pool", "state", "config"}:
+                sections.append(current)
+        elif current is not None and line.strip():
+            current["text"] += "\n" + line.strip()
+    return sections
+
+
 def parse_pool_status(text: str) -> dict[str, Any]:
     state = ""
     scan = ""
     errors = ""
+    scan_lines = []
+    in_scan = False
     config: list[dict[str, Any]] = []
     in_config = False
     role = "data"
@@ -154,13 +175,21 @@ def parse_pool_status(text: str) -> dict[str, Any]:
     }
 
     for line in text.splitlines():
+        line = line.expandtabs(8)
         stripped = line.strip()
+        if in_scan and stripped and not re.match(r"[a-z]+:", stripped):
+            scan_lines.append(stripped)
+        elif re.match(r"[a-z]+:", stripped):
+            in_scan = False
         if stripped.startswith("state:"):
             state = stripped.split(":", 1)[1].strip()
         elif stripped.startswith("scan:"):
             scan = stripped.split(":", 1)[1].strip()
+            scan_lines.append(scan)
+            in_scan = True
         elif stripped.startswith("errors:"):
             errors = stripped.split(":", 1)[1].strip()
+            in_config = False
         elif stripped == "config:":
             in_config = True
             role = "data"
@@ -174,17 +203,18 @@ def parse_pool_status(text: str) -> dict[str, Any]:
                 (idx for idx, part in enumerate(parts) if part.upper() in _ZFS_STATES),
                 None,
             )
-            if state_index is None or state_index == 0 or len(parts) < state_index + 4:
+            if state_index is None or state_index == 0 or len(parts) < state_index + 1:
                 continue
             config.append(
                 {
                     "name": " ".join(parts[:state_index]),
                     "state": _normalize_vdev_state(parts[state_index]),
-                    "read_errors": _int(parts[state_index + 1]),
-                    "write_errors": _int(parts[state_index + 2]),
-                    "checksum_errors": _int(parts[state_index + 3]),
+                    "read_errors": _int(parts[state_index + 1]) if len(parts) > state_index + 1 else None,
+                    "write_errors": _int(parts[state_index + 2]) if len(parts) > state_index + 2 else None,
+                    "checksum_errors": _int(parts[state_index + 3]) if len(parts) > state_index + 3 else None,
                     "role": role,
                     "indent": len(line) - len(line.lstrip()),
+                    "detail": " ".join(parts[state_index + 4:]),
                     "guid": None,
                     "size_bytes": 0,
                     "leaf": False,
@@ -193,16 +223,19 @@ def parse_pool_status(text: str) -> dict[str, Any]:
 
     for index, entry in enumerate(config):
         next_indent = config[index + 1]["indent"] if index + 1 < len(config) else -1
-        entry["leaf"] = next_indent <= entry["indent"]
+        entry["leaf"] = (next_indent <= entry["indent"] or
+                         (index + 1 < len(config) and config[index + 1]["role"] != entry["role"]))
 
     return {
         "state": state,
         "scan": scan,
+        "scan_detail": "\n".join(scan_lines),
         "errors": errors,
         "scrub_finished_at": _scrub_finished(scan),
         "vdevs": config,
         "raw": text,
         "structured": False,
+        "sections": parse_status_sections(text),
     }
 
 
@@ -288,14 +321,20 @@ def parse_pool_status_json(
         if isinstance(nodes, dict):
             _flatten_json_vdevs(nodes, role=role, depth=0, output=vdevs)
 
+    text_nodes = {v["name"]: v for v in fallback.get("vdevs", [])}
+    for vdev in vdevs:
+        vdev["detail"] = text_nodes.get(vdev["name"], {}).get("detail", "")
+
     return {
         "state": str(pool.get("state") or fallback.get("state") or ""),
         "scan": fallback.get("scan", ""),
+        "scan_detail": fallback.get("scan_detail", ""),
         "errors": fallback.get("errors", ""),
         "scrub_finished_at": fallback.get("scrub_finished_at"),
         "vdevs": vdevs,
         "raw": text_fallback,
         "structured": True,
+        "sections": fallback.get("sections", []),
     }
 
 
@@ -500,6 +539,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         "arcstats": "zfs.arc",
         "zpool_iostat": "zfs.iostat",
         "lsblk": "drives.inventory",
+        "disk_io": "drives.io",
         "services": "zfs.services",
     }
     failed_subsystems: set[str] = set()
@@ -524,6 +564,21 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
     pool_status_ok: list[str] = []
     for pool in pools:
         name = pool["name"]
+        capacity_result = raw.get("zpool_list_verbose", {}).get(name, {})
+        capacity_key = f"pool.capacity:{name}"
+        pool["capacity_detail"] = {"fresh": False, "rows": []}
+        try:
+            if (capacity_result.get("exit") != 0 or capacity_result.get("stdout_truncated")
+                    or capacity_result.get("stderr_truncated")):
+                raise ValueError("Verbose pool capacity collection failed or was truncated.")
+            capacity = parse_capacity(capacity_result.get("stdout", ""), name)
+            pool["capacity_detail"] = {"fresh": True, "rows": capacity, "captured_at": sampled_at,
+                                       "raw": capacity_result.get("stdout", "")}
+            freshness[capacity_key] = sampled_at
+        except (ValueError, OverflowError):
+            errors.append({"subsystem": capacity_key,
+                           "message": "Verbose pool capacity was unavailable, truncated or malformed."})
+            failed_subsystems.add(capacity_key)
         text_result = text_statuses.get(name, {})
         json_result = json_statuses.get(name, {})
         text = text_result.get("stdout", "")
@@ -572,6 +627,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
                 }
             )
 
+        parsed["verbose_complete"] = text_valid
         pool["io"] = iostat.get(name, {})
         pool["status"] = parsed
         root_dataset = datasets_by_name.get(name)
@@ -620,6 +676,17 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
                 }
             )
     disks = _flatten_disks(block.get("blockdevices", []))
+
+    disk_io = {}
+    if "drives.io" not in failed_subsystems:
+        try:
+            disk_io = parse_disk_io(raw["disk_io"].get("stdout", ""))
+        except (ValueError, IndexError):
+            failed_subsystems.add("drives.io")
+            freshness.pop("drives.io", None)
+            errors.append({"subsystem": "drives.io", "message": "Disk I/O samples were malformed or incomplete."})
+    for disk in disks:
+        disk["io"] = disk_io.get(str(disk.get("kname") or "").removeprefix("/dev/"), {})
 
     smart_map = raw.get("smart", {})
     smart_sampled = bool(raw.get("smart_sampled"))
@@ -709,6 +776,7 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         "arc": parse_arcstats(raw.get("arcstats", {}).get("stdout", "")),
         "pools": pools,
         "datasets": datasets,
+        "snapshot_inventory": parse_snapshot_inventory(raw.get("zfs_snapshots"), sampled_at),
         "drives": disks,
         "collection": {
             "captured_at": sampled_at,
@@ -724,3 +792,21 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
         },
         "capabilities": raw.get("capabilities", {}),
     }
+
+
+def parse_snapshot_inventory(result, captured_at):
+    if result is None:
+        return {"fresh": False, "rows": []}
+    if result.get("exit") != 0 or result.get("stdout_truncated"):
+        return {"fresh": False, "rows": [], "error": "Snapshot inventory unavailable or truncated"}
+    rows = []
+    for line in result.get("stdout", "").splitlines():
+        parts = line.split("\t")
+        if len(parts) != 4 or "@" not in parts[0]:
+            return {"fresh": False, "rows": [], "error": "Malformed snapshot inventory"}
+        try:
+            rows.append({"name": parts[0], "created": datetime.fromtimestamp(int(parts[1]), timezone.utc).isoformat(),
+                         "used": int(parts[2]), "referenced": int(parts[3])})
+        except (ValueError, OverflowError):
+            return {"fresh": False, "rows": [], "error": "Malformed snapshot accounting"}
+    return {"fresh": True, "captured_at": captured_at, "rows": rows}

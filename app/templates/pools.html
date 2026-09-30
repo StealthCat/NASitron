@@ -1,20 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Pools · NASitron{% endblock %}
 {% block content %}
-<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">OpenZFS</div><h1>Pools</h1><p class="muted">Complete pool inventory and topology across every monitored server.</p></div></div>
-<section class="grid three">
-  <div class="metric-card"><div class="metric-icon"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v12c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/></svg></div><div><div class="metric-label">Total pools</div><div class="metric-value">{{ pool_rows|length }}</div></div></div>
-  <div class="metric-card"><div class="metric-icon good"><svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg></div><div><div class="metric-label">Healthy</div><div class="metric-value">{{ healthy_pools }}</div></div></div>
-  <div class="metric-card"><div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19Z"/><path d="M12 9v5M12 17h.01"/></svg></div><div><div class="metric-label">Degraded / unhealthy</div><div class="metric-value">{{ degraded_pools }}</div></div></div>
-</section>
+<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">OpenZFS</div><h1>Pools</h1><a class="button" href="/tanks">Pool & root dataset accounting</a><p class="muted">Complete pool inventory and topology across every monitored server.</p></div></div>
+<nav class="page-tabs pool-tabs" role="tablist" aria-label="Pools">
+{% for row in pool_rows %}{% set health=pool_state(row.pool,row.server,row.snapshot) %}
+<button type="button" role="tab" data-page-tab="{{ row.tab_key }}"><span class="pool-tab-name">{{ row.pool.name }} <span class="badge {{ health[0] }}">{{ health[1] }}</span></span><span class="pool-tab-server">{{ row.server.name }}</span></button>
+{% endfor %}
+</nav>
 <section class="section-block">
 {% for row in pool_rows %}
   {% set pool = row.pool %}{% set cap = pool.capacity_pct or 0 %}
-  <div class="panel" style="margin-bottom:16px">
-    <div class="panel-title"><div><h2 style="margin-bottom:4px">{{ pool.name }}</h2><a class="subtle" href="/servers/{{ row.server.id }}">{{ row.server.name }}</a></div><span class="badge {{ 'good' if pool.health == 'ONLINE' else 'critical' }}"><span class="dot"></span>{{ pool.health }}</span></div>
+  <div class="panel pool-pane" data-page-pane="{{ row.tab_key }}" {% if not loop.first %}hidden{% endif %}>
+    <div class="panel-title"><div><h2 style="margin-bottom:4px">{{ pool.name }}</h2><a class="subtle" href="/servers/{{ row.server.id }}">{{ row.server.name }}</a></div>{% set health=pool_state(pool,row.server,row.snapshot) %}<span class="badge {{ health[0] }}">{{ health[1] }}</span></div>
     <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else 'good') }}"><span style="width:{{ [cap,100]|min }}%"></span></div>
     <div class="server-card-metrics"><div class="mini-stat"><span>Used</span><strong>{{ pool.alloc_bytes|human_bytes }}</strong></div><div class="mini-stat"><span>Free</span><strong>{{ pool.free_bytes|human_bytes }}</strong></div><div class="mini-stat"><span>Capacity</span><strong>{{ "%.1f"|format(cap) }}%</strong></div><div class="mini-stat"><span>Compression Ratio</span><strong>{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</strong></div></div>
-    {% if pool.status.scan %}<div class="subtle" style="margin:10px 0"><strong>Scan:</strong> {{ pool.status.scan }}</div>{% endif %}
+    <p class="subtle">Collected {{ row.snapshot.get('collection', {}).get('freshness', {}).get('pool.status:' ~ pool.name, row.snapshot.get('collection', {}).get('captured_at'))|fmt_dt }}</p>
+    {% if pool.status.get('verbose_complete') is sameas false %}<p class="pool-status-warning" role="status">Verbose status was unavailable or incomplete during this collection. The information below may be incomplete or from an earlier poll.</p>{% endif %}
+    <div class="pool-status-sections">
+    {% for section in row.status_sections %}
+      <section class="pool-status-block {{ 'pool-status-warning' if section.key in ['status','action'] or (section.key == 'errors' and section.text != 'No known data errors') else '' }}">
+        <h3>{{ {'status':'Status details','action':'Recommended action','scan':'Scrub / resilver','errors':'Data errors','see':'Reference'}.get(section.key, section.key|replace('_',' ')|title) }}</h3>
+        <pre class="pool-status-text">{{ section.text }}</pre>
+      </section>
+    {% else %}<p class="muted">Detailed status has not been collected yet.</p>{% endfor %}
+    </div>
+    {% include "pool_capacity.html" %}
+    {% include "pool_topology.html" %}
+    <details class="property-drawer pool-raw"><summary><strong>Full zpool status -v output</strong></summary><pre class="pool-status-text">{{ pool.status.raw or 'No text status has been collected yet.' }}</pre></details>
     {% set configured_pool_props = pool.properties|selectattr('is_set')|list %}
     {% if pool.properties %}
     <details class="property-drawer">
@@ -31,13 +43,7 @@
       </div>
     </details>
     {% endif %}
-    {% if pool.status.vdevs %}
-    <div class="scroll"><table><thead><tr><th>Role</th><th>Vdev / device</th><th>State</th><th>Read</th><th>Write</th><th>Checksum</th></tr></thead><tbody>
-    {% for vdev in pool.status.vdevs %}
-      <tr><td>{{ vdev.role }}</td><td style="padding-left:{{ 11 + ([vdev.indent,30]|min) }}px"><strong>{{ vdev.name }}</strong></td><td><span class="badge {{ 'good' if vdev.state in ['ONLINE','AVAIL'] else 'critical' }}">{{ vdev.state }}</span></td><td>{{ vdev.read_errors }}</td><td>{{ vdev.write_errors }}</td><td>{{ vdev.checksum_errors }}</td></tr>
-    {% endfor %}
-    </tbody></table></div>
-    {% endif %}
+
   </div>
 {% else %}<div class="panel"><p class="muted">No pool data has been collected yet.</p></div>{% endfor %}
 </section>

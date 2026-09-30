@@ -217,3 +217,38 @@ body[data-section="users"] { --section-icon: url('/static/section-icons.svg#user
   *, *::before, *::after { transition: none !important; animation: none !important; }
   .card-link:hover, button:hover, .button:hover { transform: none; }
 }
+
+/* Monitoring controls share the polished shell and remain usable at narrow widths. */
+.dashboard-toolbar .filter-bar { justify-content: flex-end; align-items: end; }
+.dashboard-toolbar label { margin: 0; min-width: 135px; }
+.display-preferences { padding: 0 0 14px; border-bottom: 1px solid var(--border-soft); margin-bottom: 22px; }
+.display-preferences select { min-height: 32px; font-size: .72rem; }
+.attention-panel { margin-bottom: 24px; border-left-width: 2px; }
+.attention-panel p { font-size: .8rem; margin: 10px 0; }
+.chart-server-label { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.chart-server-label select { width: auto; max-width: 100%; }
+.chart-controls { padding: 10px 0; gap: 8px 14px; }
+.chart-controls input[type=checkbox] { min-height: 16px; width: 16px; accent-color: var(--accent); }
+.chart-controls select { min-height: 34px; }
+.chart-status, .chart-tooltip { font-size: .68rem; }
+.chart-tooltip { border: 1px solid var(--border-soft); border-radius: 8px; }
+.chart-wrap > details { color: var(--muted); font-size: .72rem; }
+.chart-wrap > details summary { cursor: pointer; }
+.panel.flush > .table-toolbar { padding: 14px 18px; border-bottom: 1px solid var(--border-soft); }
+.table-toolbar { font-size: .74rem; }
+.table-toolbar label { min-width: 0; }
+.table-toolbar input[type=checkbox] { min-height: 16px; accent-color: var(--accent); }
+.table-toolbar details { cursor: pointer; }
+.page-tabs { gap: 8px; }
+.page-tabs button.active { background: var(--accent-soft); color: var(--accent-bright); border-color: var(--accent-line); }
+.pool-tabs .active .badge { background: var(--panel); }
+.page-tabs button { transform: none; }
+body[data-density=comfortable] .metric-card { padding-block: 25px; }
+@media(max-width:680px) {
+  .dashboard-toolbar .filter-bar { justify-content: flex-start; }
+  .dashboard-toolbar label { flex: 1 1 120px; }
+  .display-preferences { flex-wrap: wrap; }
+  .table-toolbar input[type=search] { min-width: 0; width: 100%; }
+  .table-toolbar > label { flex: 1 1 140px; }
+  .chart-controls { align-items: flex-start; }
+}

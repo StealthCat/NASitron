@@ -2,6 +2,13 @@
 {% from 'components.html' import rack_mark, server_capacity, empty_state with context %}
 {% block title %}NASitron Dashboard{% endblock %}
 {% block content %}
+<div class="dashboard-toolbar">
+  <form method="get" class="filter-bar">
+    <label>Server<select name="server" onchange="this.form.submit()"><option value="">All servers</option>{% for server in all_servers %}<option value="{{ server.id }}" {{ 'selected' if server_filter == server.id|string else '' }}>{{ server.name }}</option>{% endfor %}</select></label>
+    <button type="submit">Apply</button><button type="button" onclick="location.reload()">Refresh</button>
+    <label>Refresh<select data-page-refresh><option value="0">Off</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
+  </form>
+</div>
 <section class="page-hero overview-hero">
   <div class="hero-copy">
     <div class="hero-kicker">Storage Intelligence</div>
@@ -10,8 +17,8 @@
     <div class="overview-status">
     {% if not cards %}
       <span class="badge offline">Ready to connect</span>
-    {% elif summary.online_servers < summary.server_count and summary.overall_status == 'good' %}
-      <span class="badge offline">Waiting for telemetry</span>
+    {% elif summary.overall_status == 'unknown' %}
+      <span class="badge offline">Fresh telemetry unavailable</span>
     {% elif summary.overall_status == 'good' %}
       <span class="badge good"><span class="dot"></span>All Systems Operational</span>
     {% elif summary.overall_status == 'warning' %}
@@ -27,23 +34,31 @@
 
 {% if not cards %}
 <section class="panel accent-panel">
-  {{ empty_state('Add your first ZFS server', 'Connect an Ubuntu / OpenZFS host to start exploring storage health and performance.', '/servers/new', '+ Add server') }}
+  {{ empty_state('No matching servers' if all_servers else 'Add your first ZFS server', 'Connect an Ubuntu / OpenZFS host to start exploring storage health and performance.', '/servers/new', '+ Add server') }}
 </section>
 {% else %}
 
-<section class="grid four" aria-label="Storage summary">
+<section class="panel attention-panel">
+  <div class="panel-title"><h2>Needs attention</h2><a class="subtle" href="/alerts">Investigate alerts →</a></div>
+  {% for card in cards %}{% set state = server_state(card.server, card.snapshot) %}
+    {% if state[0] != 'good' %}<p><span class="badge {{ state[0] }}">{{ state[1] }}</span> <a href="/servers/{{ card.server.id }}">{{ card.server.name }}</a> <span class="subtle">· last successful poll {{ card.server.last_ok_at|fmt_dt }}</span></p>{% endif %}
+  {% endfor %}
+  {% for alert in recent_alerts if alert.active %}<p><span class="badge {{ alert.severity }}">{{ alert.severity }}</span> <a href="/alerts?server={{ alert.server_id }}">{{ alert.server.name }} · {{ alert.title }}</a></p>{% endfor %}
+  {% if summary.overall_status == 'good' %}<p class="badge good">Reporting systems have no active health alerts</p>{% elif summary.overall_status == 'unknown' %}<p class="muted">Health cannot be confirmed until fresh telemetry is available.</p>{% endif %}
+</section>
+<section class="grid four section-block" aria-label="Storage summary">
   <a class="metric-card card-link" href="/servers">
     <div class="metric-icon">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><circle cx="7" cy="7" r="1"/><circle cx="7" cy="17" r="1"/></svg>
     </div>
-    <div><div class="metric-label">Servers</div><div class="metric-value">{{ summary.server_count }}</div><div class="metric-sub">{{ summary.online_servers }} online · {{ summary.server_count - summary.online_servers }} unavailable</div></div>
+    <div><div class="metric-label">Servers</div><div class="metric-value">{{ summary.server_count }}</div><div class="metric-sub">{{ summary.online_servers }} reporting · {{ summary.server_count - summary.online_servers }} not reporting</div></div>
     <div class="metric-chevron">›</div>
   </a>
   <a class="metric-card card-link" href="/pools">
     <div class="metric-icon good">
       <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
     </div>
-    <div><div class="metric-label">Pools Healthy</div><div class="metric-value">{{ summary.healthy_pools }}<span style="font-size:.9rem;color:var(--muted)"> / {{ summary.pool_count }}</span></div><div class="metric-sub">{{ summary.pool_count - summary.healthy_pools }} degraded</div></div>
+    <div><div class="metric-label">Pools last reported ONLINE</div><div class="metric-value">{{ summary.healthy_pools }}<span style="font-size:.9rem;color:var(--muted)"> / {{ summary.pool_count }}</span></div><div class="metric-sub">{{ summary.pool_count - summary.healthy_pools }} not ONLINE · last reported</div></div>
     <div class="metric-chevron">›</div>
   </a>
   <a class="metric-card card-link" href="/alerts">
@@ -57,7 +72,7 @@
     <div class="metric-icon">
       <svg viewBox="0 0 24 24"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg>
     </div>
-    <div><div class="metric-label">Average ARC Hit Rate</div><div class="metric-value">{{ "%.1f"|format(summary.arc_hit_rate) }}%</div><div class="metric-sub">Across reporting servers</div></div>
+    <div><div class="metric-label">Mean ARC Hit Rate</div><div class="metric-value">{{ ("%.1f"|format(summary.arc_hit_rate) ~ "%") if summary.arc_hit_rate is not none else "—" }}</div><div class="metric-sub">Unweighted mean of fresh reporting servers</div></div>
   </div>
 </section>
 
@@ -83,27 +98,24 @@
       </div>
     </div>
     <div class="capacity-total"><span>Total pool capacity</span><strong>{{ storage.size|human_bytes if storage.size else '—' }}</strong></div>
-    <p class="subtle capacity-note">Reported pool allocation · {{ storage.pools }} of {{ pool_rows|length }} pools</p>
+    <p class="subtle capacity-note">Last reported pool allocation · {{ storage.pools }} of {{ pool_rows|length }} pools</p>
   </div>
   <div class="panel chart-wrap">
     <div class="panel-title">
       <h2><svg class="section-icon" viewBox="0 0 24 24"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg>ARC Hit Rate</h2>
-      <span class="badge">24h</span>
+      <span class="badge">History</span>
     </div>
-    {% set first = (cards|selectattr('snapshot')|list or cards)[0] %}
-    <p class="chart-caption subtle">{{ first.server.name }} · cache efficiency</p>
-    {% if first.snapshot %}
-      <canvas class="chart" id="dashboard-arc" role="img" aria-label="ARC hit rate over the last 24 hours for {{ first.server.name }}">ARC hit rate history for {{ first.server.name }}.</canvas>
-      <script>
-        document.addEventListener("DOMContentLoaded", () => NASitronChart(
-          document.getElementById("dashboard-arc"),
-          "/api/servers/{{ first.server.id }}/metrics?name=arc.hit_rate_pct&hours=24",
-          {suffix:"%", minZero:false, max100:true}
-        ));
-      </script>
-    {% else %}
-      <div class="chart-empty muted">Waiting for historical ARC samples.</div>
-    {% endif %}
+    {% set first = cards[0] %}
+    <label class="chart-server-label">Chart server<select id="arc-server">{% for card in cards %}<option value="{{ card.server.id }}">{{ card.server.name }}</option>{% endfor %}</select></label>
+    <canvas class="chart" id="dashboard-arc" role="img" aria-label="ARC hit rate history"></canvas>
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const select = document.getElementById('arc-server');
+      const render = () => NASitronChart(document.getElementById('dashboard-arc'), '/api/servers/' + select.value + '/metrics?name=arc.hit_rate_pct&hours=24', {suffix:'%', minZero:true, max100:true});
+      select.addEventListener('change', render);
+      render();
+    });
+    </script>
   </div>
 
 </section>
@@ -111,17 +123,17 @@
   <div class="panel" id="pools">
     <div class="panel-title">
       <h2><svg class="section-icon" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Pool Capacity</h2>
-      <a class="subtle" href="/pools">View all {{ summary.pool_count }} pools ›</a>
+      <div class="row"><a class="subtle" href="/forecasts">Forecast →</a><a class="subtle" href="/pools">View all {{ summary.pool_count }} pools ›</a></div>
     </div>
-    {% for row in pool_rows[:6] %}
+    {% for row in pool_rows %}
       {% set pool = row.pool %}
-      {% set cap = pool.capacity_pct or 0 %}
+      {% set cap = pool.capacity_pct %}
       <div class="pool-cap-row">
         <a href="/servers/{{ row.server.id }}" class="pool-cap-name"><strong>{{ pool.name }}</strong><span class="subtle">{{ row.server.name }}</span></a>
-        <div class="progress {{ 'critical' if cap >= 90 else ('warning' if cap >= 80 else 'good') }}"><span style="width:{{ [cap,100]|min }}%"></span></div>
+        <div class="progress {{ 'unknown' if cap is none else ('critical' if cap >= 90 else ('warning' if cap is not none and cap >= 80 else 'good')) }}"><span style="width:{{ [cap or 0,100]|min }}%"></span></div>
         <span class="pool-bytes subtle">{{ pool.alloc_bytes|human_bytes }} / {{ pool.size_bytes|human_bytes }}</span>
         <span class="badge">{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</span>
-        <strong style="color:{{ 'var(--accent-bright)' if cap >= 80 else 'var(--text)' }}">{{ "%.0f"|format(cap) }}%</strong>
+        <strong style="color:{{ 'var(--accent-bright)' if cap is not none and cap >= 80 else 'var(--text)' }}">{{ ("%.0f"|format(cap) ~ "%") if cap is not none else "—" }}</strong>
       </div>
     {% else %}
       <div class="muted">No pools have reported yet.</div>
@@ -132,7 +144,7 @@
 <section class="section-block" id="servers">
   <div class="section-heading">
     <h2><svg class="section-icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></svg>Servers</h2>
-    <a class="button primary" href="/servers/new">+ Add server</a>
+    <a class="button primary" href="/servers/new" data-admin-only>+ Add server</a>
   </div>
   <div class="grid cards">
   {% for card in cards %}
@@ -145,15 +157,9 @@
           <h2 style="margin-bottom:4px">{{ server.name }}</h2>
           <div class="subtle">{{ server.host }}:{{ server.port }}</div>
         </div>
-        {% if server.last_error and server.consecutive_failures %}
-          <span class="badge critical"><span class="dot"></span>Collection error</span>
-        {% elif not snap %}
-          <span class="badge offline"><span class="dot"></span>Waiting</span>
-        {% elif card.alerts %}
-          <span class="badge warning"><span class="dot"></span>{{ card.alerts|length }} alert{{ '' if card.alerts|length == 1 else 's' }}</span>
-        {% else %}
-          <span class="badge good"><span class="dot"></span>Healthy</span>
-        {% endif %}
+        {% set state = server_state(server, snap) %}
+        <span class="badge {{ state[0] }}">{{ state[1] }}</span>
+        {% if card.alerts %}<span class="badge warning">{{ card.alerts|length }} alerts</span>{% endif %}
       </div>
       {{ server_capacity(snap) }}
       {% if snap %}
@@ -192,7 +198,7 @@
               <div class="subtle" style="margin-top:4px">{{ pool.alloc_bytes|human_bytes }} / {{ pool.size_bytes|human_bytes }}</div>
             </td>
             <td><span class="badge">{{ ("%.2f"|format(pool.get('compression_ratio')) ~ "x") if pool.get('compression_ratio') is not none else "—" }}</span></td>
-            <td><strong>{{ "%.0f"|format(pool.capacity_pct or 0) }}%</strong></td>
+            <td><strong>{{ ("%.0f"|format(pool.capacity_pct) ~ "%") if pool.capacity_pct is not none else "—" }}</strong></td>
           </tr>
         {% else %}
           <tr><td colspan="6" class="muted">No pool data available.</td></tr>
@@ -208,18 +214,18 @@
       <a class="subtle" href="/drives">View all {{ summary.drive_count }} drives ›</a>
     </div>
     <div class="scroll">
-      <table>
+      <table class="readable-table" data-table="dashboard-drives">
         <thead><tr><th>Device</th><th>Server</th><th>Health</th><th>Temp</th><th>SMART</th></tr></thead>
         <tbody>
-        {% for row in drive_rows[:10] %}
+        {% for row in drive_rows %}
           {% set drive = row.drive %}
-          {% set smart = drive.smart or {} %}
+          {% set smart = drive.smart or {} %}{% set health = smart_state(smart) %}
           <tr>
-            <td><strong>{{ drive.path }}</strong><div class="subtle">{{ drive.model or "Unknown model" }}</div></td>
+            <td><a href="/servers/{{ row.server.id }}/drive?identity={{ (drive.serial or drive.path)|urlencode }}"><strong>{{ drive.path }}</strong></a><div class="subtle">{{ drive.model or "Unknown model" }}</div></td>
             <td>{{ row.server.name }}</td>
-            <td>{% if smart.get('smart_passed') is sameas false %}<span class="badge critical">Attention</span>{% elif smart.get('smart_passed') is sameas true %}<span class="badge good">OK</span>{% else %}<span class="badge offline">Unknown</span>{% endif %}</td>
+            <td><span class="badge {{ health[0] }}">{{ health[1] }}</span></td>
             <td>{{ (smart.get('temperature_c') ~ "°C") if smart.get('temperature_c') is not none else "—" }}</td>
-            <td>{% if smart.get('smart_passed') is sameas true %}<span class="badge good">Passed</span>{% elif smart.get('smart_passed') is sameas false %}<span class="badge critical">Failed</span>{% else %}<span class="badge offline">Unknown</span>{% endif %}</td>
+            <td><span class="badge {{ health[0] }}">{{ health[1] }}</span></td>
           </tr>
         {% else %}
           <tr><td colspan="5" class="muted">No drive data available.</td></tr>
@@ -258,14 +264,16 @@
   <div class="panel accent-panel" id="maintenance">
     <div class="panel-title">
       <h2><svg class="section-icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5-5L7.9 3.1l3 3 1.8-1.8a2 2 0 0 1 2.5 2.5l-7.7 7.7a3.5 3.5 0 1 0 2 2L17.2 8.8a4 4 0 0 0-2.5-2.5Z"/></svg><a href="/maintenance">Maintenance</a></h2>
-      {% if summary.failed_drives or summary.pool_count - summary.healthy_pools %}<span class="badge critical">Action required</span>{% else %}<span class="badge good">No action required</span>{% endif %}
+      {% if summary.failed_drives or summary.pool_count - summary.healthy_pools %}<span class="badge critical">Action required</span>{% elif summary.online_servers < summary.server_count %}<span class="badge unknown">Verify telemetry</span>{% else %}<span class="badge good">No action required</span>{% endif %}
     </div>
     {% if maintenance_server %}
       <div class="alert-callout">
         <div class="alert-symbol"><svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19Z"/><path d="M12 9v5M12 17h.01"/></svg></div>
         <div><strong>Storage maintenance detected</strong><div class="step-copy">A failed drive or unhealthy pool is present on {{ maintenance_server.name }}. Review the live replacement workflow before making changes.</div></div>
-        <a class="button primary" href="/servers/{{ maintenance_server.id }}/replace-drive">Open maintenance ›</a>
+        <a class="button primary" href="/servers/{{ maintenance_server.id }}/replace-drive" data-operator-only>Open maintenance ›</a>
       </div>
+    {% elif summary.online_servers < summary.server_count %}
+      <p class="muted">Some servers are not reporting fresh telemetry. Review their status before relying on the last reported health.</p>
     {% else %}
       <div class="alert-callout" style="border-color:rgba(56,223,163,.18);background:var(--good-soft)">
         <div class="alert-symbol" style="color:var(--good);background:var(--good-soft);border-color:rgba(56,223,163,.2)"><svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg></div>
@@ -274,5 +282,6 @@
     {% endif %}
   </div>
 </section>
+<a class="button section-block" href="/operations">View scrubs, resilvers and maintenance windows</a>
 {% endif %}
 {% endblock %}

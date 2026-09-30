@@ -335,10 +335,9 @@ def test_remote_enrollment_callback_creates_server_and_is_one_time():
 
             status = client.get(f"/api/enrollments/{enrollment_id}/status")
             assert status.status_code == 200
-            assert status.json() == {
-                "status": "complete",
-                "server_id": created_server_id,
-            }
+            assert status.json()["status"] == "complete"
+            assert status.json()["server_id"] == created_server_id
+            assert status.json()["phase"] in {"verifying", "reporting", "ssh_error"}
 
             servers_page = client.get("/servers")
             assert servers_page.status_code == 200
@@ -568,7 +567,7 @@ def test_server_and_pool_pages_show_zfs_properties():
 
             tanks_page = client.get("/tanks")
             assert tanks_page.status_code == 200
-            assert "<h1>Tanks</h1>" in tanks_page.text
+            assert "<h1>Pool &amp; root dataset</h1>" in tanks_page.text
             assert "tank" in tanks_page.text
             assert "zfs-property-test" in tanks_page.text
             assert "1.75x" in tanks_page.text

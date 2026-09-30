@@ -1020,3 +1020,114 @@ pre {
 .dataset-table tbody tr:hover td:first-child {
   background: #241523;
 }
+
+/* Preview: task-focused navigation and accessible, responsive data surfaces. */
+[hidden] { display: none !important; }
+.sidebar { overflow-y: auto; }
+.side-nav { gap: 2px; padding-block: 10px; }
+.nav-item { min-height: 38px; }
+.sidebar-meta { gap: 3px; }
+.sidebar-footer { flex-shrink: 0; }
+.badge.unknown { color: #c0cad9; background: #283242; border-color: #65758c; }
+.display-preferences { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; gap:12px; }
+.display-preferences label { display:flex; align-items:center; gap:8px; margin:0; }
+.display-preferences select { width:auto; padding:5px; }
+.filter-bar,.table-toolbar,.chart-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.filter-bar { margin-bottom:16px; }
+.table-toolbar { padding:12px 0; }
+.table-toolbar label,.chart-controls label { margin:0; }
+.table-toolbar details { position:relative; }
+.table-toolbar details[open] { padding:12px; background:var(--panel-2); border:1px solid var(--border); }
+.table-toolbar input[type=checkbox],.chart-controls input[type=checkbox] { width:auto; }
+.table-toolbar input[type=search] { min-width:220px; }
+.sort-button { border:0; padding:0; background:transparent; font:inherit; color:inherit; text-align:left; }
+.page-tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:18px; }
+.page-tabs .active { background:var(--accent); color:white; }
+.attention-panel { border-left:4px solid var(--accent); }
+.capacity-item { display:grid; grid-template-columns:1fr auto; gap:6px; margin-bottom:16px; }
+.capacity-item progress,.capacity-item .subtle { grid-column:1/-1; }
+progress { width:100%; height:10px; accent-color:var(--accent); }
+.chart { width:100%; height:220px; }
+.chart-status { min-height:2em; }
+.chart-tooltip { background:var(--panel-2); padding:8px; }
+.chart-controls { margin-bottom:8px; }
+.chart-controls select { width:auto; }
+.dataset-table { min-width:850px; }
+.dataset-table-wrap { max-height:72vh; }
+.dataset-table td { overflow-wrap:anywhere; }
+.danger-zone { border-color:var(--critical, #fc1859); }
+.skip-link { position:absolute; top:-100px; left:15px; background:var(--panel); padding:14px; z-index:100; }
+.skip-link:focus { top:10px; }
+:focus-visible { outline:2px solid #8fc8ff; outline-offset:3px; }
+body[data-density=comfortable] { font-size:17px; }
+body[data-density=comfortable] .subtle,body[data-density=comfortable] label,body[data-density=comfortable] .badge { font-size:.9rem; }
+body[data-density=comfortable] td { padding-top:16px; padding-bottom:16px; }
+body[data-role=viewer] [data-operator-only],body:not([data-role=admin]) [data-admin-only] { display:none !important; }
+@media(max-width:700px) { .page-head { align-items:stretch; } .filter-bar > label { flex:1 1 45%; } .display-preferences { align-items:flex-start; } .dataset-table { min-width:680px; } .page-tabs { position:sticky; top:62px; background:var(--bg); z-index:10; padding:8px 0; } }
+@media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } *,*::before,*::after { animation:none !important; transition:none !important; } }
+
+.overview-metric { display:block; min-width:0; }
+.overview-metric .metric-value { white-space:nowrap; }
+
+.chart-controls label { display:flex; align-items:center; gap:6px; }
+
+/* Match capacity tables while retaining the status hierarchy. */
+.pool-topology { margin-top:24px; min-width:0; }
+.topology-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.topology-toolbar h3 { margin:0; }
+.topology-toolbar .button { padding:6px 10px; font-size:12px; }
+.topology-label { position:relative; min-width:0; }
+.topology-disclosure { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; margin-right:4px; background:transparent; border:1px solid var(--border); border-radius:4px; color:var(--text); cursor:pointer; }
+.topology-disclosure[aria-expanded=false] span { transform:rotate(-90deg); }
+.topology-drive-details { margin-top:6px; font-size:12px; font-weight:normal; }
+.topology-drive-details summary { cursor:pointer; color:var(--muted); }
+.topology-disk { display:grid; gap:6px; margin-top:8px; }
+.topology-disk a { overflow-wrap:anywhere; }
+
+.io-filters { display:flex; align-items:end; flex-wrap:wrap; gap:14px; margin-bottom:14px; }
+.io-filters label { min-width:0; max-width:100%; }
+.io-filters select, .io-filters input { max-width:100%; }
+.io-filters > label:has(#io-disk) { flex:1; min-width:200px; }
+.io-filters [hidden] { display:none; }
+.io-filters label:has(#io-auto) { display:flex; align-items:center; align-self:center; gap:8px; }
+.io-filters input[type=checkbox] { width:16px; height:16px; min-height:0; margin:0; padding:0; flex:0 0 16px; }
+
+.pool-tabs { margin-top:20px; }
+.pool-tabs button { min-width:170px; text-align:left; display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.pool-tabs .badge { white-space:nowrap; flex-shrink:0; }
+.pool-tab-name { display:flex; align-items:center; gap:12px; flex-wrap:wrap; overflow-wrap:anywhere; }
+.pool-tab-server { display:block; font-size:12px; opacity:.85; margin-top:5px; }
+.pool-pane { min-width:0; }
+.pool-status-sections { display:grid; gap:12px; margin-top:16px; }
+.pool-status-block { padding:14px 16px; border:1px solid var(--border, #263447); border-radius:8px; background:#0b121e; }
+.pool-status-block h3 { margin:0 0 8px; font-size:14px; }
+.pool-status-text { white-space:pre-wrap; overflow-wrap:anywhere; margin:0; font:13px/1.65 ui-monospace,monospace; }
+.pool-status-warning { border-left:3px solid #e9ad45; padding-left:14px; }
+.pool-raw { margin:20px 0 12px; }
+.pool-raw pre { padding:16px; }
+.critical-text { color:#ff718a; }
+@media (max-width:800px) {
+  .pool-tabs { position:static; }
+  .pool-tabs button { flex:1 1 150px; min-width:0; }
+}
+
+.pool-capacity { min-width:0; }
+.capacity-scroll { max-width:100%; border:1px solid var(--border, #263447); border-radius:9px; }
+.capacity-table { min-width:1100px; border-collapse:separate; border-spacing:0; }
+.capacity-table caption { text-align:left; padding:12px; }
+.capacity-table td { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.capacity-table th { text-align:right; }
+.capacity-table th:first-child { text-align:left; min-width:240px; max-width:360px; overflow-wrap:anywhere; }
+.capacity-table tbody th:first-child { position:sticky; left:0; z-index:1; background:#0d1522; }
+.capacity-table th .subtle { display:block; margin-top:4px; font-size:11px; font-weight:normal; }
+.capacity-table tbody tr:nth-child(even) > * { background:#111c2d; }
+.capacity-table .capacity-root > * { background:#192b40 !important; font-weight:700; }
+.capacity-table .capacity-group > * { border-top:2px solid #33465c; }
+.capacity-table meter { display:block; width:70px; height:6px; margin:6px 0 0 auto; accent-color:#FC1859; }
+.pool-datasets { margin-top:16px; }
+@media(max-width:600px) { .capacity-table th:first-child { min-width:150px; max-width:190px; } }
+.capacity-table thead th:first-child { position:sticky; left:0; z-index:2; background:#111c2d; }
+.topology-table tr[hidden] { display:none; }
+.topology-table tbody .topology-section-heading > th { position:static; background:#111c2d; text-align:left; padding-block:10px; }
+.topology-table .topology-section-heading .subtle { display:inline; margin-left:10px; }
+.topology-table th .badge { white-space:normal; }

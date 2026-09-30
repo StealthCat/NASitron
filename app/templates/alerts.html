@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Alerts · NASitron{% endblock %}
+{% block title %}Alerts · NASitron<nav class="row section-block" aria-label="Alert pages">{% if page > 1 %}<a class="button" href="{{ request.url.include_query_params(page=page-1) }}">Previous</a>{% endif %}{% if page < pages %}<a class="button" href="{{ request.url.include_query_params(page=page+1) }}">Next</a>{% endif %}</nav>
+{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="page-title-wrap">
@@ -8,19 +9,26 @@
     <p class="muted">Current and resolved storage-health conditions across monitored servers.</p>
   </div>
 </div>
+<form method="get" class="panel filter-bar">
+<label>Search<input name="q" value="{{ q }}" placeholder="Condition or message"></label>
+<label>State<select name="state">{% for key,label in [('active','Active'),('resolved','Resolved'),('acknowledged','Acknowledged'),('all','All')] %}<option value="{{ key }}" {{ 'selected' if state == key else '' }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Severity<select name="severity"><option value="">All severities</option>{% for v in ['critical','warning','info'] %}<option {{ 'selected' if severity == v else '' }}>{{ v }}</option>{% endfor %}</select></label>
+<label>Server<select name="server"><option value="">All servers</option>{% for s in servers %}<option value="{{ s.id }}" {{ 'selected' if server_filter == s.id|string else '' }}>{{ s.name }}</option>{% endfor %}</select></label><button class="primary">Filter</button></form>
+<p>{{ total }} matching alerts · page {{ page }} of {{ pages }}</p>
 <div class="panel flush scroll">
 <table class="readable-table">
-<thead><tr><th>State</th><th>Severity</th><th>Server</th><th>Condition</th><th>First Seen</th><th>Last Seen</th><th>Action</th></tr></thead>
+<thead><tr><th>State</th><th>Severity</th><th>Server</th><th>Condition</th><th>First Seen</th><th>Last Seen</th><th data-operator-only>Action</th></tr></thead>
 <tbody>
 {% for alert in alerts %}
 <tr>
   <td><span class="badge {{ alert.severity if alert.active else 'offline' }}"><span class="dot"></span>{{ "ACTIVE" if alert.active else "RESOLVED" }}</span></td>
   <td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td>
   <td><a href="/servers/{{ alert.server_id }}"><strong>{{ alert.server.name }}</strong></a></td>
-  <td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message }}</div></td>
+  <td><a href="{{ alert_target(alert) }}"><strong>{{ alert.title }}</strong></a><div class="subtle">{{ alert.message }}</div></td>
   <td>{{ alert.first_seen|fmt_dt }}</td>
   <td>{{ alert.last_seen|fmt_dt }}</td>
-  <td>{% if alert.active and not alert.acknowledged %}<form method="post" action="/alerts/{{ alert.id }}/ack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Acknowledge</button></form>{% elif alert.acknowledged %}<span class="badge">Acknowledged</span>{% endif %}</td>
+  <td data-operator-only>{% if alert.active and not alert.acknowledged %}<form method="post" action="/alerts/{{ alert.id }}/ack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Acknowledge</button></form>{% elif alert.acknowledged %}<span class="badge">Acknowledged</span>{% endif %}
+{% if alert.active %}<form method="post" action="/alerts/{{ alert.id }}/snooze"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Snooze<select name="minutes"><option value="60">1 hour</option><option value="1440">1 day</option><option value="0">End snooze</option></select></label><button>Apply</button></form>{% if alert.snoozed_until %}<span class="subtle">Snoozed until {{ alert.snoozed_until|fmt_dt }}</span>{% endif %}{% endif %}</td>
 </tr>
 {% else %}
 <tr><td colspan="7"><span class="badge good"><span class="dot"></span>No alerts have been recorded</span></td></tr>
@@ -28,4 +36,5 @@
 </tbody>
 </table>
 </div>
+<nav class="row section-block" aria-label="Alert pages">{% if page > 1 %}<a class="button" href="{{ request.url.include_query_params(page=page-1) }}">Previous</a>{% endif %}{% if page < pages %}<a class="button" href="{{ request.url.include_query_params(page=page+1) }}">Next</a>{% endif %}</nav>
 {% endblock %}
