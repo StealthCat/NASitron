@@ -20,3 +20,11 @@ def test_support_bundle_redacts_sensitive_and_user_properties():
     assert "<redacted>" in text
     assert "<redacted:user-property>" in text
     assert "lz4" in text
+
+
+def test_nested_cached_property_outputs_are_not_exported():
+    raw = {"detail_cache": {"secret": "cached-token"},
+           "zpool_get": {"tank": {"exit": 0, "stderr": "", "stdout": "tank\torg.example:token\tlive-token\tlocal"}}}
+    safe = sanitize_diagnostics(raw)
+    assert "detail_cache" not in safe
+    assert "live-token" not in safe["zpool_get"]["tank"]["stdout"]

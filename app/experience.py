@@ -102,7 +102,7 @@ def operation_status(pool):
 
 def update_operations(db, server, snapshot):
     from sqlalchemy import select
-    from .models import MaintenanceAction
+    from .models import MaintenanceAction, MonitorEvent
 
     pools = {p["name"]: p for p in snapshot.get("pools", [])}
     stale = set(snapshot.get("collection", {}).get("stale_subsystems", []))
@@ -113,6 +113,7 @@ def update_operations(db, server, snapshot):
             MaintenanceAction.completed_at.is_(None),
         )
     ):
+        previous_state = action.state
         pool = pools.get(action.pool)
         if not pool or f"pool.status:{action.pool}" in stale:
             continue
@@ -149,6 +150,8 @@ def update_operations(db, server, snapshot):
                 ):
                     action.state = "complete"
                     action.completed_at = datetime.utcnow()
+        if action.state != previous_state:
+            db.add(MonitorEvent(server_id=server.id,kind="replacement",severity="good" if action.state=="complete" else "info",message=f"{action.pool}: {action.state} (action #{action.id})"))
 
 
 def forecast(points, threshold=80):

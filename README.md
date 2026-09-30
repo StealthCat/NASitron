@@ -1,9 +1,9 @@
 # NASitron
 
-> **0.8:** Polished navy/pink UI, physical drive-bay labels, synchronized disk
-> comparisons, event timeline, collection diagnostics and database health.
-> History now retains recent raw samples and compact older summaries with peaks
-> and worst health states. See [Storage intelligence](docs/STORAGE_INTELLIGENCE.md)
+> **0.9:** Enclosure layouts with empty/missing bays, searchable drive comparisons,
+> saved monitoring views and per-user timezones in the same navy/pink UI.
+> Faster inventory/history queries, clearer collection states, configurable summary
+> windows, and corrected history boundaries and replacement events. See [Storage intelligence](docs/STORAGE_INTELLIGENCE.md)
 > and the [monitoring guide](docs/PREVIEW.md) for usage and upgrade details.
 
 

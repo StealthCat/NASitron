@@ -144,3 +144,67 @@ def test_rollup_failure_keeps_source_samples(history_db, monkeypatch):
     monkeypatch.setattr(db, "commit", original)
     assert db.scalar(select(func.count()).select_from(Metric)) == 1
     assert db.scalar(select(func.count()).select_from(MetricRollup)) == 0
+
+
+def test_overlapping_summary_bounds_are_explicit_and_raw_keeps_own_resolution(
+    history_db,
+):
+    db, server = history_db
+    at = datetime(2026, 8, 1)
+    db.add(
+        MetricRollup(
+            server_id=server.id,
+            name="system.load1",
+            scope="",
+            captured_at=at,
+            resolution=86400,
+            sample_count=2,
+            total=30,
+            minimum=10,
+            maximum=20,
+            last_at=at + timedelta(hours=20),
+            last_value=20,
+        )
+    )
+    db.commit()
+    start, end = at + timedelta(hours=10), at + timedelta(hours=12)
+    result = history_series(db, server, ["system.load1"], [""], start, end)[0]
+    assert result["sample_count"] == 2
+    point = result["points"][0]
+    assert point["partial"] and point["v"] == 15
+    assert point["t"] == end.isoformat() + "Z"
+    assert result["partial_bucket_count"] == 1
+    recent = at + timedelta(days=40)
+    db.add(
+        Metric(
+            server_id=server.id,
+            name="system.load1",
+            scope="",
+            captured_at=recent,
+            value=7,
+        )
+    )
+    db.commit()
+    result = history_series(
+        db, server, ["system.load1"], [""], at, recent, bucket_seconds=60
+    )[0]
+    assert [p["resolution_seconds"] for p in result["points"]] == [86400, 60]
+
+
+def test_configurable_compaction_windows(history_db):
+    db, server = history_db
+    now = datetime(2026, 9, 30)
+    db.add(
+        Metric(
+            server_id=server.id,
+            name="system.load1",
+            scope="",
+            captured_at=now - timedelta(days=3),
+            value=4,
+        )
+    )
+    db.commit()
+    compact_history(db, RLock(), now, raw_days=4, hourly_days=5)
+    assert db.scalar(select(func.count()).select_from(Metric)) == 1
+    compact_history(db, RLock(), now, raw_days=1, hourly_days=2)
+    assert db.scalar(select(MetricRollup.resolution)) == 86400

@@ -7,7 +7,7 @@ from pathlib import Path
 from app.db import init_db, SessionLocal
 from app.parser import parse_pool_status
 from app.pool_capacity import parse_capacity
-from app.models import Server, CurrentState, Metric, Alert, DriveLabel, MonitorEvent
+from app.models import Server, CurrentState, Metric, Alert, DriveLabel, MonitorEvent, Enclosure, BayAssignment
 from app.security import ensure_bootstrap_admin
 from app.settings_store import ensure_defaults
 
@@ -118,6 +118,10 @@ with SessionLocal() as db:
                                ("write_latency_ms", 6), ("busy_pct", 45), ("queue_depth", 0.8)]:
                 db.add(Metric(server_id=sid, name="drive.io." + key, scope=scope,
                               value=value, captured_at=now - timedelta(minutes=minutes)))
+    enclosure=Enclosure(server_id=sid,name="Enclosure A",rows=5,columns=5)
+    db.add(enclosure);db.flush()
+    db.add(BayAssignment(enclosure_id=enclosure.id,slot=1,identity="DEMO-001"))
+    db.add(BayAssignment(enclosure_id=enclosure.id,slot=2,identity="MISSING-DEMO"))
     for i in range(25):
         db.add(DriveLabel(server_id=sid, identity=f"DEMO-{i:03}", label=f"Enclosure A · Bay {i+1}"))
     for day in range(1,11):

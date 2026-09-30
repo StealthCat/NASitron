@@ -22,6 +22,7 @@ class WebUser(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     session_version: Mapped[int] = mapped_column(Integer, default=1)
+    timezone: Mapped[str] = mapped_column(String(80), default="")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -235,3 +236,46 @@ class MonitorEvent(Base):
     kind: Mapped[str] = mapped_column(String(40))
     severity: Mapped[str] = mapped_column(String(20), default='info')
     message: Mapped[str] = mapped_column(Text)
+
+
+class SnapshotInventory(Base):
+    __tablename__ = 'snapshot_inventory'
+    __table_args__ = (UniqueConstraint('server_id','name'), Index('ix_inventory_created','created_at'), Index('ix_inventory_used','used'))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey('servers.id',ondelete='CASCADE'),index=True)
+    name: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime,nullable=True)
+    used: Mapped[int] = mapped_column(Integer,default=0)
+    referenced: Mapped[int] = mapped_column(Integer,default=0)
+
+
+class InventoryStatus(Base):
+    __tablename__ = 'inventory_status'
+    server_id: Mapped[int] = mapped_column(ForeignKey('servers.id',ondelete='CASCADE'),primary_key=True)
+    captured_at: Mapped[str] = mapped_column(String(80),default='')
+    error: Mapped[str | None] = mapped_column(Text,nullable=True)
+
+
+class Enclosure(Base):
+    __tablename__ = 'enclosures'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey('servers.id',ondelete='CASCADE'),index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    rows: Mapped[int] = mapped_column(Integer)
+    columns: Mapped[int] = mapped_column(Integer)
+
+
+class BayAssignment(Base):
+    __tablename__ = 'bay_assignments'
+    __table_args__ = (UniqueConstraint('enclosure_id','identity'),)
+    enclosure_id: Mapped[int] = mapped_column(ForeignKey('enclosures.id',ondelete='CASCADE'),primary_key=True)
+    slot: Mapped[int] = mapped_column(Integer,primary_key=True)
+    identity: Mapped[str] = mapped_column(String(255))
+
+
+class SavedView(Base):
+    __tablename__ = 'saved_views'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('web_users.id',ondelete='CASCADE'),index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    path: Mapped[str] = mapped_column(Text)

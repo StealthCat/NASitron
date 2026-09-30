@@ -182,14 +182,15 @@ const fs = require('node:fs');
     await page.setViewportSize({width:1440,height:1000});
     await page.goto('http://127.0.0.1:8765/disk-io?server_id=1&identity=DEMO-000');
     await page.locator('#io-compare').evaluate(el => el.closest('details').open=true);
-    await page.locator('#io-compare').selectOption(['DEMO-001','DEMO-002']);
+    await page.locator('[data-drive-compare][value="DEMO-001"]').check();
+    await page.locator('[data-drive-compare][value="DEMO-002"]').check();
     await page.waitForFunction(() => document.querySelectorAll('#io-comparisons canvas').length===3);
     assert.equal(await page.locator('#io-comparisons .chart-status').filter({hasText:'Updated'}).count(),2);
     assert.equal(await page.locator('#io-comparisons .chart-status').filter({hasText:'No samples'}).count(),1);
     await page.screenshot({path:'test-results/disk-comparison.png',fullPage:true});
     for (const width of [1440,390,320]) {
       await page.setViewportSize({width,height:1000});
-      for (const path of ['drive-bays','diagnostics','timeline','settings/database','forecasts','snapshots','operations']) {
+      for (const path of ['drive-bays','diagnostics','timeline','settings/database','forecasts','snapshots','operations','preferences']) {
         const response=await page.goto('http://127.0.0.1:8765/'+path);
         assert.equal(response.status(),200,path);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${path} overflows at ${width}`);

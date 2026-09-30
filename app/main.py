@@ -74,6 +74,7 @@ from .security import (
 from .experience import server_state, smart_state, pool_state, effective_role, operation_status, alert_target
 from .insights import install as install_insights
 from .observability import install as install_observability
+from .personalization import install as install_personalization, user_timezone
 from .service import latest_snapshot
 from .settings_store import ensure_defaults, get_many, get_setting, set_setting, get_int
 from .support import sanitize_diagnostics, support_bundle_lock
@@ -106,6 +107,7 @@ BASE_DIR = Path(__file__).resolve().parent
 INSTALLER_PATH = BASE_DIR.parent / "scripts" / "install-remote.sh"
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals["csrf_token"] = csrf_token
+templates.env.globals["display_timezone"] = lambda: user_timezone.get()
 _instance_lock = InstanceLock()
 
 
@@ -155,7 +157,7 @@ def fmt_dt(value) -> str:
             return value
     if value.tzinfo is None:
         value = value.replace(tzinfo=ZoneInfo("UTC"))
-    return value.astimezone(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S %Z")
+    return value.astimezone(ZoneInfo(user_timezone.get())).strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 templates.env.filters["human_bytes"] = human_bytes
@@ -203,6 +205,7 @@ async def require_web_session(request: Request, call_next):
         if user is not None:
             request.state.current_user = user
 
+    user_timezone.set((user.timezone if user else "") or TIMEZONE)
     if public_path:
         return await call_next(request)
     if user is not None:
@@ -211,10 +214,10 @@ async def require_web_session(request: Request, call_next):
         admin_page = (path.startswith(("/settings", "/users", "/api/enrollments")) or
                       path == "/servers/new" or path.endswith(("/edit", "/host-key")))
         operator_action = bool(re.fullmatch(
-            r"/servers/\d+/(poll|replace-drive|support-bundle|drive-label|maintenance-window)|/alerts/\d+/(ack|snooze)", path))
+            r"/servers/\d+/(poll|replace-drive|support-bundle|drive-label|maintenance-window)|/alerts/\d+/(ack|snooze)|/enclosures(?:/\d+/(?:assign|delete))?", path))
         if admin_page and role != "admin":
             return PlainTextResponse("Administrator access required.", status_code=403)
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and path != "/logout":
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and path not in {"/logout","/preferences","/views"} and not re.fullmatch(r"/views/\d+/delete",path):
             if role != "admin" and not (role == "operator" and operator_action):
                 return PlainTextResponse("This action requires an operator or administrator.", status_code=403)
         if "replace-drive" in path and role == "viewer":
@@ -1621,7 +1624,7 @@ def perform_drive_replacement(
                 server_id=server.id,
                 action="zpool_replace",
                 actor=_current_user(request).username,
-                state="accepted",
+                state="accepted" if result.get("ok") else "failed",
                 pool=request_data.pool,
                 old_device=f"{request_data.old_device} [guid={request_data.old_guid}]",
                 new_device=request_data.new_device,
@@ -1652,7 +1655,7 @@ def perform_drive_replacement(
                 server_id=server.id,
                 action="zpool_replace",
                 actor=_current_user(request).username,
-                state="accepted",
+                state="failed",
                 pool=request_data.pool,
                 old_device=f"{request_data.old_device} [guid={request_data.old_guid}]",
                 new_device=request_data.new_device,
@@ -1702,13 +1705,28 @@ def metric_history(
 
 
 @app.get("/api/servers/{server_id}/metrics/batch")
-def metric_batch(server_id: int, names: list[str] = Query(...), scopes: list[str] = Query(...),
+def metric_batch(server_id: int, names: list[str] = Query([]), scopes: list[str] = Query([]), pairs: list[str] = Query([]),
                  hours: float = Query(24, ge=0.25, le=8760), start: datetime | None = Query(None),
                  end: datetime | None = Query(None), db: Session = Depends(get_db)):
     server = db.get(Server, server_id)
     if server is None:
         raise HTTPException(404)
-    if not 1 <= len(names) <= 8 or not 1 <= len(scopes) <= 4 or any(n not in METRIC_NAMES for n in names) or any(len(s)>255 for s in scopes):
+    selected_pairs=None
+    if pairs:
+        try:
+            decoded = [json.loads(p) if len(p) <= 512 else None for p in pairs]
+            if any(not isinstance(p, list) for p in decoded):
+                raise ValueError()
+            selected_pairs = [tuple(p) for p in decoded]
+            if not 1<=len(selected_pairs)<=32 or any(len(p)!=2 or not all(isinstance(v,str) for v in p) or p[0] not in METRIC_NAMES or len(p[1])>255 for p in selected_pairs):
+                raise ValueError()
+            if len({p[1] for p in selected_pairs}) > 4:
+                raise ValueError()
+        except (ValueError,TypeError):
+            raise HTTPException(400,"Select known metric/drive pairs for up to four drives.")
+        names = list(dict.fromkeys(p[0] for p in selected_pairs))
+        scopes = list(dict.fromkeys(p[1] for p in selected_pairs))
+    elif not 1 <= len(names) <= 8 or not 1 <= len(scopes) <= 4 or any(n not in METRIC_NAMES for n in names) or any(len(s)>255 for s in scopes):
         raise HTTPException(400, "Select up to eight known metrics and four drives.")
     until = datetime.utcnow()
     since = until - timedelta(hours=hours)
@@ -1722,7 +1740,7 @@ def metric_batch(server_id: int, names: list[str] = Query(...), scopes: list[str
         if not timedelta(0) < until-since <= timedelta(days=365):
             raise HTTPException(400, "Choose a range of at most 365 days.")
     from .history import history_series
-    return {"series": history_series(db, server, list(dict.fromkeys(names)), list(dict.fromkeys(scopes)), since, until)}
+    return {"series": history_series(db, server, list(dict.fromkeys(names)), list(dict.fromkeys(scopes)), since, until, pairs=selected_pairs)}
 
 
 @app.post("/servers/{server_id}/support-bundle")
@@ -1753,7 +1771,7 @@ def support_bundle(
                 "smart_interval_minutes": server.smart_interval_minutes,
                 "sudo_for_smart": server.sudo_for_smart,
             },
-            "latest_snapshot": latest_snapshot(db, server_id),
+            "latest_snapshot": {k: v for k, v in (latest_snapshot(db, server_id) or {}).items() if not k.startswith("_")},
             "diagnostics": diagnostics,
             "privacy_note": (
                 "SSH/SMTP credentials are excluded. Sensitive ZFS native values "
@@ -2401,3 +2419,4 @@ def test_email(
 # Register focused read-only insight pages and monitoring controls.
 install_insights(app, templates)
 install_observability(app, templates)
+install_personalization(app, templates)

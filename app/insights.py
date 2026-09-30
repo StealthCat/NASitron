@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from fastapi import Depends, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from .models import (
     Server,
     Metric,
     MetricRollup,
+    SnapshotInventory, InventoryStatus,
     DriveLabel,
     MaintenanceWindow,
     MaintenanceAction,
@@ -95,6 +96,10 @@ def install(app, templates):
             ).union(select(MetricRollup.scope).where(MetricRollup.server_id == server.id, MetricRollup.name == "drive.io.read_bps"))).all()
             for scope in historical:
                 disks.setdefault(scope, {"path": scope, "model": "Historical device"})
+        if server:
+            for label in db.scalars(select(DriveLabel).where(DriveLabel.server_id == server.id)):
+                if label.identity in disks:
+                    disks[label.identity]["bay_label"] = label.label
         selected = identity if identity in disks else next(iter(disks), "")
         return templates.TemplateResponse(request=request, name="disk_io.html", context={
             "servers": servers, "server": server, "disks": disks, "identity": selected,
@@ -272,21 +277,18 @@ def install(app, templates):
             page, size = 1, 50
         if size not in {25,50,100,250}:
             size = 50
-        rows, inventories = [], []
-        servers = db.scalars(select(Server).order_by(Server.name)).all()
-        states = current_states(db, servers)
-        for server in servers:
-            snapshot = states.get(server.id) or {}
-            inventory = snapshot.get("snapshot_inventory", {})
-            inventories.append({"server": server, "inventory": inventory})
-            for row in inventory.get("rows", []):
-                rows.append({"server": server, **row})
-        rows = [r for r in rows if not q or q.casefold() in (r.get('name','')+' '+r['server'].name).casefold()]
-        rows.sort(key=lambda r: (r.get(sort) is None, r.get(sort) if r.get(sort) is not None else ('' if sort=='name' else 0)), reverse=descending)
-        total = len(rows)
-        pages = max(1,(total+size-1)//size)
-        page = min(page,pages)
-        rows = rows[(page-1)*size:page*size]
+        from .inventory_store import backfill_inventory
+        backfill_inventory(db)
+        inventories=[{"server":server,"inventory":{"captured_at":status.captured_at,"error":status.error}} for server,status in db.execute(select(Server,InventoryStatus).join(InventoryStatus)).all()]
+        query=select(SnapshotInventory,Server).join(Server)
+        if q:
+            query=query.where(or_(SnapshotInventory.name.contains(q,autoescape=True),Server.name.contains(q,autoescape=True)))
+        total=db.scalar(select(func.count()).select_from(query.subquery())) or 0
+        pages=max(1,(total+size-1)//size)
+        page=min(page,pages)
+        column=getattr(SnapshotInventory,"created_at" if sort=="created" else sort)
+        data=db.execute(query.order_by(column.desc() if descending else column.asc(),SnapshotInventory.id).offset((page-1)*size).limit(size)).all()
+        rows=[{"server":server,"name":r.name,"created":r.created_at,"used":r.used,"referenced":r.referenced} for r,server in data]
         return templates.TemplateResponse(
             request=request,
             name="snapshots.html",

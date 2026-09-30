@@ -93,6 +93,7 @@ class SSHCollector:
         self.client: paramiko.SSHClient | None = None
 
     def __enter__(self) -> "SSHCollector":
+        self.collection_deadline = time.monotonic() + 180
         self.connect()
         return self
 
@@ -224,6 +225,12 @@ class SSHCollector:
         if not self.client:
             raise CollectorError("SSH connection is not open")
 
+        remaining = getattr(self, "collection_deadline", None)
+        if remaining is not None:
+            remaining -= time.monotonic()
+            if remaining <= 0:
+                raise CollectorError("Host collection exceeded its 180-second deadline")
+            timeout = min(timeout, remaining)
         limit = max_output_bytes or MAX_REMOTE_OUTPUT_BYTES
         full_command = (
             f"export PATH={self.REMOTE_PATH}; export LC_ALL=C; export LANG=C; export TZ=UTC; "
@@ -245,6 +252,9 @@ class SSHCollector:
             while True:
                 progressed = False
                 while channel.recv_ready():
+                    if time.monotonic() >= deadline:
+                        channel.close()
+                        raise TimeoutError("Remote command deadline exceeded")
                     chunk = channel.recv(65536)
                     out_size, truncated = self._append_limited(
                         out_parts, chunk, out_size, limit
@@ -252,6 +262,9 @@ class SSHCollector:
                     out_truncated = out_truncated or truncated
                     progressed = True
                 while channel.recv_stderr_ready():
+                    if time.monotonic() >= deadline:
+                        channel.close()
+                        raise TimeoutError("Remote command deadline exceeded")
                     chunk = channel.recv_stderr(65536)
                     err_size, truncated = self._append_limited(
                         err_parts, chunk, err_size, limit
@@ -339,8 +352,20 @@ class SSHCollector:
             "lsblk": "lsblk -J -b -o NAME,KNAME,PATH,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL,FSTYPE,UUID,PTTYPE,PARTTYPE,MOUNTPOINTS",
             "services": "printf 'zfs.target='; systemctl is-active zfs.target 2>/dev/null || true; printf 'zfs-zed.service='; systemctl is-active zfs-zed.service 2>/dev/null || true",
         }
+        cache = (getattr(self,"previous",None) or {}).get('_detail_cache',{})
+        cache_time = cache.get('captured_at',0)
+        detail_due = time.time()-cache_time >= 900
+        cached = cache.get('commands',{})
+        updated = {}
+        slow = {'hostname','os_release','kernel','zfs_version','zfs_get'}
         for key, command in commands.items():
-            raw[key] = self.run(command, timeout=45 if key == "zpool_iostat" else 20)
+            reuse = not detail_due and key in slow and key in cached
+            raw[key] = cached[key] if reuse else self.run(command, timeout=45 if key == "zpool_iostat" else 20)
+            if key in slow and raw[key].get('exit')==0 and not raw[key].get('stdout_truncated'):
+                updated[key]=raw[key]
+        raw['detail_cache']={'captured_at':time.time() if detail_due else cache_time,'commands':updated}
+        raw['details_cached']=not detail_due
+
 
         if include_smart:
             raw["zfs_snapshots"] = self.run(
@@ -356,10 +381,11 @@ class SSHCollector:
             quoted = shlex.quote(pool)
             raw["zpool_list_verbose"][pool] = self.run(
                 f"zpool list -H -p -v -P -L -o {POOL_CAPACITY_PROPERTIES} {quoted}", timeout=20)
-            raw["zpool_get"][pool] = self.run(
-                f"zpool get -H -p -o name,property,value,source all {quoted}",
-                timeout=20,
-            )
+            key='pool-properties:'+pool
+            raw["zpool_get"][pool] = cached[key] if not detail_due and key in cached else self.run(
+                f"zpool get -H -p -o name,property,value,source all {quoted}",timeout=20)
+            if raw['zpool_get'][pool].get('exit')==0 and not raw['zpool_get'][pool].get('stdout_truncated'):
+                updated[key]=raw['zpool_get'][pool]
             raw["zpool_status"][pool] = self.run(
                 f"zpool status -v -p -P -L {quoted}", timeout=20
             )
@@ -413,6 +439,7 @@ class SSHCollector:
                         command = f"smartctl -a -j {shlex.quote(device)} 2>/dev/null"
                     raw["smart"][device] = self.run(command, timeout=45)
 
+        self.collection_deadline = None
         raw["smart_attempted_count"] = len(raw["smart"])
         return raw
 

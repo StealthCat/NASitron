@@ -1,3 +1,18 @@
+/* A single timezone for server-rendered timestamps and client charts. */
+window.NASitronTime = (() => {
+  const zone=document.body.dataset.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const format=(date,options={})=>new Date(date).toLocaleString([], {...options,timeZone:zone});
+  const localValue=date=>new Intl.DateTimeFormat('sv-SE',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(date)).replace(' ','T');
+  function toUTC(value) {
+    if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return new Date(NaN);
+    const normalized=value.length===16?value+':00':value, target=Date.parse(normalized+'Z');
+    let guess=target;
+    for(let i=0;i<4;i++) guess+=target-Date.parse(localValue(guess)+'Z');
+    const candidates=[-120,-90,-60,-30,0,30,60,90,120].map(m=>guess+m*60000).filter(t=>localValue(t)===normalized);
+    return new Date(candidates.length?Math.min(...candidates):NaN);
+  }
+  return {zone,format,localValue,toUTC};
+})();
 /* Shared charts and accessible, persistent inventory controls. No external CDN. */
 const preference = {
   read(key, fallback) {
@@ -58,7 +73,6 @@ window.NASitronChart = function(canvas, source, options = {}) {
   canvas.setAttribute('aria-label', (canvas.closest('.panel')?.querySelector('h2')?.textContent.trim() || 'Historical metric chart') + '. A text summary follows.');
   canvas.tabIndex = 0;
   let points = [],
-    gap = 180000,
     generation = 0,
     abort, disposed = false,
     selected = 0, windowStart, windowEnd;
@@ -74,6 +88,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
     return n.toFixed(1) + ' ' + u[i] + '/s';
   })() : value.toFixed(options.decimals ?? 1) + (options.suffix || '');
 
+  const connected = (a,b) => b.t-a.t <= Math.max(a.resolution,b.resolution)*3000;
   function draw() {
     const width = Math.max(1, canvas.getBoundingClientRect().width),
       height = Math.max(170, canvas.getBoundingClientRect().height || 220),
@@ -123,7 +138,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
     ctx.fillStyle = gradient;
     let segmentStart = 0;
     for (let i = 0; i < points.length; i++) {
-      if (i + 1 < points.length && points[i + 1].t - points[i].t <= gap) continue;
+      if (i + 1 < points.length && connected(points[i],points[i+1])) continue;
       if (i > segmentStart) {
         ctx.beginPath();
         ctx.moveTo(x(points[segmentStart].t), height - bottom);
@@ -142,14 +157,14 @@ window.NASitronChart = function(canvas, source, options = {}) {
     ctx.lineWidth = 2;
     ctx.beginPath();
     points.forEach((p, i) => {
-      if (i === 0 || p.t - points[i - 1].t > gap) ctx.moveTo(x(p.t), y(p.v));
+      if (i === 0 || !connected(points[i-1],p)) ctx.moveTo(x(p.t), y(p.v));
       else ctx.lineTo(x(p.t), y(p.v));
     });
     ctx.stroke();
     // Isolated observations must remain visible without drawing across gaps.
     points.forEach((p, i) => {
-      const beforeGap = i === 0 || p.t - points[i - 1].t > gap;
-      const afterGap = i === points.length - 1 || points[i + 1].t - p.t > gap;
+      const beforeGap = i === 0 || !connected(points[i-1],p);
+      const afterGap = i === points.length - 1 || !connected(p,points[i+1]);
       if (beforeGap && afterGap) {
         ctx.beginPath();
         ctx.arc(x(p.t), y(p.v), 2.5, 0, Math.PI * 2);
@@ -158,7 +173,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
       }
     });
     ctx.restore();
-    const time = t => new Date(t).toLocaleString([], {
+    const time = t => NASitronTime.format(t, {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
@@ -195,11 +210,11 @@ window.NASitronChart = function(canvas, source, options = {}) {
       windowEnd = Date.parse(data.end || options.range?.end) || undefined;
       points = (data.points || []).filter(p => p.v !== null).map(p => ({
         t: Date.parse(p.t),
-        v: Number(p.v), low: Number(p.min ?? p.v), high: Number(p.max ?? p.v)
+        resolution: Math.max(data.expected_interval_seconds || 60, p.resolution_seconds || data.bucket_seconds || 1), partial: !!p.partial, coverage: [p.coverage_start,p.coverage_end], v: Number(p.v), low: Number(p.min ?? p.v), high: Number(p.max ?? p.v)
       })).filter(p => Number.isFinite(p.t) && Number.isFinite(p.v)).sort((a, b) => a.t - b.t);
-      gap = Math.max(data.expected_interval_seconds || 60, data.bucket_seconds || 1, data.retained_resolution_seconds || 1) * 3000;
-      status.textContent = points.length ? 'Updated ' + new Date().toLocaleTimeString() + ' · ' + (data.sample_count ?? points.length) + ' readings / ' + points.length + ' buckets · times shown in your browser timezone' + (data.retained_resolution_seconds > 1 ? ' · retained resolution ' + (data.retained_resolution_seconds / 3600) + 'h' : '') : 'No samples in this time range.';
-      summaryText.textContent = points.length ? `Minimum ${format(Math.min(...points.map(p=>p.low)))}; maximum ${format(Math.max(...points.map(p=>p.high)))}; latest ${format(points[points.length-1].v)} at ${new Date(points[points.length-1].t).toLocaleString()}. Missing intervals are gaps. Use left/right arrows on the chart for individual samples.` : 'No data available.';
+      status.textContent = points.length ? 'Updated ' + NASitronTime.format(Date.now(),{hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' · ' + (data.sample_count ?? points.length) + ' readings / ' + points.length + ' buckets · timezone ' + NASitronTime.zone + '' + (data.retained_resolution_seconds > 1 ? ' · retained resolution ' + (data.retained_resolution_seconds / 3600) + 'h' : '') : 'No samples in this time range.';
+      if (data.partial_bucket_count) status.textContent += ' · ' + data.partial_bucket_count + ' overlapping summary buckets (approximate boundaries)';
+      summaryText.textContent = points.length ? `Minimum ${format(Math.min(...points.map(p=>p.low)))}; maximum ${format(Math.max(...points.map(p=>p.high)))}; latest ${format(points[points.length-1].v)} at ${NASitronTime.format(points[points.length-1].t)}. Missing intervals are gaps. Use left/right arrows on the chart for individual samples.` : 'No data available.';
       draw();
     } catch (error) {
       if (!disposed && requestId === generation) status.textContent = (error.name === 'AbortError' ? 'Request timed out.' : error.message) + ' Select Refresh to retry.';
@@ -213,7 +228,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
     if (!points.length) return;
     selected = Math.max(0, Math.min(points.length - 1, index));
     const p = points[selected];
-    tooltip.textContent = new Date(p.t).toLocaleString() + ' · ' + format(p.v) + (p.low !== p.high ? ' · range ' + format(p.low) + '–' + format(p.high) : '');
+    tooltip.textContent = NASitronTime.format(p.t) + ' · ' + format(p.v) + (p.partial ? ' · partial summary bucket; values include observations outside this selection' : '') + (p.low !== p.high ? ' · range ' + format(p.low) + '–' + format(p.high) : '');
     tooltip.hidden = false;
   }
 
@@ -223,6 +238,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
     points.forEach((p, i) => {
       if (Math.abs(p.t - t) < Math.abs(points[index].t - t)) index = i;
     });
+    if (Math.abs(points[index].t-t) > points[index].resolution*3000) {tooltip.textContent='No sample near this time.';tooltip.hidden=false;return;}
     show(index);
   }
 
@@ -288,7 +304,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') window.toggleSidebar(false);
   const sidebar = document.getElementById('sidebar');
   if (event.key === 'Tab' && sidebar?.classList.contains('open')) {
-    const items = [...sidebar.querySelectorAll('a,button,input,select')].filter(e => e.getClientRects().length);
+    const items = [...sidebar.querySelectorAll('a,button,input,select,summary')].filter(e => e.getClientRects().length);
     if (event.shiftKey && document.activeElement === items[0]) {
       event.preventDefault();
       items.at(-1)?.focus();
@@ -303,7 +319,8 @@ function inventory(table, index) {
   const rows = [...table.tBodies[0]?.rows || []].filter(r => r.cells.length === table.tHead?.rows[0].cells.length);
   if (!rows.length) return;
   const key = 'table:' + location.pathname + ':' + (table.dataset.table || index),
-    saved = preference.read(key, {});
+    stored = preference.read(key, {}),
+    saved = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
   const searchText = new Map(rows.map(r => [r, r.textContent.toLowerCase()]));
   const headers = [...table.tHead.rows[0].cells],
     wrapper = table.closest('.scroll') || table;
@@ -314,9 +331,10 @@ function inventory(table, index) {
   search.type = 'search';
   search.placeholder = 'Search name, server, pool, serial…';
   search.setAttribute('aria-label', 'Search inventory');
-  search.value = saved.query || '';
+  const urlState = new URL(location.href), param = 'table_' + (table.dataset.table || index) + '_';
+  search.value = urlState.searchParams.get(param+'q') ?? (typeof saved.query === 'string' ? saved.query : '');
   const type = dataset ? document.getElementById('dataset-type-filter') : null;
-  if (type) type.value = saved.type || 'all';
+  if (type) {type.value = urlState.searchParams.get(param+'type') ?? saved.type ?? 'all'; if(!type.value)type.value='all';}
   if (!dataset) {
     const label = document.createElement('label');
     label.textContent = 'Search ';
@@ -332,7 +350,8 @@ function inventory(table, index) {
     const select = document.createElement('select');
     select.add(new Option('All', ''));
     values.forEach(v => select.add(new Option(v, v)));
-    select.value = saved[field] || '';
+    select.value = urlState.searchParams.get(param+field) ?? saved[field] ?? '';
+    if (!select.value) select.value = '';
     label.append(select);
     toolbar.append(label);
     selectors.push([field, select]);
@@ -341,7 +360,8 @@ function inventory(table, index) {
     columnTitle = document.createElement('summary');
   columnTitle.textContent = 'Columns';
   columns.append(columnTitle);
-  let visible = saved.columns || ((table.dataset.defaultColumns || '').split(',').filter(Boolean).map(Number));
+  if (urlState.searchParams.has(param+'columns')) saved.columns=urlState.searchParams.get(param+'columns').split(',').map(Number);
+  let visible = (Array.isArray(saved.columns) ? saved.columns.filter(i => Number.isInteger(i) && i >= 0 && i < headers.length) : null) || ((table.dataset.defaultColumns || '').split(',').filter(Boolean).map(Number));
   if (!visible.length) visible = headers.map((_, i) => i);
   headers.forEach((h, i) => {
     const label = document.createElement('label'),
@@ -358,7 +378,7 @@ function inventory(table, index) {
   });
   const reset = document.createElement('button');
   reset.type = 'button';
-  reset.textContent = 'Reset filters';
+  reset.textContent = 'Reset table';
   const count = document.createElement('span');
   count.setAttribute('role', 'status');
   const prev = document.createElement('button'),
@@ -369,11 +389,14 @@ function inventory(table, index) {
   const pageSize = document.createElement('select');
   [25, 50, 100, 250].forEach(n => pageSize.add(new Option(n + ' rows', n)));
   pageSize.setAttribute('aria-label', 'Rows per page');
-  pageSize.value = saved.pageSize || '50';
+  if(urlState.searchParams.has(param+'size'))saved.pageSize=urlState.searchParams.get(param+'size');
+  if(urlState.searchParams.has(param+'sort'))saved.sort=Number(urlState.searchParams.get(param+'sort'));
+  if(urlState.searchParams.has(param+'desc'))saved.descending=urlState.searchParams.get(param+'desc')==='1';
+  pageSize.value = ['25','50','100','250'].includes(String(saved.pageSize)) ? String(saved.pageSize) : '50';
   toolbar.append(columns, reset, pageSize, prev, count, next);
   wrapper.before(toolbar);
   let page = 0,
-    sort = Number.isInteger(saved.sort) ? saved.sort : 0,
+    sort = Number.isInteger(saved.sort) && saved.sort >= 0 && saved.sort < headers.length ? saved.sort : 0,
     descending = !!saved.descending;
 
   function value(cell) {
@@ -408,6 +431,7 @@ function inventory(table, index) {
     prev.disabled = page === 0;
     next.disabled = (page + 1) * Number(pageSize.value) >= matching.length;
     count.textContent = matching.length + ' matches · page ' + (page + 1) + ' / ' + Math.max(1, Math.ceil(matching.length / Number(pageSize.value)));
+    if (!matching.length) count.textContent = 'No matching rows. Use Reset table to clear filters.';
     if (dataset) {
       document.getElementById('dataset-visible-count').textContent = matching.length;
       document.getElementById('dataset-empty-filter').hidden = matching.length !== 0;
@@ -422,6 +446,9 @@ function inventory(table, index) {
     };
     selectors.forEach(([k, s]) => state[k] = s.value);
     preference.write(key, state);
+    const url=new URL(location.href);
+    for(const [k,v] of [['q',search.value],['sort',String(sort)],['desc',descending?'1':'0'],['size',pageSize.value],['columns',visible.join(',')],['type',type?.value||''],...selectors.map(([k,sel])=>[k,sel.value])]) {url.searchParams.set(param+k,v);}
+    history.replaceState(null,'',url);
   }
   headers.forEach((h, i) => {
     const b = document.createElement('button');
@@ -443,6 +470,8 @@ function inventory(table, index) {
   }));
   reset.addEventListener('click', () => {
     search.value = '';
+    sort = 0; descending = false; pageSize.value = '50'; visible = headers.map((_,i)=>i);
+    columns.querySelectorAll('input').forEach(c=>c.checked=true);
     if (type) type.value = 'all';
     selectors.forEach(x => x[1].value = '');
     page = 0;
@@ -470,8 +499,9 @@ document.addEventListener('DOMContentLoaded', () => {
       preference.write('density', density.value);
     });
   }
+  document.querySelectorAll('[data-save-view-path]').forEach(input=>{input.form.addEventListener('submit',()=>input.value=location.pathname+location.search+location.hash);});
   const updated = document.getElementById('page-updated');
-  if (updated) updated.textContent = 'Page loaded ' + new Date().toLocaleTimeString();
+  if (updated) updated.textContent = 'Page loaded ' + NASitronTime.format(Date.now(),{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent);

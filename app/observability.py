@@ -5,8 +5,8 @@ from pathlib import Path
 import re
 from urllib.parse import quote
 
-from fastapi import Depends, Query, Request
-from sqlalchemy import select, func, literal, union_all, text
+from fastapi import Depends, Query, Request, HTTPException
+from sqlalchemy import select, func, literal, union_all, text, case, and_, or_
 from .db import engine
 from .insights import session
 from .models import (
@@ -18,10 +18,20 @@ from .models import (
     MaintenanceWindow,
     Metric,
     MetricRollup,
+    Enclosure,
+    BayAssignment,
 )
 from .service import current_states
 from .settings_store import get_int, get_setting
 from .experience import server_state, smart_state
+
+
+def server_filter(value):
+    if not value:
+        return None
+    if not re.fullmatch(r"[0-9]{1,18}", value) or int(value) < 1:
+        raise HTTPException(400, "Choose a valid server ID.")
+    return int(value)
 
 
 def install(app, templates):
@@ -29,6 +39,9 @@ def install(app, templates):
     def diagnostics(request: Request, db=Depends(session)):
         servers = db.scalars(select(Server).order_by(Server.name)).all()
         states = current_states(db, servers)
+        from .scheduler import collector_states
+
+        live = collector_states()
         rows = []
         now = datetime.utcnow()
         for s in servers:
@@ -45,6 +58,13 @@ def install(app, templates):
                     "collection": snapshot.get("collection", {}),
                     "due": due,
                     "overdue": s.enabled and due < now,
+                    "worker": (
+                        {"state": "overdue", "at": live.get(s.id, {}).get("at")}
+                        if s.enabled
+                        and due < now
+                        and live.get(s.id, {}).get("state") not in {"queued", "running"}
+                        else live.get(s.id, {"state": "idle"})
+                    ),
                 }
             )
         return templates.TemplateResponse(
@@ -53,7 +73,7 @@ def install(app, templates):
 
     @app.get("/drive-bays")
     def bays(request: Request, server: str = "", db=Depends(session)):
-        server = int(server) if server.isdigit() else None
+        server = server_filter(server)
         servers = db.scalars(select(Server).order_by(Server.name)).all()
         selected = [s for s in servers if server is None or s.id == server]
         states = current_states(db, selected)
@@ -97,6 +117,36 @@ def install(app, templates):
                     "state": server_state(s, states.get(s.id)),
                 }
             )
+        enclosures = db.scalars(
+            select(Enclosure)
+            .where(Enclosure.server_id.in_([s.id for s in selected]))
+            .order_by(Enclosure.name)
+        ).all()
+        assignments = {
+            (a.enclosure_id, a.slot): a.identity
+            for a in db.scalars(
+                select(BayAssignment).where(
+                    BayAssignment.enclosure_id.in_([e.id for e in enclosures])
+                )
+            )
+        }
+        for group in groups:
+            disks = {d["identity"]: d for d in group["disks"]}
+            group["enclosures"] = []
+            for enclosure in enclosures:
+                if enclosure.server_id != group["server"].id:
+                    continue
+                slots = []
+                for number in range(1, enclosure.rows * enclosure.columns + 1):
+                    identity = assignments.get((enclosure.id, number), "")
+                    slots.append(
+                        {
+                            "number": number,
+                            "identity": identity,
+                            "drive": disks.get(identity),
+                        }
+                    )
+                group["enclosures"].append({"config": enclosure, "slots": slots})
         return templates.TemplateResponse(
             request=request,
             name="drive_bays.html",
@@ -108,10 +158,10 @@ def install(app, templates):
         request: Request,
         server: str = "",
         kind: str = "",
-        page: int = Query(1, ge=1, le=100000),
+        before: str = Query("", max_length=160),
         db=Depends(session),
     ):
-        server = int(server) if server.isdigit() else None
+        server = server_filter(server)
         sources = [
             select(
                 MonitorEvent.id.label("id"),
@@ -120,6 +170,7 @@ def install(app, templates):
                 MonitorEvent.kind.label("kind"),
                 MonitorEvent.severity.label("severity"),
                 MonitorEvent.message.label("message"),
+                literal("monitor").label("source"),
             ),
             select(
                 Alert.id,
@@ -128,6 +179,7 @@ def install(app, templates):
                 literal("alert"),
                 Alert.severity,
                 Alert.title,
+                literal("alert"),
             ),
             select(
                 Alert.id,
@@ -136,14 +188,20 @@ def install(app, templates):
                 literal("resolved"),
                 literal("good"),
                 Alert.title,
+                literal("alert"),
             ).where(Alert.resolved_at.is_not(None)),
             select(
                 MaintenanceAction.id,
                 MaintenanceAction.server_id,
                 MaintenanceAction.created_at,
                 literal("replacement"),
-                literal("info"),
-                MaintenanceAction.pool + ": " + MaintenanceAction.state,
+                case((MaintenanceAction.success.is_(False), "critical"), else_="info"),
+                MaintenanceAction.pool
+                + case(
+                    (MaintenanceAction.success.is_(False), ": command failed"),
+                    else_=": command accepted",
+                ),
+                literal("action"),
             ),
             select(
                 MaintenanceWindow.id,
@@ -152,6 +210,7 @@ def install(app, templates):
                 literal("window"),
                 literal("info"),
                 MaintenanceWindow.reason,
+                literal("window"),
             ),
         ]
         events = union_all(*sources).subquery()
@@ -164,10 +223,40 @@ def install(app, templates):
             query = query.where(events.c.server_id == server)
         if kind in {"collection", "scan", "alert", "resolved", "replacement", "window"}:
             query = query.where(events.c.kind == kind)
+        if before:
+            try:
+                at, event_kind, event_id, event_source = before.split("|")
+                at = datetime.fromisoformat(at)
+                event_id = int(event_id)
+                if (
+                    at.tzinfo is not None
+                    or event_id < 1
+                    or event_id > 9223372036854775807
+                ):
+                    raise ValueError()
+            except (ValueError, TypeError):
+                raise HTTPException(400, "Invalid timeline cursor.")
+            query = query.where(
+                or_(
+                    events.c.at < at,
+                    and_(events.c.at == at, events.c.kind > event_kind),
+                    and_(
+                        events.c.at == at,
+                        events.c.kind == event_kind,
+                        events.c.id < event_id,
+                    ),
+                    and_(
+                        events.c.at == at,
+                        events.c.kind == event_kind,
+                        events.c.id == event_id,
+                        events.c.source > event_source,
+                    ),
+                )
+            )
         rows = db.execute(
-            query.order_by(events.c.at.desc(), events.c.kind, events.c.id.desc())
-            .offset((page - 1) * 50)
-            .limit(51)
+            query.order_by(
+                events.c.at.desc(), events.c.kind, events.c.id.desc(), events.c.source
+            ).limit(51)
         ).all()
         return templates.TemplateResponse(
             request=request,
@@ -175,7 +264,17 @@ def install(app, templates):
             context={
                 "rows": rows[:50],
                 "has_next": len(rows) > 50,
-                "page": page,
+                "cursor": (
+                    rows[49].at.isoformat()
+                    + "|"
+                    + rows[49].kind
+                    + "|"
+                    + str(rows[49].id)
+                    + "|"
+                    + rows[49].source
+                )
+                if len(rows) > 50
+                else "",
                 "kind": kind,
                 "selected": server,
                 "servers": db.scalars(select(Server).order_by(Server.name)).all(),
@@ -187,8 +286,8 @@ def install(app, templates):
         # Exact counts are opt-in; normal page loads never scan the history table.
         now = datetime.utcnow()
         stats = {
-            "raw_days": 7,
-            "hourly_days": 30,
+            "raw_days": get_int(db, "raw_history_days", 7),
+            "hourly_days": get_int(db, "hourly_history_days", 30),
             "retention": get_int(db, "metric_retention_days", 90),
             "snapshot_retention": get_int(db, "snapshot_retention_days", 30),
             "housekeeping": get_setting(db, "history_housekeeping_at", "Not run yet"),
@@ -196,6 +295,44 @@ def install(app, templates):
                 db, "history_housekeeping_result", "No housekeeping result yet"
             ),
         }
+        import math
+
+        for key in ["state", "error", "seconds", "attempt"]:
+            stats[key] = get_setting(db, "history_housekeeping_" + key, "Not recorded")
+        oldest = db.scalar(select(func.min(Metric.captured_at)))
+        oldest_hourly = db.scalar(
+            select(func.min(MetricRollup.captured_at)).where(
+                MetricRollup.resolution == 3600
+            )
+        )
+        raw_windows = (
+            max(
+                0,
+                math.ceil(
+                    ((now - timedelta(days=stats["raw_days"])) - oldest).total_seconds()
+                    / 3600
+                ),
+            )
+            if oldest
+            else 0
+        )
+        daily_windows = (
+            max(
+                0,
+                math.ceil(
+                    (
+                        (now - timedelta(days=stats["hourly_days"])) - oldest_hourly
+                    ).total_seconds()
+                    / 86400
+                ),
+            )
+            if oldest_hourly
+            else 0
+        )
+        stats["backlog"] = raw_windows + daily_windows
+        stats["catchup"] = max(
+            math.ceil(raw_windows / 48), math.ceil(daily_windows / 48)
+        )
         if engine.dialect.name == "sqlite":
             stats["database_bytes"] = (
                 db.execute(text("PRAGMA page_count")).scalar()

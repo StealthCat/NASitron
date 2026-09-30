@@ -17,19 +17,28 @@ _scheduler = BackgroundScheduler(timezone="UTC")
 _pool: ThreadPoolExecutor | None = None
 _lock = threading.Lock()
 _inflight: set[int] = set()
+_states: dict[int, dict] = {}
+
+
+def collector_states():
+    with _lock:
+        return {key: dict(value) for key, value in _states.items()}
 
 
 def _collect_worker(server_id: int) -> None:
+    with _lock:
+        _states[server_id] = {"state": "running", "at": datetime.utcnow()}
+    result = "completed"
     try:
         with SessionLocal() as db:
             try:
                 collect_server(db, server_id)
             except Exception:
-                # collect_server persists the failed-collection state itself.
-                pass
+                result = "failed"
     finally:
         with _lock:
             _inflight.discard(server_id)
+            _states[server_id] = {"state": result, "at": datetime.utcnow()}
 
 
 def trigger_now(server_id: int) -> bool:
@@ -40,12 +49,14 @@ def trigger_now(server_id: int) -> bool:
         if _pool is None:
             return False
         _inflight.add(server_id)
+        _states[server_id] = {"state": "queued", "at": datetime.utcnow()}
         pool = _pool
     try:
         pool.submit(_collect_worker, server_id)
     except RuntimeError:
         with _lock:
             _inflight.discard(server_id)
+            _states.pop(server_id, None)
         return False
     return True
 
@@ -53,14 +64,11 @@ def trigger_now(server_id: int) -> bool:
 def _schedule_due() -> None:
     now = datetime.utcnow()
     with SessionLocal() as db:
-        servers = db.scalars(
-            select(Server).where(Server.enabled.is_(True))
-        ).all()
+        servers = db.scalars(select(Server).where(Server.enabled.is_(True))).all()
         for server in servers:
             interval = max(15, min(86400, server.poll_interval_seconds or 60))
-            due = (
-                server.last_poll_at is None
-                or now - server.last_poll_at >= timedelta(seconds=interval)
+            due = server.last_poll_at is None or now - server.last_poll_at >= timedelta(
+                seconds=interval
             )
             if due:
                 trigger_now(server.id)
@@ -75,11 +83,31 @@ def _deliver_notifications() -> None:
 
 
 def _housekeeping() -> None:
+    from .settings_store import set_setting
+    import time
+
+    started = time.monotonic()
     with SessionLocal() as db:
         try:
+            set_setting(db, "history_housekeeping_state", "running")
+            db.commit()
             prune_history(db)
-        except Exception:
+            set_setting(db, "history_housekeeping_state", "completed")
+            set_setting(db, "history_housekeeping_error", "")
+        except Exception as exc:
             db.rollback()
+            set_setting(db, "history_housekeeping_state", "failed")
+            set_setting(db, "history_housekeeping_error", str(exc)[:2000])
+        finally:
+            set_setting(
+                db,
+                "history_housekeeping_seconds",
+                str(round(time.monotonic() - started, 2)),
+            )
+            set_setting(
+                db, "history_housekeeping_attempt", datetime.utcnow().isoformat()
+            )
+            db.commit()
 
 
 def start_scheduler() -> None:
@@ -134,3 +162,4 @@ def stop_scheduler() -> None:
         _pool = None
     with _lock:
         _inflight.clear()
+        _states.clear()

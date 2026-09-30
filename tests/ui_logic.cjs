@@ -32,6 +32,7 @@ function dom(html) {
   d.window.close();
 
   const table=dom('<div class="scroll"><table data-table="test"><thead><tr><th>Name</th><th>Size</th></tr></thead><tbody>'+Array.from({length:60},(_,i)=>`<tr><td>Disk ${i}</td><td data-sort="${i}">${i} B</td></tr>`).join('')+'</tbody></table></div>');
+  table.window.localStorage.setItem('nasitron:table:/:test',JSON.stringify({sort:999,columns:'bad',pageSize:3}));
   table.window.eval(script);await tick();
   const document=table.window.document;
   assert.equal(document.querySelectorAll('tbody tr:not([hidden])').length,50);
@@ -39,13 +40,21 @@ function dom(html) {
   await new Promise(r=>setTimeout(r,180));
   assert.equal(document.querySelectorAll('tbody tr:not([hidden])').length,1);
   assert.match(document.querySelector('tbody tr:not([hidden])').textContent,/Disk 59/);
+  const reset=[...document.querySelectorAll('button')].find(b=>b.textContent==='Reset table');reset.click();
+  assert.equal(document.querySelectorAll('tbody tr:not([hidden])').length,50);
+  assert.equal(document.querySelector('th').getAttribute('aria-sort'),'ascending');
   table.window.close();
+  const tz=dom('<body data-timezone="America/New_York"></body>');tz.window.eval(script);await tick();
+  assert.equal(tz.window.NASitronTime.toUTC('2026-07-01T12:00').toISOString(),'2026-07-01T16:00:00.000Z');
+  assert.ok(Number.isNaN(+tz.window.NASitronTime.toUTC('2026-03-08T02:30')));
+  assert.equal(tz.window.NASitronTime.toUTC('2026-11-01T01:30').toISOString(),'2026-11-01T05:30:00.000Z');
+  tz.window.close();
 
-  const io=dom(`<select id="io-server"><option>1</option></select><select id="io-disk"><option>A</option></select><select id="io-compare" multiple><option>B</option></select><select id="io-compare-metric"><option value="read_bps">Read</option></select><form id="io-range-form"><select id="io-range"><option value="1">1h</option><option value="custom">Custom</option></select><input id="io-start"><input id="io-end"><input id="io-auto" type="checkbox"><div id="io-custom"></div></form><p id="io-range-error"></p><div id="io-comparisons"></div><div id="io-charts" data-server="1" data-identity="A"><article class="panel"><h2>Read</h2><canvas data-io-metric="read_bps" data-unit="bytes"></canvas></article></div>`);
-  let calls=0;io.window.fetch=async url=>{calls++;const u=new URL(url,'http://localhost');return {ok:true,json:async()=>({series:u.searchParams.getAll('scopes').map(scope=>({scope,name:'drive.io.read_bps',points:[{t:new Date().toISOString(),v:5,min:1,max:10}]}))})};};
+  const io=dom(`<select id="io-server"><option>1</option></select><select id="io-disk"><option>A</option></select><div id="io-compare"><input id="io-drive-search"><label><input type="checkbox" data-drive-compare value="B">Drive B</label><div id="io-selected"></div></div><p id="io-selection-state"></p><select id="io-compare-metric"><option value="read_bps">Read</option></select><form id="io-range-form"><select id="io-range"><option value="1">1h</option><option value="custom">Custom</option></select><input id="io-start"><input id="io-end"><input id="io-auto" type="checkbox"><div id="io-custom"></div></form><p id="io-range-error"></p><div id="io-comparisons"></div><div id="io-charts" data-server="1" data-identity="A"><article class="panel"><h2>Read</h2><canvas data-io-metric="read_bps" data-unit="bytes"></canvas></article></div>`);
+  let calls=0;io.window.fetch=async url=>{calls++;const u=new URL(url,'http://localhost');return {ok:true,json:async()=>({series:u.searchParams.getAll('pairs').map(p=>JSON.parse(p)).map(([name,scope])=>({scope,name,points:[{t:new Date().toISOString(),v:5,min:1,max:10}]}))})};};
   io.window.eval(script);await tick();io.window.eval(fs.readFileSync('app/static/disk_io.js','utf8'));await tick();
   assert.equal(calls,1,'A disk page uses a single batched history request');
-  const compare=io.window.document.querySelector('#io-compare');compare.options[0].selected=true;compare.dispatchEvent(new io.window.Event('change'));await tick();
+  const compare=io.window.document.querySelector('#io-compare');compare.querySelector('input[type=checkbox]').checked=true;compare.dispatchEvent(new io.window.Event('change'));await tick();
   assert.equal(calls,2);
   assert.equal(io.window.document.querySelectorAll('#io-comparisons canvas').length,2);
   assert.match(io.window.document.querySelector('#io-charts .chart-status').textContent,/Updated/);

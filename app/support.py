@@ -40,16 +40,19 @@ def _sanitize_property_output(text: str) -> str:
     return "\n".join(output)
 
 
-def sanitize_diagnostics(raw: dict[str, Any]) -> dict[str, Any]:
+def sanitize_diagnostics(raw: dict[str, Any], property_output: bool = False) -> dict[str, Any]:
     safe: dict[str, Any] = {}
     for key, value in raw.items():
+        if key in {"detail_cache", "_detail_cache"}:
+            continue
+        properties = property_output or key in {"zfs_get_all", "zpool_get_all", "zfs_get", "zpool_get"}
         if isinstance(value, dict) and {"stdout", "stderr", "exit"} <= set(value):
             item = dict(value)
-            if key in {"zfs_get_all", "zpool_get_all"}:
+            if properties:
                 item["stdout"] = _sanitize_property_output(str(item.get("stdout", "")))
             safe[key] = item
         elif isinstance(value, dict):
-            safe[key] = sanitize_diagnostics(value)
+            safe[key] = sanitize_diagnostics(value, properties)
         else:
             safe[key] = value
     return safe

@@ -202,8 +202,16 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
 
     try:
         with SSHCollector(server) as collector:
+            collector.previous = previous
             raw = collector.collect(include_smart=include_smart)
         snapshot = build_snapshot(raw, captured_at=now)
+        snapshot["_detail_cache"] = raw.get("detail_cache", {})
+        snapshot["collection"]["detail_cache_at"] = raw.get("detail_cache", {}).get("captured_at")
+        if raw.get("details_cached"):
+            fresh = snapshot["collection"].setdefault("freshness", {})
+            for key,value in (previous or {}).get("collection", {}).get("freshness", {}).items():
+                if key in {"system.hostname","system.os","system.kernel","zfs.version","zfs.dataset_properties"} or key.startswith("pool.properties:"):
+                    fresh[key] = value
         _merge_previous_subsystems(snapshot, previous)
         _update_expected_pools(server, snapshot)
 
@@ -214,6 +222,8 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
         payload = json.dumps(snapshot, separators=(",", ":"))
         with _db_write_lock:
             _write_current_state(db, server.id, now, payload)
+            from .inventory_store import sync_inventory
+            sync_inventory(db, server.id, snapshot.get("snapshot_inventory", {}))
             store_metrics(db, server.id, now, snapshot)
 
             snapshot_interval = max(
@@ -324,7 +334,7 @@ def prune_history(db: Session, now: datetime | None = None) -> tuple[int, int]:
     delete_chunks(db, _db_write_lock, MetricRollup, MetricRollup.captured_at < now - timedelta(days=metric_days))
     snapshots = delete_chunks(db, _db_write_lock, Snapshot, Snapshot.captured_at < now - timedelta(days=snapshot_days))
     delete_chunks(db, _db_write_lock, MonitorEvent, MonitorEvent.captured_at < now - timedelta(days=metric_days))
-    rolled = compact_history(db, _db_write_lock, now)
+    rolled = compact_history(db, _db_write_lock, now, raw_days=get_int(db,"raw_history_days",7), hourly_days=get_int(db,"hourly_history_days",30))
     with _db_write_lock:
         set_setting(db, "history_housekeeping_at", now.isoformat())
         set_setting(db, "history_housekeeping_result", f"Removed {metrics} raw samples and {snapshots} snapshots; wrote {rolled} summary buckets")

@@ -15,14 +15,19 @@
   const compare=document.getElementById('io-compare'), metric=document.getElementById('io-compare-metric');
   const comparison=document.getElementById('io-comparisons');
   const params=new URLSearchParams(location.search);
-  const localValue=date=>new Date(date-date.getTimezoneOffset()*60000).toISOString().slice(0,19);
+  const localValue=NASitronTime.localValue;
   start.value=localValue(new Date(Date.now()-3600000)); end.value=localValue(new Date());
   if(params.has('start')&&params.has('end')) {
     const a=new Date(params.get('start')),b=new Date(params.get('end'));
     if(Number.isFinite(+a)&&Number.isFinite(+b)) {range.value='custom';start.value=localValue(a);end.value=localValue(b);}
   } else if([...range.options].some(o=>o.value===params.get('hours'))) range.value=params.get('hours');
   const selected=params.getAll('compare').slice(0,3);
-  [...compare.options].forEach(o=>o.selected=selected.includes(o.value));
+  const checks=[...compare.querySelectorAll('[data-drive-compare]')];
+  checks.forEach(o=>o.checked=selected.includes(o.value));
+  const labels=new Map([...disk.options].map(o=>[o.value,o.dataset.label || o.textContent]));
+  document.getElementById('io-drive-search').addEventListener('input',e=>checks.forEach(c=>c.closest('label').hidden=!c.closest('label').textContent.toLowerCase().includes(e.target.value.toLowerCase())));
+  const selectionState=document.getElementById('io-selection-state');
+  function chips(){const box=document.getElementById('io-selected');box.replaceChildren();checks.filter(c=>c.checked).forEach(c=>{const b=document.createElement('button');b.type='button';b.className='drive-chip';b.textContent=(labels.get(c.value)||c.value)+' ×';b.addEventListener('click',()=>{c.checked=false;render();});box.append(b);});}
   if([...metric.options].some(o=>o.value===params.get('compare_metric'))) metric.value=params.get('compare_metric');
   function mode() {
     document.getElementById('io-custom').hidden=range.value!=='custom';
@@ -32,13 +37,14 @@
   let generation=0, controller;
   async function render() {
     error.textContent='';
-    const extra=[...compare.selectedOptions].map(o=>o.value).filter(s=>s!==charts.dataset.identity);
+    chips();
+    const extra=checks.filter(o=>o.checked).map(o=>o.value).filter(s=>s!==charts.dataset.identity);
     if(extra.length>3) {error.textContent='Choose up to three additional drives (four total).';return;}
     let windowRange;
     const url=new URL(location.href);
     for(const key of ['hours','start','end','compare','compare_metric']) url.searchParams.delete(key);
     if(range.value==='custom') {
-      const a=new Date(start.value),b=new Date(end.value);
+      const a=NASitronTime.toUTC(start.value),b=NASitronTime.toUTC(end.value);
       if(!Number.isFinite(+a)||!Number.isFinite(+b)||b<=a||b-a>365*86400000) {error.textContent='Choose an end after the start, within a maximum period of 365 days.';return;}
       windowRange={start:a.toISOString(),end:b.toISOString()};
     } else windowRange={hours:range.value};
@@ -49,8 +55,10 @@
     const activeController=controller, timeout=setTimeout(()=>activeController.abort(),15000);
     const canvases=[...charts.querySelectorAll('canvas')];
     const query=new URLSearchParams(windowRange);
-    canvases.forEach(c=>query.append('names','drive.io.'+c.dataset.ioMetric));
-    const scopes=[charts.dataset.identity,...extra];scopes.forEach(s=>query.append('scopes',s));
+    canvases.forEach(c=>query.append('pairs',JSON.stringify(['drive.io.'+c.dataset.ioMetric,charts.dataset.identity])));
+    const scopes=[charts.dataset.identity,...extra];extra.forEach(scope=>query.append('pairs',JSON.stringify(['drive.io.'+metric.value,scope])));
+    selectionState.textContent='Loading selected window; visible charts still show the previous selection until this completes.';
+    charts.classList.add('history-pending');comparison.classList.add('history-pending');
     charts.setAttribute('aria-busy','true');error.textContent='Loading shared history…';
     try {
       const response=await fetch(`/api/servers/${charts.dataset.server}/metrics/batch?${query}`,{signal:activeController.signal,cache:'no-store'});
@@ -66,12 +74,14 @@
         const bounds=[0,Math.max(1,...all.map(p=>p.max??p.v))];
         for(const scope of scopes) {
           const article=document.createElement('article');article.className='panel chart-wrap';
-          const title=document.createElement('h2');title.textContent=scope+' · '+metric.selectedOptions[0].textContent;
+          const title=document.createElement('h2');title.textContent=(labels.get(scope)||scope)+' · '+metric.selectedOptions[0].textContent;
           const canvas=document.createElement('canvas');canvas.className='chart';canvas.dataset.ioMetric=metric.value;canvas.dataset.unit=source.dataset.unit;
           article.append(title,canvas);comparison.append(article);
           NASitronChart(canvas,'',{...options(canvas,scope),bounds,syncGroup:'disk-comparison'});
         }
       }
+      selectionState.textContent='Displayed window: '+(windowRange.hours ? 'last '+windowRange.hours+' hours' : NASitronTime.format(windowRange.start)+' – '+NASitronTime.format(windowRange.end))+' · '+NASitronTime.zone;
+      charts.classList.remove('history-pending');comparison.classList.remove('history-pending');
       error.textContent='';
     } catch(e) {if(request===generation) error.textContent=(e.name==='AbortError'?'History request timed out.':e.message)+' Use Apply / Refresh to retry. Previously displayed charts may be from an earlier selection.';}
     finally {clearTimeout(timeout);if(request===generation)charts.removeAttribute('aria-busy');}
