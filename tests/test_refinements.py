@@ -115,6 +115,11 @@ def test_personal_views_enclosures_policy_and_input_bounds():
             assert post(client, "/enclosures", server_id=sid, name="Second rack", rows=1, columns=2).status_code == 303
             page = client.get(f"/drive-bays?server={sid}").text
             assert '<option value="stable">' not in page
+            assert 'data-assign-bay' in page and 'aria-haspopup="dialog"' in page
+            assert 'name="empty_only" value="true"' in page
+            assert 'No unassigned drives with a stable serial number' in page
+            assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="stable", empty_only="true").status_code == 409
+            assert post(client, f"/enclosures/{eid}/assign", slot=3, identity="", empty_only="true").status_code == 400
             assert "Rack · Bay 1" in page
             assert "Unlabeled" not in page
             bay, detected = page.split("<h3>Detected drives</h3>")
@@ -122,7 +127,7 @@ def test_personal_views_enclosures_policy_and_input_bounds():
                 assert detail in bay and detail in detected
             assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="").status_code == 303
             page = client.get(f"/drive-bays?server={sid}").text
-            assert page.count('<option value="stable">') == 2
+            assert page.count('<option value="stable">') == 3
             assert "Unlabeled" in page
             assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="stable").status_code == 303
             with SessionLocal() as db:

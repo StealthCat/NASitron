@@ -153,6 +153,7 @@ def install(app, templates):
         enclosure_id: int,
         slot: int = Form(...),
         identity: str = Form(""),
+        empty_only: bool = Form(False),
         db=Depends(session),
     ):
         enclosure = db.get(Enclosure, enclosure_id)
@@ -160,6 +161,10 @@ def install(app, templates):
             raise HTTPException(404)
         if not 1 <= slot <= enclosure.rows * enclosure.columns:
             raise HTTPException(400, "Choose a slot within this enclosure.")
+        if empty_only and db.get(BayAssignment, (enclosure_id, slot)):
+            raise HTTPException(409, "This bay was assigned while the page was open. Refresh the page and choose an empty bay.")
+        if empty_only and not identity:
+            raise HTTPException(400, "Select a drive to assign.")
         if identity:
             disks = (latest_snapshot(db, enclosure.server_id) or {}).get("drives", [])
             if not any(d.get("serial") == identity for d in disks):

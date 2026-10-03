@@ -293,3 +293,11 @@ body[data-density=comfortable] .metric-card { padding-block: 25px; }
 .history-pending { opacity:.5; }
 .display-preferences { flex-wrap:wrap; }
 @media(max-width:600px) { .drive-choices { grid-template-columns:minmax(0,1fr); } .save-view form { right:auto; left:0; width:230px; } }
+
+button.bay-empty { width:100%; text-align:left; font:inherit; cursor:pointer; border-style:dashed; }
+.bay-empty:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.bay-assign-hint { color:var(--accent); font-size:.85rem; }
+.bay-dialog { width:min(600px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); box-sizing:border-box; overflow:auto; padding:26px; border:1px solid var(--border); border-radius:18px; background:var(--panel); color:var(--text); }
+.bay-dialog::backdrop { background:rgba(0,0,0,.7); backdrop-filter:blur(4px); }
+.bay-dialog select { width:100%; min-width:0; margin:8px 0; }
+.bay-dialog .row { justify-content:flex-end; margin-top:22px; }

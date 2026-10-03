@@ -1,5 +1,7 @@
 # NASitron
 
+> **0.10.2:** Click an empty drive bay to assign an available drive in a popup.
+>
 > **0.10.1:** Assigned drives leave the available bay-assignment list, show full
 > drive details in their bays, and display their enclosure/bay under detected drives.
 >
