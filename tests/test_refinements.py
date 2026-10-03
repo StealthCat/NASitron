@@ -61,7 +61,10 @@ def test_personal_views_enclosures_policy_and_input_bounds():
                 CurrentState(
                     server_id=sid,
                     payload_json=json.dumps(
-                        {"drives": [{"serial": "stable", "path": "/dev/sda"}]}
+                        {"drives": [{"serial": "stable", "path": "/dev/sda",
+                            "size_bytes": 1024**4, "model": "Bay test HDD",
+                            "smart": {"temperature_c": 35, "power_on_hours": 8760,
+                                      "sampled_at": "2026-10-02T12:00:00Z"}}]}
                     ),
                 )
             )
@@ -108,6 +111,20 @@ def test_personal_views_enclosures_policy_and_input_bounds():
                 ).status_code
                 == 400
             )
+            # Assignments in any enclosure remove a drive from every available list.
+            assert post(client, "/enclosures", server_id=sid, name="Second rack", rows=1, columns=2).status_code == 303
+            page = client.get(f"/drive-bays?server={sid}").text
+            assert '<option value="stable">' not in page
+            assert "Rack · Bay 1" in page
+            assert "Unlabeled" not in page
+            bay, detected = page.split("<h3>Detected drives</h3>")
+            for detail in ("Bay test HDD", "1.0 TiB", "35°C", "1 year", "2026-10-02"):
+                assert detail in bay and detail in detected
+            assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="").status_code == 303
+            page = client.get(f"/drive-bays?server={sid}").text
+            assert page.count('<option value="stable">') == 2
+            assert "Unlabeled" in page
+            assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="stable").status_code == 303
             with SessionLocal() as db:
                 db.get(CurrentState, sid).payload_json = '{"drives":[]}'
                 db.commit()

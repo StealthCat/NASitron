@@ -107,6 +107,27 @@ def install(app, templates):
             "snapshot": snapshot, "freshness": server_state(server, snapshot) if server else None,
         })
 
+    @app.get("/pool-io")
+    def pool_io_page(request: Request, server_id: int | None = None,
+                     identity: str = "", db: Session = Depends(session)):
+        servers = db.scalars(select(Server).order_by(Server.name)).all()
+        server = db.get(Server, server_id) if server_id is not None else (servers[0] if servers else None)
+        if server_id is not None and server is None:
+            raise HTTPException(404)
+        snapshot = latest_snapshot(db, server.id) or {} if server else {}
+        pools = {d.get("name"): d for d in snapshot.get("pools", [])}
+        if server:
+            historical = db.scalars(select(Metric.scope).where(
+                Metric.server_id == server.id, Metric.name == "pool.read_bps"
+            ).union(select(MetricRollup.scope).where(MetricRollup.server_id == server.id, MetricRollup.name == "pool.read_bps"))).all()
+            for scope in historical:
+                pools.setdefault(scope, {"name": scope})
+        selected = identity if identity in pools else next(iter(pools), "")
+        return templates.TemplateResponse(request=request, name="pool_io.html", context={
+            "servers": servers, "server": server, "pools": pools, "identity": selected,
+            "snapshot": snapshot, "freshness": server_state(server, snapshot) if server else None,
+        })
+
     @app.get("/operations")
     def operations(request: Request, db: Session = Depends(session)):
         rows = []

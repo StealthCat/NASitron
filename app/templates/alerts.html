@@ -24,7 +24,7 @@
   <td><span class="badge {{ alert.severity if alert.active else 'offline' }}"><span class="dot"></span>{{ "ACTIVE" if alert.active else "RESOLVED" }}</span></td>
   <td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td>
   <td><a href="/servers/{{ alert.server_id }}"><strong>{{ alert.server.name }}</strong></a></td>
-  <td><a href="{{ alert_target(alert) }}"><strong>{{ alert.title }}</strong></a><div class="subtle">{{ alert.message }}</div></td>
+  <td><a href="{{ alert_target(alert) }}"><strong>{{ alert.title }}</strong></a><div class="subtle">{{ alert.message|alert_temperature }}</div></td>
   <td>{{ alert.first_seen|fmt_dt }}</td>
   <td>{{ alert.last_seen|fmt_dt }}</td>
   <td data-operator-only>{% if alert.active and not alert.acknowledged %}<form method="post" action="/alerts/{{ alert.id }}/ack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Acknowledge</button></form>{% elif alert.acknowledged %}<span class="badge">Acknowledged</span>{% endif %}

@@ -15,6 +15,7 @@
 
 <div class="settings-tabs" data-active-tab="{{ active_tab }}">
   <div class="settings-tab-list" role="tablist" aria-label="Settings sections">
+    <button type="button" class="settings-tab {{ 'active' if active_tab == 'display' else '' }}" role="tab" id="tab-display" aria-controls="panel-display" aria-selected="{{ 'true' if active_tab == 'display' else 'false' }}" data-settings-tab="display"><span class="settings-tab-label">Display</span><span class="settings-tab-sub">Temperature units</span></button>
     <button type="button" class="settings-tab {{ 'active' if active_tab == 'smtp' else '' }}" role="tab" id="tab-smtp" aria-controls="panel-smtp" aria-selected="{{ 'true' if active_tab == 'smtp' else 'false' }}" data-settings-tab="smtp">
       <span class="settings-tab-label">Email</span>
       <span class="settings-tab-sub">SMTP / Mailjet</span>
@@ -37,6 +38,13 @@
     </button>
   </div>
 
+  <section class="settings-tab-panel {{ 'active' if active_tab == 'display' else '' }}" id="panel-display" role="tabpanel" aria-labelledby="tab-display" data-settings-panel="display" {% if active_tab != 'display' %}hidden{% endif %}>
+    <form method="post" class="panel settings-panel-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="section" value="display">
+      <h2>Temperature units</h2><p class="muted">Applies to all users, temperature readings, charts, health thresholds, and alert notifications. Stored telemetry remains in Celsius.</p>
+      <label>Display temperatures in<select name="temperature_unit"><option value="C" {{ 'selected' if temperature_unit == 'C' else '' }}>Celsius (°C)</option><option value="F" {{ 'selected' if temperature_unit == 'F' else '' }}>Fahrenheit (°F)</option></select></label><button type="submit">Save display settings</button>
+    </form>
+  </section>
   <section class="settings-tab-panel {{ 'active' if active_tab == 'smtp' else '' }}" id="panel-smtp" role="tabpanel" aria-labelledby="tab-smtp" data-settings-panel="smtp" {% if active_tab != 'smtp' %}hidden{% endif %}>
     <form method="post" class="panel accent-panel settings-panel-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -116,7 +124,7 @@
   <section class="settings-tab-panel {{ 'active' if active_tab == 'health' else '' }}" id="panel-health" role="tabpanel" aria-labelledby="tab-health" data-settings-panel="health" {% if active_tab != 'health' %}hidden{% endif %}>
     <form method="post" class="panel accent-panel settings-panel-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="section" value="health">
+      <input type="hidden" name="section" value="health"><input type="hidden" name="threshold_temperature_unit" value="{{ temperature_unit }}">
       <div class="panel-title">
         <div>
           <div class="hero-kicker">Alert Policy</div>
@@ -129,8 +137,8 @@
       <div class="grid two settings-field-grid">
         <div class="field"><label for="settings-field-11">Pool capacity warning %</label><input id="settings-field-11" type="number" min="1" max="100" name="pool_capacity_warning" value="{{ values.pool_capacity_warning }}"></div>
         <div class="field"><label for="settings-field-12">Pool capacity critical %</label><input id="settings-field-12" type="number" min="1" max="100" name="pool_capacity_critical" value="{{ values.pool_capacity_critical }}"></div>
-        <div class="field"><label for="settings-field-13">Drive temperature warning °C</label><input id="settings-field-13" type="number" min="1" max="150" name="drive_temp_warning_c" value="{{ values.drive_temp_warning_c }}"></div>
-        <div class="field"><label for="settings-field-14">Drive temperature critical °C</label><input id="settings-field-14" type="number" min="1" max="150" name="drive_temp_critical_c" value="{{ values.drive_temp_critical_c }}"></div>
+        <div class="field"><label for="settings-field-13">Drive temperature warning °{{ temperature_unit }}</label><input id="settings-field-13" type="number" step="any" min="{{ temperature_value(1, temperature_unit) }}" max="{{ temperature_value(150, temperature_unit) }}" name="drive_temp_warning" value="{{ temperature_value(values.drive_temp_warning_c, temperature_unit) }}"></div>
+        <div class="field"><label for="settings-field-14">Drive temperature critical °{{ temperature_unit }}</label><input id="settings-field-14" type="number" step="any" min="{{ temperature_value(1, temperature_unit) }}" max="{{ temperature_value(150, temperature_unit) }}" name="drive_temp_critical" value="{{ temperature_value(values.drive_temp_critical_c, temperature_unit) }}"></div>
         <div class="field"><label for="settings-field-15">NVMe endurance warning (% used)</label><input id="settings-field-15" type="number" min="1" max="100" name="nvme_percentage_used_warning" value="{{ values.nvme_percentage_used_warning }}"></div>
         <div class="field"><label for="settings-field-16">NVMe endurance critical (% used)</label><input id="settings-field-16" type="number" min="1" max="100" name="nvme_percentage_used_critical" value="{{ values.nvme_percentage_used_critical }}"></div>
         <div class="field"><label for="settings-field-17">Scrub age warning (days, 0 disables)</label><input id="settings-field-17" type="number" min="0" max="3650" name="scrub_age_warning_days" value="{{ values.scrub_age_warning_days }}"></div>

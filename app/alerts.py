@@ -13,6 +13,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import Alert, Server, MaintenanceWindow
+from .display import temperature_message
 from .settings_store import get_bool, get_int, get_many, get_setting
 
 
@@ -301,8 +302,8 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
     )
     warn_cap = int(settings["pool_capacity_warning"] or 80)
     crit_cap = int(settings["pool_capacity_critical"] or 90)
-    warn_temp = int(settings["drive_temp_warning_c"] or 45)
-    crit_temp = int(settings["drive_temp_critical_c"] or 55)
+    warn_temp = float(settings["drive_temp_warning_c"] or 45)
+    crit_temp = float(settings["drive_temp_critical_c"] or 55)
     warn_nvme = int(settings["nvme_percentage_used_warning"] or 80)
     crit_nvme = int(settings["nvme_percentage_used_critical"] or 95)
     scrub_days = int(settings["scrub_age_warning_days"] or 35)
@@ -690,7 +691,7 @@ def deliver_pending_notifications(db: Session) -> int:
             lines.extend(
                 [
                     f"[{alert.severity.upper()}] {alert.title}",
-                    alert.message,
+                    temperature_message(alert.message, get_setting(db, "temperature_unit", "C")),
                     "",
                 ]
             )

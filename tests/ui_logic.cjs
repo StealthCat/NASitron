@@ -50,8 +50,9 @@ function dom(html) {
   assert.equal(tz.window.NASitronTime.toUTC('2026-11-01T01:30').toISOString(),'2026-11-01T05:30:00.000Z');
   tz.window.close();
 
-  const io=dom(`<select id="io-server"><option>1</option></select><select id="io-disk"><option>A</option></select><div id="io-compare"><input id="io-drive-search"><label><input type="checkbox" data-drive-compare value="B">Drive B</label><div id="io-selected"></div></div><p id="io-selection-state"></p><select id="io-compare-metric"><option value="read_bps">Read</option></select><form id="io-range-form"><select id="io-range"><option value="1">1h</option><option value="custom">Custom</option></select><input id="io-start"><input id="io-end"><input id="io-auto" type="checkbox"><div id="io-custom"></div></form><p id="io-range-error"></p><div id="io-comparisons"></div><div id="io-charts" data-server="1" data-identity="A"><article class="panel"><h2>Read</h2><canvas data-io-metric="read_bps" data-unit="bytes"></canvas></article></div>`);
-  let calls=0;io.window.fetch=async url=>{calls++;const u=new URL(url,'http://localhost');return {ok:true,json:async()=>({series:u.searchParams.getAll('pairs').map(p=>JSON.parse(p)).map(([name,scope])=>({scope,name,points:[{t:new Date().toISOString(),v:5,min:1,max:10}]}))})};};
+  for (const prefix of ['drive.io.', 'pool.']) {
+  const io=dom(`<select id="io-server"><option>1</option></select><select id="io-disk"><option>A</option></select><div id="io-compare"><input id="io-drive-search"><label><input type="checkbox" data-drive-compare value="B">Drive B</label><div id="io-selected"></div></div><p id="io-selection-state"></p><select id="io-compare-metric"><option value="read_bps">Read</option></select><form id="io-range-form"><select id="io-range"><option value="1">1h</option><option value="custom">Custom</option></select><input id="io-start"><input id="io-end"><input id="io-auto" type="checkbox"><div id="io-custom"></div></form><p id="io-range-error"></p><div id="io-comparisons"></div><div id="io-charts" data-metric-prefix="${prefix}" data-server="1" data-identity="A"><article class="panel"><h2>Read</h2><canvas data-io-metric="read_bps" data-unit="bytes"></canvas></article></div>`);
+  let calls=0;io.window.fetch=async url=>{calls++;const u=new URL(url,'http://localhost');assert.ok(u.searchParams.getAll('pairs').every(p=>JSON.parse(p)[0].startsWith(prefix)));return {ok:true,json:async()=>({series:u.searchParams.getAll('pairs').map(p=>JSON.parse(p)).map(([name,scope])=>({scope,name,points:[{t:new Date().toISOString(),v:5,min:1,max:10}]}))})};};
   io.window.eval(script);await tick();io.window.eval(fs.readFileSync('app/static/disk_io.js','utf8'));await tick();
   assert.equal(calls,1,'A disk page uses a single batched history request');
   const compare=io.window.document.querySelector('#io-compare');compare.querySelector('input[type=checkbox]').checked=true;compare.dispatchEvent(new io.window.Event('change'));await tick();
@@ -59,5 +60,12 @@ function dom(html) {
   assert.equal(io.window.document.querySelectorAll('#io-comparisons canvas').length,2);
   assert.match(io.window.document.querySelector('#io-charts .chart-status').textContent,/Updated/);
   io.window.close();
+  }
+  const temp=dom('<article class="panel"><h2>Temperature</h2><canvas></canvas></article>');
+  temp.window.eval(script);await tick();
+  temp.window.NASitronChart(temp.window.document.querySelector('canvas'),'',{temperatureUnit:'F',suffix:'°F',data:{points:[{t:new Date().toISOString(),v:45,min:40,max:50}]}});
+  await tick();
+  assert.match(temp.window.document.querySelector('details p').textContent,/Minimum 104.0°F; maximum 122.0°F; latest 113.0°F/);
+  temp.window.close();
   console.log('Chart race, inventory paging, and batched comparison checks passed');
 })().catch(e=>{console.error(e);process.exit(1)});

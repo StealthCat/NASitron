@@ -225,7 +225,7 @@
             <td><a href="/servers/{{ row.server.id }}/drive?identity={{ (drive.serial or drive.path)|urlencode }}"><strong>{{ drive.path }}</strong></a><div class="subtle">{{ drive.model or "Unknown model" }}</div></td>
             <td>{{ row.server.name }}</td>
             <td><span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
-            <td>{{ (smart.get('temperature_c') ~ "°C") if smart.get('temperature_c') is not none else "—" }}</td>
+            <td>{{ smart.get('temperature_c')|temperature }}</td>
             <td><span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
           </tr>
         {% else %}
@@ -251,7 +251,7 @@
           <tr>
             <td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td>
             <td>{{ alert.server.name }}</td>
-            <td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message }}</div></td>
+            <td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message|alert_temperature }}</div></td>
             <td>{{ alert.last_seen|fmt_dt }}</td>
           </tr>
         {% else %}

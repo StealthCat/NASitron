@@ -77,6 +77,7 @@ def install(app, templates):
                 "/datasets",
                 "/snapshots",
                 "/disk-io",
+                "/pool-io",
                 "/timeline",
                 "/forecasts",
                 "/operations",

@@ -171,8 +171,8 @@
         <td>{{ disk.size_bytes|human_bytes }}</td>
         <td>{{ disk.transport or "—" }}</td>
         <td>{% set health=smart_state(smart) %}<span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
-        <td>{{ (smart.get('temperature_c') ~ "°C") if smart.get('temperature_c') is not none else "—" }}</td>
-        <td>{{ (smart.get('power_on_hours') ~ " h") if smart.get('power_on_hours') is not none else "—" }}</td>
+        <td>{{ smart.get('temperature_c')|temperature }}</td>
+        <td data-sort="{{ smart.get('power_on_hours') if smart.get('power_on_hours') is not none else -1 }}"><span title="{{ smart.get('power_on_hours') }} hours (months ≈ 30 days; years ≈ 365 days)">{{ smart.get('power_on_hours')|power_on_duration }}</span></td>
         <td class="subtle">R {{ smart.get('reallocated_sectors', "—") }} · P {{ smart.get('pending_sectors', "—") }} · U {{ smart.get('offline_uncorrectable', "—") }}{% if smart.get('percentage_used') is not none %}<br>NVMe used {{ smart.get('percentage_used') }}% · media {{ smart.get('media_errors', 0) }}{% endif %}</td>
       </tr>
       {% endfor %}
@@ -232,7 +232,7 @@
   <div class="panel flush scroll">
     <table class="readable-table" data-table><thead><tr><th>Status</th><th>Severity</th><th>Alert</th><th>Last seen</th></tr></thead><tbody>
     {% for alert in alerts %}
-    <tr><td>{{ "Active" if alert.active else "Resolved" }}</td><td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td><td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message }}</div></td><td>{{ alert.last_seen|fmt_dt }}</td></tr>
+    <tr><td>{{ "Active" if alert.active else "Resolved" }}</td><td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td><td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message|alert_temperature }}</div></td><td>{{ alert.last_seen|fmt_dt }}</td></tr>
     {% endfor %}
     </tbody></table>
   </div>

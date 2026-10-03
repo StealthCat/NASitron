@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Pool I/O · NASitron{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="hero-kicker">Performance history</div><h1>Pool I/O</h1><p class="muted">Read and write throughput and operations for each ZFS pool.</p></div>{% if freshness %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>{% endif %}</div>
+{% if servers %}
+<section class="panel">
+<div class="io-filters">
+<label>Server<select id="io-server">{% for item in servers %}<option value="{{ item.id }}" {{ 'selected' if server.id == item.id else '' }}>{{ item.name }}</option>{% endfor %}</select></label>
+<label>Pool<select id="io-disk">{% for scope, pool in pools.items() %}<option data-label="{{ scope }}" value="{{ scope }}" {{ 'selected' if scope == identity else '' }}>{{ scope }}</option>{% endfor %}</select></label>
+</div>
+{% if pools %}
+<details class="section-block"><summary>Compare pools · up to four total</summary><div id="io-compare"><label>Find a pool<input id="io-drive-search" type="search" placeholder="Pool name"></label><div class="drive-choices">{% for scope,d in pools.items() %}{% if scope!=identity %}<label><input type="checkbox" value="{{ scope }}" data-drive-compare> {{ scope }}</label>{% endif %}{% endfor %}</div><div id="io-selected" class="selected-chips" aria-live="polite"></div></div><label>Comparison metric<select id="io-compare-metric">{% for k,l in [('read_bps','Read throughput'),('write_bps','Write throughput'),('read_iops','Read IOPS'),('write_iops','Write IOPS')] %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label><p class="subtle">Charts share time and value scales. Hover or use arrow keys to inspect the same time across pools.</p></details>
+<form id="io-range-form">
+<div class="io-filters">
+<label>Time period<select id="io-range"><option value="0.25">Last 15m</option><option value="1" selected>Last 1h</option><option value="6">Last 6h</option><option value="24">Last 24h</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option><option value="custom">Custom period</option></select></label>
+<div id="io-custom" class="io-filters" hidden><label>From<input id="io-start" type="datetime-local" step="1"></label><label>To<input id="io-end" type="datetime-local" step="1"></label></div>
+<button type="submit">Apply / Refresh</button><label><input id="io-auto" type="checkbox"> Auto refresh (60s)</label>
+</div><p id="io-range-error" role="alert" class="critical-text"></p>
+</form>
+<p class="subtle">Times use {{ display_timezone() }}. Repeated daylight-saving times select the earlier occurrence; nonexistent times are rejected. I/O is sampled for approximately 1 second every {{ server.poll_interval_seconds }} seconds, using ZFS pool counters. Short bursts between samples may not appear. Available history follows the configured retention period.</p>
+{% if not pools[identity].get('io') %}<p class="muted">No current I/O sample for this pool. Available historical samples are shown below. {% if not server.enabled %}Collection is disabled for this server.{% elif server.last_error %}The last collection failed: {{ server.last_error }}{% else %}{% for issue in snapshot.get("collection",{}).get("errors",[]) if issue.subsystem=="zfs.iostat" %}Collector report: {{ issue.message }}{% endfor %}{% endif %}</p>{% endif %}
+{% else %}<p class="muted">No pools have been collected on this server yet.</p>{% endif %}
+</section>
+{% if pools %}
+<p id="io-selection-state" role="status" class="subtle">Choose a time window to load history.</p><p class="subtle">Pink line: bucket average; the final fully covered point uses the latest reading. Boundary summaries are marked approximate. Shaded vertical range: observed minimum–maximum.</p><section id="io-comparisons" class="io-comparison-grid section-block" aria-label="Synchronized pool comparison"></section>
+<section class="grid two section-block" id="io-charts" data-metric-prefix="pool." data-item-label="pools" data-server="{{ server.id }}" data-identity="{{ identity }}">
+{% for key, label, unit in [('read_bps','Read throughput','bytes'),('write_bps','Write throughput','bytes'),('read_iops','Read operations',' IOPS'),('write_iops','Write operations',' IOPS')] %}
+<article class="panel chart-wrap"><h2>{{ label }}</h2><canvas class="chart" data-io-metric="{{ key }}" data-unit="{{ unit }}" aria-label="{{ label }} history"></canvas></article>
+{% endfor %}
+</section>
+<p class="subtle">Long time ranges show averages with min/max envelopes. Older history uses hourly or daily summaries; missing samples remain gaps.</p>
+{% endif %}
+<script defer src="/static/disk_io.js?v=0.10.0"></script>
+{% else %}<section class="panel"><p>Add a server to begin collecting pool I/O history.</p><a class="button" href="/servers/new">Add server</a></section>{% endif %}
+{% endblock %}

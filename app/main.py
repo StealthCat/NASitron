@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import gzip
 import hashlib
 import hmac
@@ -103,9 +104,22 @@ from .validation import (
     validate_threshold_pair,
 )
 
+from .display import temperature, temperature_value, power_on_duration, alert_temperature
+
 BASE_DIR = Path(__file__).resolve().parent
 INSTALLER_PATH = BASE_DIR.parent / "scripts" / "install-remote.sh"
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def display_context(request):
+    with SessionLocal() as db:
+        unit = get_setting(db, "temperature_unit", "C")
+    return {"temperature_unit": unit if unit in {"C", "F"} else "C"}
+
+
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"), context_processors=[display_context])
+templates.env.filters.update(temperature=temperature, power_on_duration=power_on_duration,
+                             alert_temperature=alert_temperature)
+templates.env.globals["temperature_value"] = temperature_value
 templates.env.globals["csrf_token"] = csrf_token
 templates.env.globals["display_timezone"] = lambda: user_timezone.get()
 _instance_lock = InstanceLock()
@@ -2068,6 +2082,7 @@ def delete_web_user(
 def settings_page(request: Request, db: Session = Depends(get_db)):
     keys = [
         "smtp_enabled",
+        "temperature_unit",
         "email_transport",
         "mailjet_api_url",
         "smtp_host",
@@ -2099,7 +2114,7 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
     values["mailjet_secret_key_configured"] = bool(get_setting(db, "mailjet_secret_key"))
     values["tls_status"] = manual_certificate_status()
     active_tab = request.query_params.get("tab", "smtp").strip().lower()
-    if active_tab not in {"smtp", "health", "history", "enrollment", "tls"}:
+    if active_tab not in {"smtp", "health", "history", "enrollment", "tls", "display"}:
         active_tab = "smtp"
     return templates.TemplateResponse(
         request=request,
@@ -2115,6 +2130,10 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
 @app.post("/settings")
 def save_settings(
     section: str = Form("all"),
+    temperature_unit: str | None = Form(None),
+    threshold_temperature_unit: str = Form("C"),
+    drive_temp_warning: float | None = Form(None),
+    drive_temp_critical: float | None = Form(None),
     smtp_enabled: bool = Form(False),
     email_transport: str = Form("smtp"),
     mailjet_api_url: str = Form("https://api.mailjet.com/v3.1/send"),
@@ -2143,10 +2162,15 @@ def save_settings(
     db: Session = Depends(get_db),
 ):
     section = section.strip().lower()
-    if section not in {"all", "smtp", "health", "history"}:
+    if section not in {"all", "smtp", "health", "history", "display"}:
         bad_request("Unknown settings section.")
 
     saved_sections: list[str] = []
+    if section in {"all", "display"} and (temperature_unit is not None or section == "display"):
+        if temperature_unit not in {"C", "F"}:
+            bad_request("Temperature unit must be C or F.")
+        set_setting(db, "temperature_unit", temperature_unit)
+        saved_sections.append("Display")
 
     if section in {"all", "smtp"}:
         transport = email_transport.strip().lower()
@@ -2230,9 +2254,18 @@ def save_settings(
         warn_cap, crit_cap = validate_threshold_pair(
             pool_capacity_warning, pool_capacity_critical, "Pool capacity", 1, 100
         )
-        warn_temp, crit_temp = validate_threshold_pair(
-            drive_temp_warning_c, drive_temp_critical_c, "Drive temperature", 1, 150
-        )
+        if threshold_temperature_unit not in {"C", "F"}:
+            bad_request("Temperature unit must be C or F.")
+        if (drive_temp_warning is None) != (drive_temp_critical is None):
+            bad_request("Both temperature thresholds are required.")
+        if drive_temp_warning is not None:
+            warn_temp, crit_temp = drive_temp_warning, drive_temp_critical
+            if threshold_temperature_unit == "F":
+                warn_temp, crit_temp = (round((v - 32) * 5 / 9, 10) for v in (warn_temp, crit_temp))
+        else:
+            warn_temp, crit_temp = drive_temp_warning_c, drive_temp_critical_c
+        if not all(math.isfinite(v) and 1 <= v <= 150 for v in (warn_temp, crit_temp)) or warn_temp >= crit_temp:
+            bad_request("Temperature thresholds must be between 1°C and 150°C (33.8°F–302°F), with warning below critical.")
         warn_nvme, crit_nvme = validate_threshold_pair(
             nvme_percentage_used_warning,
             nvme_percentage_used_critical,

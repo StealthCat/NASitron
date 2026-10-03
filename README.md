@@ -1,5 +1,13 @@
 # NASitron
 
+> **0.10.1:** Assigned drives leave the available bay-assignment list, show full
+> drive details in their bays, and display their enclosure/bay under detected drives.
+>
+> **0.10:** Statistics → Pool I/O now provides per-pool throughput and IOPS history,
+> comparisons, preset/custom time ranges, and auto-refresh. Settings → Display selects
+> Celsius or Fahrenheit for all users. Drive power-on age automatically uses hours,
+> days, months (30 days), or years (365 days), with exact hours available on hover.
+>
 > **0.9:** Enclosure layouts with empty/missing bays, searchable drive comparisons,
 > saved monitoring views and per-user timezones in the same navy/pink UI.
 > Faster inventory/history queries, clearer collection states, configurable summary

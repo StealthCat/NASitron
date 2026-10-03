@@ -5,7 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 APP_NAME = "NASitron"
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.10.1"
 
 _CONFIG_ERRORS: list[str] = []
 
@@ -85,6 +85,7 @@ DEFAULT_SETTINGS = {
     "smtp_ssl": "false",
     "pool_capacity_warning": "80",
     "pool_capacity_critical": "90",
+    "temperature_unit": "C",
     "drive_temp_warning_c": "45",
     "drive_temp_critical_c": "55",
     "nvme_percentage_used_warning": "80",

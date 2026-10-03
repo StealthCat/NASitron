@@ -119,7 +119,8 @@ with SessionLocal() as db:
                 db.add(Metric(server_id=sid, name="drive.io." + key, scope=scope,
                               value=value, captured_at=now - timedelta(minutes=minutes)))
     enclosure=Enclosure(server_id=sid,name="Enclosure A",rows=5,columns=5)
-    db.add(enclosure);db.flush()
+    db.add(enclosure)
+    db.flush()
     db.add(BayAssignment(enclosure_id=enclosure.id,slot=1,identity="DEMO-001"))
     db.add(BayAssignment(enclosure_id=enclosure.id,slot=2,identity="MISSING-DEMO"))
     for i in range(25):

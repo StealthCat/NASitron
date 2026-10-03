@@ -9,6 +9,7 @@
   server?.addEventListener('change',()=>navigate('server_id',server.value));
   disk?.addEventListener('change',()=>navigate('identity',disk.value));
   const charts=document.getElementById('io-charts'); if (!charts) return;
+  const prefix=charts.dataset.metricPrefix || 'drive.io.', itemLabel=charts.dataset.itemLabel || 'drives';
   const form=document.getElementById('io-range-form'), range=document.getElementById('io-range');
   const start=document.getElementById('io-start'), end=document.getElementById('io-end');
   const error=document.getElementById('io-range-error'), auto=document.getElementById('io-auto');
@@ -39,7 +40,7 @@
     error.textContent='';
     chips();
     const extra=checks.filter(o=>o.checked).map(o=>o.value).filter(s=>s!==charts.dataset.identity);
-    if(extra.length>3) {error.textContent='Choose up to three additional drives (four total).';return;}
+    if(extra.length>3) {error.textContent=`Choose up to three additional ${itemLabel} (four total).`;return;}
     let windowRange;
     const url=new URL(location.href);
     for(const key of ['hours','start','end','compare','compare_metric']) url.searchParams.delete(key);
@@ -55,8 +56,8 @@
     const activeController=controller, timeout=setTimeout(()=>activeController.abort(),15000);
     const canvases=[...charts.querySelectorAll('canvas')];
     const query=new URLSearchParams(windowRange);
-    canvases.forEach(c=>query.append('pairs',JSON.stringify(['drive.io.'+c.dataset.ioMetric,charts.dataset.identity])));
-    const scopes=[charts.dataset.identity,...extra];extra.forEach(scope=>query.append('pairs',JSON.stringify(['drive.io.'+metric.value,scope])));
+    canvases.forEach(c=>query.append('pairs',JSON.stringify([prefix+c.dataset.ioMetric,charts.dataset.identity])));
+    const scopes=[charts.dataset.identity,...extra];extra.forEach(scope=>query.append('pairs',JSON.stringify([prefix+metric.value,scope])));
     selectionState.textContent='Loading selected window; visible charts still show the previous selection until this completes.';
     charts.classList.add('history-pending');comparison.classList.add('history-pending');
     charts.setAttribute('aria-busy','true');error.textContent='Loading shared history…';
@@ -64,7 +65,7 @@
       const response=await fetch(`/api/servers/${charts.dataset.server}/metrics/batch?${query}`,{signal:activeController.signal,cache:'no-store'});
       if(!response.ok) throw new Error(response.status===401?'Session expired; sign in again.':`History unavailable (${response.status}).`);
       const data=await response.json();if(request!==generation) return;
-      const series=(scope,key)=>data.series.find(s=>s.scope===scope&&s.name==='drive.io.'+key);
+      const series=(scope,key)=>data.series.find(s=>s.scope===scope&&s.name===prefix+key);
       const options=(c,scope)=>({data:series(scope,c.dataset.ioMetric),range:windowRange,minZero:true,bytes:c.dataset.unit==='bytes',suffix:c.dataset.unit==='bytes'?'':c.dataset.unit,max100:c.dataset.ioMetric==='busy_pct'});
       canvases.forEach(c=>NASitronChart(c,'',options(c,charts.dataset.identity)));
       comparison.querySelectorAll('canvas').forEach(c=>c._dispose?.());comparison.replaceChildren();

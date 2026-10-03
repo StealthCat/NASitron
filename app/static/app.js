@@ -208,9 +208,10 @@ window.NASitronChart = function(canvas, source, options = {}) {
       if (disposed || requestId !== generation) return;
       windowStart = Date.parse(data.start || options.range?.start) || undefined;
       windowEnd = Date.parse(data.end || options.range?.end) || undefined;
+      const displayValue = value => options.temperatureUnit === 'F' ? Number(value) * 9 / 5 + 32 : Number(value);
       points = (data.points || []).filter(p => p.v !== null).map(p => ({
         t: Date.parse(p.t),
-        resolution: Math.max(data.expected_interval_seconds || 60, p.resolution_seconds || data.bucket_seconds || 1), partial: !!p.partial, coverage: [p.coverage_start,p.coverage_end], v: Number(p.v), low: Number(p.min ?? p.v), high: Number(p.max ?? p.v)
+        resolution: Math.max(data.expected_interval_seconds || 60, p.resolution_seconds || data.bucket_seconds || 1), partial: !!p.partial, coverage: [p.coverage_start,p.coverage_end], v: displayValue(p.v), low: displayValue(p.min ?? p.v), high: displayValue(p.max ?? p.v)
       })).filter(p => Number.isFinite(p.t) && Number.isFinite(p.v)).sort((a, b) => a.t - b.t);
       status.textContent = points.length ? 'Updated ' + NASitronTime.format(Date.now(),{hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' · ' + (data.sample_count ?? points.length) + ' readings / ' + points.length + ' buckets · timezone ' + NASitronTime.zone + '' + (data.retained_resolution_seconds > 1 ? ' · retained resolution ' + (data.retained_resolution_seconds / 3600) + 'h' : '') : 'No samples in this time range.';
       if (data.partial_bucket_count) status.textContent += ' · ' + data.partial_bucket_count + ' overlapping summary buckets (approximate boundaries)';
@@ -404,7 +405,7 @@ function inventory(table, index) {
     const text = cell.textContent.trim();
     const size = text.match(/^([\d.]+)\s*(KiB|MiB|GiB|TiB|PiB|B)(?:$|\/)/);
     if (size) return Number(size[1]) * 1024 ** (['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'].indexOf(size[2]));
-    if (/^[-+]?\d+(\.\d+)?(?:%|x|°C| h)?$/.test(text)) return parseFloat(text);
+    if (/^[-+]?\d+(\.\d+)?(?:%|x|°[CF]| h)?$/.test(text)) return parseFloat(text);
     return text;
   }
 

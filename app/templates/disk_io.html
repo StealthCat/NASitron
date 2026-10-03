@@ -31,6 +31,6 @@
 <p class="subtle">Latency includes queueing and is unavailable when no operations complete. Busy time is not a measure of maximum throughput on parallel devices such as NVMe. Long time ranges show averages with min/max envelopes. Older history uses hourly or daily summaries; missing samples remain gaps.</p>
 {% endif %}
 {% if busiest %}<section class="panel section-block"><h2>Busiest drives · latest one-second sample</h2><p class="subtle">Ranked by sampled busy time, not maximum device capability. Check the server freshness above.</p><div class="scroll"><table class="readable-table"><thead><tr><th>Drive</th><th>Busy</th><th>Read / second</th><th>Write / second</th></tr></thead><tbody>{% for d in busiest %}<tr><td><a href="/disk-io?server_id={{ server.id }}&identity={{ (d.serial or d.path)|urlencode }}">{{ d.path }}</a></td><td>{{ '%.1f'|format(d.io.busy_pct) }}%</td><td>{{ d.io.read_bps|human_bytes }}</td><td>{{ d.io.write_bps|human_bytes }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
-<script defer src="/static/disk_io.js"></script>
+<script defer src="/static/disk_io.js?v=0.10.0"></script>
 {% else %}<section class="panel"><p>Add a server to begin collecting disk I/O history.</p><a class="button" href="/servers/new">Add server</a></section>{% endif %}
 {% endblock %}

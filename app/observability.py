@@ -100,16 +100,6 @@ def install(app, templates):
                         + quote(identity, safe=""),
                     }
                 )
-            disks.sort(
-                key=lambda d: (
-                    d["label"] == "Unlabeled",
-                    tuple(
-                        (0, int(part)) if part.isdigit() else (1, part.casefold())
-                        for part in re.split(r"(\d+)", d["label"])
-                    ),
-                    d["identity"],
-                )
-            )
             groups.append(
                 {
                     "server": s,
@@ -139,6 +129,11 @@ def install(app, templates):
                 slots = []
                 for number in range(1, enclosure.rows * enclosure.columns + 1):
                     identity = assignments.get((enclosure.id, number), "")
+                    if identity in disks:
+                        drive = disks[identity]
+                        drive["location"] = f"{enclosure.name} · Bay {number}"
+                        if drive["label"] == "Unlabeled":
+                            drive["label"] = drive["location"]
                     slots.append(
                         {
                             "number": number,
@@ -147,6 +142,19 @@ def install(app, templates):
                         }
                     )
                 group["enclosures"].append({"config": enclosure, "slots": slots})
+            group["available_disks"] = [
+                d for d in group["disks"] if d["disk"].get("serial") and not d.get("location")
+            ]
+            group["disks"].sort(
+                key=lambda d: (
+                    d["label"] == "Unlabeled",
+                    tuple(
+                        (0, int(part)) if part.isdigit() else (1, part.casefold())
+                        for part in re.split(r"(\d+)", d["label"])
+                    ),
+                    d["identity"],
+                )
+            )
         return templates.TemplateResponse(
             request=request,
             name="drive_bays.html",
