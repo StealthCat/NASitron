@@ -63,6 +63,8 @@ def test_personal_views_enclosures_policy_and_input_bounds():
                     payload_json=json.dumps(
                         {"drives": [{"serial": "stable", "path": "/dev/sda",
                             "size_bytes": 1024**4, "model": "Bay test HDD",
+                            "zfs_memberships": [{"pool": "tank", "role": "data"},
+                                                {"pool": "backup", "role": "cache"}],
                             "smart": {"temperature_c": 35, "power_on_hours": 8760,
                                       "sampled_at": "2026-10-02T12:00:00Z"}}]}
                     ),
@@ -123,7 +125,7 @@ def test_personal_views_enclosures_policy_and_input_bounds():
             assert "Rack · Bay 1" in page
             assert "Unlabeled" not in page
             bay, detected = page.split("<h3>Detected drives</h3>")
-            for detail in ("Bay test HDD", "1.0 TiB", "35°C", "1 year", "2026-10-02"):
+            for detail in ("Bay test HDD", "1.0 TiB", "35°C", "1 year", "2026-10-02", "tank · Data", "backup · L2ARC / cache"):
                 assert detail in bay and detail in detected
             assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="").status_code == 303
             page = client.get(f"/drive-bays?server={sid}").text

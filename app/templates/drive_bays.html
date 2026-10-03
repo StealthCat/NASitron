@@ -1,9 +1,11 @@
-{% extends 'base.html' %}{% block title %}Drive bays · NASitron<script defer src="/static/drive_bays.js?v=0.10.2"></script>
-{% endblock %}{% macro drive_details(b) %}
+{% extends 'base.html' %}{% block title %}Drive bays · NASitron{% endblock %}{% macro drive_details(b) %}
 <span class="badge {{ b.health[0] }}">{{ b.health[1] }}</span>
 <span>{{ b.disk.path }} · {{ b.disk.get('size_bytes')|human_bytes }}</span>
 <span class="subtle">{{ b.disk.get('model') or 'Unknown model' }}{% if b.disk.get('transport') %} · {{ b.disk.transport }}{% endif %}</span>
 <span class="subtle">{{ b.identity }}</span>
+{% for member in b.disk.get('zfs_memberships', []) %}
+<span class="badge" title="Pool membership and drive role">{{ member.pool }} · {{ {'data':'Data', 'logs':'SLOG / log', 'log':'SLOG / log', 'cache':'L2ARC / cache', 'special':'Special', 'dedup':'Dedup', 'spares':'Spare', 'spare':'Spare'}.get(member.role, member.role|replace('_', ' ')|title) }}</span>
+{% else %}<span class="subtle">No detected pool membership</span>{% endfor %}
 <span class="subtle">Temperature {{ (b.disk.smart or {}).get('temperature_c')|temperature }} · Power-on {{ (b.disk.smart or {}).get('power_on_hours')|power_on_duration }}</span>
 <span class="subtle">SMART {{ (b.disk.smart or {}).get('sampled_at')|fmt_dt }}</span>
 {% endmacro %}

@@ -1,5 +1,7 @@
 # NASitron
 
+> **0.10.3:** Drive bay and detected-drive tiles show each pool membership and role.
+>
 > **0.10.2:** Click an empty drive bay to assign an available drive in a popup.
 >
 > **0.10.1:** Assigned drives leave the available bay-assignment list, show full
