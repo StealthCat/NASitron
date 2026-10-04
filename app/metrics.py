@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .devices import is_zvol
+
 from datetime import datetime
 import math
 from typing import Any
@@ -108,6 +110,8 @@ def store_metrics(
             for key in IO_KEYS:
                 _row(rows, server_id, captured_at, f"drive.io.{key}",
                      (disk.get("io") or {}).get(key), scope)
+        if is_zvol(disk):
+            continue
         smart = disk.get("smart") or {}
         if smart.get("stale") or not smart.get("data_available"):
             continue

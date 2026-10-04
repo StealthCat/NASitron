@@ -1,5 +1,8 @@
 # NASitron
 
+> **0.10.5:** Linux ZFS volume devices (`/dev/zdN`) are labeled as virtual volumes,
+> with SMART checks and physical bay/replacement assignment disabled.
+>
 > **0.10.4:** The Drives inventory now resolves locations from drive-bay assignments,
 > falling back to manual labels when no bay is assigned.
 >

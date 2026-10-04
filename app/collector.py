@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .devices import is_zvol
+
 import base64
 import fcntl
 import hashlib
@@ -478,7 +480,7 @@ class SSHCollector:
     def _disk_paths(nodes: list[dict[str, Any]]) -> list[str]:
         paths: list[str] = []
         for node in nodes:
-            if node.get("type") == "disk" and node.get("path"):
+            if node.get("type") == "disk" and node.get("path") and not is_zvol(node):
                 paths.append(str(node["path"]))
             paths.extend(SSHCollector._disk_paths(node.get("children") or []))
         return sorted(set(paths))

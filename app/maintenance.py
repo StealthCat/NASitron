@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .devices import is_zvol
+
 import copy
 import json
 import shlex
@@ -267,7 +269,9 @@ done""",
 
         stable_path = _best_stable_path(stable_map.get(path, []))
         reason = ""
-        if stable_path is None:
+        if is_zvol(disk):
+            reason = "ZFS virtual volume; not a physical replacement disk"
+        elif stable_path is None:
             reason = "no stable /dev/disk/by-id whole-disk identifier"
         elif _node_has_usage(disk):
             reason = "filesystem, partition table, UUID, mountpoint, or child device present"

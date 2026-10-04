@@ -1,25 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Drives · NASitron{% endblock %}
 {% block content %}
-<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">Physical Storage</div><h1>Drives</h1><p class="muted">Full physical-disk inventory reported by <code>lsblk</code>. This page does not truncate the list.</p></div></div>
+<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">Physical Storage</div><h1>Drives</h1><p class="muted">Block-device inventory, including ZFS virtual volumes, reported by <code>lsblk</code>. This page does not truncate the list.</p></div></div>
 {% if inventory_warnings %}<div class="message"><strong>Drive inventory warning:</strong> the latest inventory was stale or failed for {{ inventory_warnings|map(attribute='name')|join(', ') }}. Retained last-known data may be shown until the next successful poll.</div>{% endif %}
 <section class="grid four">
-  <div class="metric-card"><div class="metric-icon"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3"/><circle cx="12" cy="9" r="3"/></svg></div><div><div class="metric-label">Physical drives</div><div class="metric-value">{{ drive_rows|length }}</div><div class="metric-sub">All monitored servers</div></div></div>
+  <div class="metric-card"><div class="metric-icon"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3"/><circle cx="12" cy="9" r="3"/></svg></div><div><div class="metric-label">Physical drives</div><div class="metric-value">{{ physical_drive_count }}</div><div class="metric-sub">All monitored servers</div></div></div>
   <div class="metric-card"><div class="metric-icon good"><svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg></div><div><div class="metric-label">ZFS assigned</div><div class="metric-value">{{ assigned_drives }}</div></div></div>
   <div class="metric-card"><div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M4 12h16M12 4v16"/></svg></div><div><div class="metric-label">Unassigned</div><div class="metric-value">{{ unassigned_drives }}</div></div></div>
   <div class="metric-card"><div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19Z"/><path d="M12 9v5M12 17h.01"/></svg></div><div><div class="metric-label">SMART attention</div><div class="metric-value">{{ failed_drives }}</div><div class="metric-sub">{{ unknown_smart }} unknown</div></div></div>
 </section>
 <section class="section-block panel flush">
-  <div class="panel-title" style="padding:16px 16px 0"><h2>Complete Drive Inventory</h2><span class="badge">{{ drive_rows|length }} shown</span></div>
+  <div class="panel-title" style="padding:16px 16px 0"><h2>Drive and Volume Inventory</h2><span class="badge">{{ drive_rows|length }} shown</span></div>
   <div class="scroll"><table class="readable-table" data-table="drives"><thead><tr><th>#</th><th>Device</th><th>Server</th><th>ZFS Role</th><th>Model / Serial</th><th>Size</th><th>Transport</th><th>SMART</th><th>Temp</th><th>Power-on</th><th>Indicators</th></tr></thead><tbody>
   {% for row in drive_rows %}{% set disk = row.drive %}{% set smart = disk.smart or {} %}
-  <tr data-server="{{ row.server.name }}" data-health="{{ smart_state(smart)[1] }}">
+  <tr data-server="{{ row.server.name }}" data-health="{{ drive_health(disk)[1] }}">
     <td class="subtle">{{ loop.index }}</td>
-    <td><span class="table-device"><span class="device-dot"></span><a href="/servers/{{ row.server.id }}/drive?identity={{ (disk.serial or disk.path)|urlencode }}"><strong>{{ disk.path }}</strong></a></span><div class="subtle">{{ disk.bay_label or "Location not labeled" }}</div><div class="subtle">{{ "HDD" if disk.rotational else "SSD/NVMe" }}</div></td>
+    <td><span class="table-device"><span class="device-dot"></span><a href="/servers/{{ row.server.id }}/drive?identity={{ (disk.serial or disk.path)|urlencode }}"><strong>{{ disk.path }}</strong></a></span><div class="subtle">{{ "Virtual device · no physical bay" if is_zvol(disk) else (disk.bay_label or "Location not labeled") }}</div><div class="subtle">{{ device_label(disk) }}</div></td>
     <td><a href="/servers/{{ row.server.id }}">{{ row.server.name }}</a></td>
     <td>{% for member in disk.zfs_memberships %}<span class="badge">{{ member.pool }} · {{ member.role }}</span>{% else %}<span class="subtle">Unassigned</span>{% endfor %}</td>
     <td>{{ disk.model or "—" }}<div class="subtle">{{ disk.serial or "No serial" }}</div></td><td>{{ disk.size_bytes|human_bytes }}</td><td>{{ disk.transport or "—" }}</td>
-    <td>{% set freshness=server_state(row.server,row.snapshot) %}{% if freshness[0] != 'good' %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>{% endif %}{% set health=smart_state(smart) %}<span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
+    <td>{% set freshness=server_state(row.server,row.snapshot) %}{% if freshness[0] != 'good' %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>{% endif %}{% set health=drive_health(disk) %}<span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
     <td>{{ smart.get('temperature_c')|temperature }}</td><td data-sort="{{ smart.get('power_on_hours') if smart.get('power_on_hours') is not none else -1 }}"><span title="{{ smart.get('power_on_hours') }} hours (months ≈ 30 days; years ≈ 365 days)">{{ smart.get('power_on_hours')|power_on_duration }}</span></td>
     <td class="subtle">R {{ smart.get('reallocated_sectors', "—") }} · P {{ smart.get('pending_sectors', "—") }} · U {{ smart.get('offline_uncorrectable', "—") }}{% if smart.get('percentage_used') is not none %}<br>NVMe used {{ smart.get('percentage_used') }}% · media {{ smart.get('media_errors', 0) }}{% endif %}</td>
   </tr>

@@ -1,5 +1,7 @@
 """Read-only fleet diagnostics, physical labels and a bounded event timeline."""
 
+from .devices import is_zvol
+
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
@@ -94,8 +96,8 @@ def install(app, templates):
                     {
                         "disk": d,
                         "identity": identity,
-                        "label": labels.get((s.id, identity), "") or "Unlabeled",
-                        "health": smart_state(d.get("smart")),
+                        "label": "ZFS virtual volume (zvol)" if is_zvol(d) else (labels.get((s.id, identity), "") or "Unlabeled"),
+                        "health": ("unknown", "SMART not applicable") if is_zvol(d) else smart_state(d.get("smart")),
                         "url": f"/servers/{s.id}/drive?identity="
                         + quote(identity, safe=""),
                     }
@@ -143,7 +145,7 @@ def install(app, templates):
                     )
                 group["enclosures"].append({"config": enclosure, "slots": slots})
             group["available_disks"] = [
-                d for d in group["disks"] if d["disk"].get("serial") and not d.get("location")
+                d for d in group["disks"] if d["disk"].get("serial") and not is_zvol(d["disk"]) and not d.get("location")
             ]
             group["disks"].sort(
                 key=lambda d: (

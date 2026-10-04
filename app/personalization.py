@@ -1,5 +1,7 @@
 """User display preferences, saved routes, and operator-managed enclosure slots."""
 
+from .devices import is_zvol
+
 from contextvars import ContextVar
 from urllib.parse import urlsplit
 from zoneinfo import available_timezones
@@ -167,7 +169,7 @@ def install(app, templates):
             raise HTTPException(400, "Select a drive to assign.")
         if identity:
             disks = (latest_snapshot(db, enclosure.server_id) or {}).get("drives", [])
-            if not any(d.get("serial") == identity for d in disks):
+            if not any(d.get("serial") == identity and not is_zvol(d) for d in disks):
                 raise HTTPException(
                     400,
                     "Choose a currently detected drive with a stable serial number.",

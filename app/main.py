@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .devices import is_zvol, device_label, drive_health
+
 import math
 import gzip
 import hashlib
@@ -177,7 +179,7 @@ def fmt_dt(value) -> str:
 templates.env.filters["human_bytes"] = human_bytes
 templates.env.filters["human_duration"] = human_duration
 templates.env.filters["fmt_dt"] = fmt_dt
-templates.env.globals.update(server_state=server_state, smart_state=smart_state,
+templates.env.globals.update(is_zvol=is_zvol, device_label=device_label, drive_health=drive_health, server_state=server_state, smart_state=smart_state,
                              pool_state=pool_state, effective_role=effective_role,
                              operation_status=operation_status, alert_target=alert_target)
 
@@ -696,7 +698,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         for drive in snapshot.get("drives", []):
             drive_rows.append({"server": server, "drive": drive, "snapshot": snapshot})
             smart = drive.get("smart") or {}
-            if smart.get("smart_passed") is False:
+            if not is_zvol(drive) and smart.get("smart_passed") is False:
                 failed_drives += 1
                 if maintenance_server is None:
                     maintenance_server = server
@@ -1042,6 +1044,8 @@ def drives_index(request: Request, db: Session = Depends(get_db)):
     assigned = 0
     for row in data["drive_rows"]:
         drive = row["drive"]
+        if is_zvol(drive):
+            continue
         smart = drive.get("smart") or {}
         if smart.get("smart_passed") is False:
             failed += 1
@@ -1056,10 +1060,11 @@ def drives_index(request: Request, db: Session = Depends(get_db)):
         context={
             "request": request,
             **data,
+            "physical_drive_count": sum(not is_zvol(r["drive"]) for r in data["drive_rows"]),
             "failed_drives": failed,
             "unknown_smart": unknown,
             "assigned_drives": assigned,
-            "unassigned_drives": max(0, len(data["drive_rows"]) - assigned),
+            "unassigned_drives": max(0, sum(not is_zvol(r["drive"]) for r in data["drive_rows"]) - assigned),
         },
     )
 

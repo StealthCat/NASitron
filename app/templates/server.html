@@ -165,12 +165,12 @@
       {% for disk in snapshot.drives %}
       {% set smart = disk.smart or {} %}
       <tr>
-        <td><span class="table-device"><span class="device-dot"></span><a href="/servers/{{ server.id }}/drive?identity={{ (disk.serial or disk.path)|urlencode }}"><strong>{{ disk.path }}</strong></a></span><div class="subtle">{{ "HDD" if disk.rotational else "SSD/NVMe" }}</div></td>
+        <td><span class="table-device"><span class="device-dot"></span><a href="/servers/{{ server.id }}/drive?identity={{ (disk.serial or disk.path)|urlencode }}"><strong>{{ disk.path }}</strong></a></span><div class="subtle">{{ device_label(disk) }}</div></td>
         <td>{% for member in disk.zfs_memberships %}<span class="badge">{{ member.pool }} · {{ member.role }}</span>{% else %}<span class="subtle">Unassigned</span>{% endfor %}</td>
         <td>{{ disk.model or "—" }}<div class="subtle">{{ disk.serial or "No serial" }}</div></td>
         <td>{{ disk.size_bytes|human_bytes }}</td>
         <td>{{ disk.transport or "—" }}</td>
-        <td>{% set health=smart_state(smart) %}<span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
+        <td>{% set health=drive_health(disk) %}<span class="badge {{ health[0] }}">{{ health[1] }}</span>{% if smart.get('stale') %}<span class="badge">Last known · {{ smart.get('sampled_at')|fmt_dt }}</span>{% endif %}</td>
         <td>{{ smart.get('temperature_c')|temperature }}</td>
         <td data-sort="{{ smart.get('power_on_hours') if smart.get('power_on_hours') is not none else -1 }}"><span title="{{ smart.get('power_on_hours') }} hours (months ≈ 30 days; years ≈ 365 days)">{{ smart.get('power_on_hours')|power_on_duration }}</span></td>
         <td class="subtle">R {{ smart.get('reallocated_sectors', "—") }} · P {{ smart.get('pending_sectors', "—") }} · U {{ smart.get('offline_uncorrectable', "—") }}{% if smart.get('percentage_used') is not none %}<br>NVMe used {{ smart.get('percentage_used') }}% · media {{ smart.get('media_errors', 0) }}{% endif %}</td>

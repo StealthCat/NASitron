@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .devices import is_zvol
+
 from .disk_io import parse_disk_io
 from .pool_capacity import parse_capacity
 
@@ -696,7 +698,9 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
 
     for disk in disks:
         smart_result = smart_map.get(disk["path"])
-        if smart_sampled:
+        if is_zvol(disk):
+            smart = {"data_available": False, "not_applicable": True}
+        elif smart_sampled:
             if smart_result:
                 smart = parse_smart(
                     smart_result.get("stdout", ""),

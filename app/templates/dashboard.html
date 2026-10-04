@@ -220,7 +220,7 @@
         <tbody>
         {% for row in drive_rows %}
           {% set drive = row.drive %}
-          {% set smart = drive.smart or {} %}{% set health = smart_state(smart) %}
+          {% set smart = drive.smart or {} %}{% set health = drive_health(drive) %}
           <tr>
             <td><a href="/servers/{{ row.server.id }}/drive?identity={{ (drive.serial or drive.path)|urlencode }}"><strong>{{ drive.path }}</strong></a><div class="subtle">{{ drive.model or "Unknown model" }}</div></td>
             <td>{{ row.server.name }}</td>

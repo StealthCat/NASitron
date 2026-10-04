@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .devices import is_zvol
+
 import base64
 import json
 import smtplib
@@ -468,6 +470,8 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
                 pass
 
     for disk in snapshot.get("drives", []):
+        if is_zvol(disk):
+            continue
         smart = disk.get("smart") or {}
         ident = str(disk.get("serial") or disk.get("path") or "unknown")
         display = str(disk.get("model") or disk.get("path") or ident)

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Disk I/O · NASitron{% endblock %}
 {% block content %}
-<div class="page-head"><div><div class="hero-kicker">Performance history</div><h1>Disk I/O</h1><p class="muted">Read and write activity for each physical disk, including disks outside ZFS pools.</p></div>{% if freshness %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>{% endif %}</div>
+<div class="page-head"><div><div class="hero-kicker">Performance history</div><h1>Disk I/O</h1><p class="muted">Read and write activity for block devices, including physical disks and ZFS virtual volumes.</p></div>{% if freshness %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>{% endif %}</div>
 {% if servers %}
 <section class="panel">
 <div class="io-filters">
