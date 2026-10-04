@@ -54,7 +54,7 @@ from .middleware import (
     RequireHTTPSMiddleware,
     SecurityHeadersMiddleware,
 )
-from .models import Alert, CurrentState, MaintenanceAction, RemoteEnrollment, Server, WebUser, DriveLabel
+from .models import Alert, CurrentState, MaintenanceAction, RemoteEnrollment, Server, WebUser, DriveLabel, Enclosure, BayAssignment
 from .scheduler import start_scheduler, stop_scheduler, trigger_now
 from .security import (
     SESSION_COOKIE_NAME,
@@ -848,9 +848,21 @@ def _inventory_rows(db: Session) -> dict:
             drive_rows.append({"server": server, "drive": drive, "snapshot": snapshot})
 
     labels = {(r.server_id, r.identity): r.label for r in db.scalars(select(DriveLabel))}
+    # Resolve current layout assignments on every request; serials are scoped to
+    # their server and no duplicate labels need to be persisted or synchronized.
+    bay_locations = {
+        (server_id, identity): f"{name} · Bay {slot}"
+        for server_id, identity, name, slot in db.execute(
+            select(Enclosure.server_id, BayAssignment.identity,
+                   Enclosure.name, BayAssignment.slot)
+            .join(BayAssignment, BayAssignment.enclosure_id == Enclosure.id)
+        )
+    }
     for row in drive_rows:
         disk = row["drive"]
-        disk["bay_label"] = labels.get((row["server"].id, disk.get("serial")), "")
+        identity = disk.get("serial") or disk.get("path") or ""
+        key = (row["server"].id, identity)
+        disk["bay_label"] = bay_locations.get(key) or labels.get(key, "")
     pool_rows.sort(
         key=lambda row: (
             row["server"].name.lower(),

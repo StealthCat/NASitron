@@ -14,6 +14,7 @@ from app.models import (
     Server,
     CurrentState,
     Enclosure,
+    DriveLabel,
     SavedView,
     WebUser,
     MonitorEvent,
@@ -123,6 +124,14 @@ def test_personal_views_enclosures_policy_and_input_bounds():
             assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="stable", empty_only="true").status_code == 409
             assert post(client, f"/enclosures/{eid}/assign", slot=3, identity="", empty_only="true").status_code == 400
             assert "Rack · Bay 1" in page
+            inventory = client.get("/drives").text
+            assert "Rack · Bay 1" in inventory
+            # An enclosure assignment takes precedence over a manual location.
+            with SessionLocal() as db:
+                db.add(DriveLabel(server_id=sid, identity="stable", label="Manual shelf"))
+                db.commit()
+            assert "Rack · Bay 1" in client.get("/drives").text
+            assert "Manual shelf" not in client.get("/drives").text
             assert "Unlabeled" not in page
             bay, detected = page.split("<h3>Detected drives</h3>")
             for detail in ("Bay test HDD", "1.0 TiB", "35°C", "1 year", "2026-10-02", "tank · Data", "backup · L2ARC / cache"):
@@ -130,7 +139,9 @@ def test_personal_views_enclosures_policy_and_input_bounds():
             assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="").status_code == 303
             page = client.get(f"/drive-bays?server={sid}").text
             assert page.count('<option value="stable">') == 3
-            assert "Unlabeled" in page
+            assert "Manual shelf" in page
+            inventory = client.get("/drives").text
+            assert "Manual shelf" in inventory and "Rack · Bay 1" not in inventory
             assert post(client, f"/enclosures/{eid}/assign", slot=1, identity="stable").status_code == 303
             with SessionLocal() as db:
                 db.get(CurrentState, sid).payload_json = '{"drives":[]}'

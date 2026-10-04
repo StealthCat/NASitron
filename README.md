@@ -1,5 +1,8 @@
 # NASitron
 
+> **0.10.4:** The Drives inventory now resolves locations from drive-bay assignments,
+> falling back to manual labels when no bay is assigned.
+>
 > **0.10.3:** Drive bay and detected-drive tiles show each pool membership and role.
 >
 > **0.10.2:** Click an empty drive bay to assign an available drive in a popup.
