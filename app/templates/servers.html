@@ -8,7 +8,10 @@
     <h1>Servers</h1>
     <p class="muted">Every monitored host, its collection state, storage summary, and current alerts.</p>
   </div>
-  <a class="button primary" href="/servers/new" data-admin-only>+ Add server</a>
+  {% if effective_role(request.state.current_user)=='admin' %}<div class="row">
+    <a class="button" href="/servers/upgrade">Upgrade Server</a>
+    <a class="button primary" href="/servers/new">+ Add server</a>
+  </div>{% endif %}
 </div>
 {% if not cards %}
 <section class="panel accent-panel">{{ empty_state('No monitored servers', 'Connect your first Ubuntu / OpenZFS host to begin collecting storage telemetry.', '/servers/new', '+ Add server') }}</section>

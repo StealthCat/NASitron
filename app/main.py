@@ -34,6 +34,7 @@ from .config import (
     ALLOW_INSECURE_HTTP,
     APP_NAME,
     APP_VERSION,
+    REMOTE_HELPER_PATH,
     SESSION_TTL_SECONDS,
     TIMEZONE,
     validate_runtime_config,
@@ -230,7 +231,7 @@ async def require_web_session(request: Request, call_next):
         role = effective_role(user)
         # Deny by default: operators have an explicit action allowlist.
         admin_page = (path.startswith(("/settings", "/users", "/api/enrollments")) or
-                      path == "/servers/new" or path.endswith(("/edit", "/host-key")))
+                      path in {"/servers/new", "/servers/upgrade"} or path.endswith(("/edit", "/host-key")))
         operator_action = bool(re.fullmatch(
             r"/servers/\d+/(poll|replace-drive|support-bundle|drive-label|maintenance-window)|/alerts/\d+/(ack|snooze)|/enclosures(?:/\d+/(?:assign|delete))?", path))
         if admin_page and role != "admin":
@@ -1114,6 +1115,38 @@ def maintenance_index(request: Request, db: Session = Depends(get_db)):
             "actions": actions,
         },
     )
+
+
+@app.get("/servers/upgrade", response_class=HTMLResponse)
+def upgrade_server(request: Request, server_id: int | None = None, db: Session = Depends(get_db)):
+    from .zfs_actions import admin
+    admin(request)
+    servers = db.scalars(select(Server).order_by(Server.name)).all()
+    selected = db.get(Server, server_id) if server_id is not None else (servers[0] if servers else None)
+    if server_id is not None and selected is None:
+        raise HTTPException(404, "Server not found")
+    tls_mode = (get_setting(db, "tls_mode") or "internal").strip().lower()
+    command = ""
+    if selected:
+        if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", selected.username):
+            raise HTTPException(400, "The installer requires a standard Linux monitoring username")
+        if not INSTALLER_PATH.is_file():
+            raise HTTPException(503, "Remote installer is not packaged")
+        digest = hashlib.sha256(INSTALLER_PATH.read_bytes()).hexdigest()
+        url = shlex.quote(str(request.url_for("download_remote_installer")))
+        args = shlex.join(["--upgrade-only", "--user", selected.username, "--helper-path", REMOTE_HELPER_PATH])
+        curl_flags = "-kfsSL" if tls_mode == "internal" else "-fsSL"
+        command = (
+            '(tmp="$(mktemp)" && '
+            f'curl {curl_flags} {url} -o "$tmp" && '
+            f"printf '%s  %s\\n' {shlex.quote(digest)} \"$tmp\" "
+            f'| sha256sum -c - && sudo bash "$tmp" {args}; '
+            'rc=$?; rm -f "$tmp"; exit "$rc")'
+        )
+    return templates.TemplateResponse(request=request, name="server_upgrade.html", context={
+        "servers": servers, "selected": selected, "installer_command": command,
+        "installer_tls_mode": tls_mode, "helper_path": REMOTE_HELPER_PATH,
+    })
 
 
 @app.get("/servers/new", response_class=HTMLResponse)

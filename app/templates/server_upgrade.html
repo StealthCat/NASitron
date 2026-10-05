@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Upgrade Server · NASitron{% endblock %}
+{% block content %}
+<div class="server-form-shell">
+  <div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">Existing server maintenance</div><h1>Upgrade Server</h1><p class="muted">Upgrade a 0.x NAS helper to 1.x, or reinstall the current helper on an existing server.</p></div><a class="button" href="/servers">Back to servers</a></div>
+  {% if not servers %}
+  <section class="panel"><h2>No existing servers</h2><p>Add a server before using the upgrade workflow.</p><a class="button primary" href="/servers/new">+ Add server</a></section>
+  {% else %}
+  <section class="panel"><h2>1. Select the existing server</h2><form method="get" action="/servers/upgrade" class="filter-bar"><label for="upgrade-server">Server<select name="server_id" id="upgrade-server">{% for server in servers %}<option value="{{ server.id }}" {{ 'selected' if selected and server.id==selected.id else '' }}>{{ server.name }} · {{ server.host }}</option>{% endfor %}</select></label><button>Prepare upgrade</button></form></section>
+  {% if selected %}
+  <section class="panel section-block"><h2>2. Run this command on {{ selected.name }}</h2><p>Connect to <strong>{{ selected.host }}</strong> using an account with sudo access, then paste the command below.</p><div class="grid two prep-meta-grid"><div class="mini-stat"><span>Existing monitoring account</span><strong>{{ selected.username }}</strong></div><div class="mini-stat"><span>Root helper</span><strong class="break-anywhere">{{ helper_path }}</strong></div></div>
+  <p>The installer updates the helper and its restricted sudo policy. It preserves SSH keys, login settings, the server registration, drive-bay assignments and history. Pools and datasets are unaffected.</p>
+  {% if installer_tls_mode=='internal' %}<p class="subtle">For this instance's internal CA, the download bypasses certificate verification and then verifies the exact SHA-256 supplied by this authenticated page before execution.</p>{% else %}<p class="subtle">The download verifies HTTPS and the exact SHA-256 before execution.</p>{% endif %}
+  <div class="command-box installer-command"><code id="upgrade-command">{{ installer_command }}</code></div><button type="button" data-copy="upgrade-command">Copy upgrade command</button>
+  <p class="subtle">Use the same command to reinstall a missing or damaged helper. It requires the existing monitoring account and dependencies. If the checksum fails after NASitron is updated, reload this page and copy the new command.</p>
+  </section>
+  <section class="panel section-block"><h2>3. Verify the existing connection</h2><p>After the installer reports completion, poll this server and refresh its storage inventory. The helper version appears under <strong>Host & helper</strong>.</p><p class="subtle">Last successful collection: {{ selected.last_ok_at|fmt_dt }}</p><div class="row"><form method="post" action="/servers/{{ selected.id }}/poll"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary">Poll server</button></form><a class="button" href="/servers/{{ selected.id }}/storage?tab=host">Host & helper</a><a class="button" href="/servers/{{ selected.id }}">Server details</a></div></section>
+  {% endif %}{% endif %}
+</div>
+{% endblock %}

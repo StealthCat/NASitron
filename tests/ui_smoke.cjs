@@ -81,6 +81,13 @@ const fs = require('node:fs');
       const response = await page.goto('http://127.0.0.1:8765' + path);
       assert.equal(response.status(), 200, path);
     }
+    await page.goto('http://127.0.0.1:8765/servers');
+    await page.getByRole('link',{name:'Upgrade Server',exact:true}).click();
+    await page.waitForURL('**/servers/upgrade');
+    assert.match(await page.locator('#upgrade-command').textContent(),/--upgrade-only/);
+    await page.locator('#upgrade-server').selectOption('2');
+    await Promise.all([page.waitForURL('**/servers/upgrade?server_id=2'),page.getByRole('button',{name:'Prepare upgrade',exact:true}).click()]);
+    assert.match(await page.locator('h2').nth(1).textContent(),/Boreas Demo/);
     await page.goto('http://127.0.0.1:8765/pools');
     assert.equal(await page.locator('.topology-group:visible').count(), 3);
     for (let i = 0; i < 3; i++) {
@@ -202,7 +209,7 @@ const fs = require('node:fs');
     await page.screenshot({path:'test-results/disk-comparison.png',fullPage:true});
     for (const width of [1440,390,320]) {
       await page.setViewportSize({width,height:1000});
-      for (const path of ['drive-bays','diagnostics','timeline','settings/database','forecasts','snapshots','operations','preferences']) {
+      for (const path of ['drive-bays','diagnostics','timeline','settings/database','forecasts','snapshots','operations','preferences','servers/upgrade']) {
         const response=await page.goto('http://127.0.0.1:8765/'+path);
         assert.equal(response.status(),200,path);
         if (path==='settings/database' && width<600) {

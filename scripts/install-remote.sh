@@ -14,6 +14,7 @@ ENROLL_URL="${NASITRON_ENROLL_URL:-}"
 ENROLL_SECRET="${NASITRON_ENROLL_SECRET:-}"
 ENROLL_INSECURE=0
 ENROLLMENT_MANAGED_KEY=0
+UPGRADE_ONLY=0
 SKIP_PACKAGES=0
 SKIP_SSH_HARDENING=0
 QUIET=0
@@ -31,6 +32,7 @@ die() {
 }
 
 cleanup() {
+  if [[ -n "${STAGED_HELPER:-}" ]]; then rm -f -- "$STAGED_HELPER"; fi
   if [[ -n "${TMP_DIR:-}" && -d "$TMP_DIR" ]]; then
     rm -rf "$TMP_DIR"
   fi
@@ -55,10 +57,13 @@ Configures an Ubuntu/Debian OpenZFS NAS for agentless NASitron monitoring.
 Usage:
   curl -fsSL <installer-url> | sudo bash
   sudo ./scripts/install-remote.sh
+  sudo ./scripts/install-remote.sh --upgrade-only --user nasitron
   sudo ./scripts/install-remote.sh --public-key-file /path/to/nasitron.pub
   sudo ./scripts/install-remote.sh --public-key 'ssh-ed25519 AAAA...'
 
 Options:
+  --upgrade-only           Upgrade/reinstall helper and sudo policy for an existing
+                            account; preserve SSH keys, sshd and registration.
   --public-key KEY          Use an existing public key instead of generating one.
   --public-key-file FILE    Read an existing public key from FILE.
   --user USER               Remote monitoring account (default: nasitron).
@@ -88,6 +93,12 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --upgrade-only)
+      UPGRADE_ONLY=1
+      SKIP_PACKAGES=1
+      SKIP_SSH_HARDENING=1
+      shift
+      ;;
     --public-key)
       [[ $# -ge 2 ]] || die "--public-key requires a value"
       PUBLIC_KEY="$2"
@@ -144,6 +155,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$UPGRADE_ONLY" -eq 1 ]]; then
+  [[ -z "$PUBLIC_KEY" && -z "$PUBLIC_KEY_FILE" && -z "$ENROLL_URL" && -z "$ENROLL_SECRET" ]] || die "--upgrade-only cannot change SSH keys or enroll a server"
+fi
+
 [[ "$EUID" -eq 0 ]] || die "Run this installer as root (for example: sudo $0 ...)"
 [[ "$NASITRON_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "Invalid monitoring username: $NASITRON_USER"
 [[ "$HELPER_PATH" == /* && "$HELPER_PATH" != *[[:space:]]* ]] || die "--helper-path must be an absolute path without whitespace"
@@ -153,6 +168,9 @@ if [[ -n "$ENROLL_URL" || -n "$ENROLL_SECRET" ]]; then
   [[ "$ENROLL_SECRET" =~ ^[A-Za-z0-9_-]{32,128}$ ]] || die "--enroll-secret is malformed"
 fi
 
+if [[ "$UPGRADE_ONLY" -eq 1 ]]; then
+  getent passwd "$NASITRON_USER" >/dev/null || die "Existing monitoring account not found: $NASITRON_USER. Use Add server for a new installation."
+fi
 TMP_DIR="$(mktemp -d -t nasitron-install.XXXXXX)"
 
 if [[ -n "$PUBLIC_KEY_FILE" ]]; then
@@ -182,6 +200,13 @@ for command in sshd ssh-keygen sudo visudo python3 zpool zfs smartctl lsblk; do
   command -v "$command" >/dev/null 2>&1 || die "Required command is missing after setup: $command"
 done
 
+if [[ "$UPGRADE_ONLY" -eq 1 ]]; then
+  command -v flock >/dev/null 2>&1 || die "flock is required to coordinate the upgrade"
+  exec 9>/run/lock/nasitron-zpool-replace.lock
+  flock -n 9 || die "Another NASitron storage operation is active. Wait for it to finish, then retry."
+fi
+
+if [[ "$UPGRADE_ONLY" -eq 0 ]]; then
 if [[ -z "$PUBLIC_KEY" ]]; then
   GENERATED_KEY=1
   GENERATED_KEY_PATH="$TMP_DIR/nasitron-monitoring"
@@ -270,6 +295,8 @@ EOF
     die "sshd rejected the NASitron hardening configuration; previous configuration was restored"
   fi
 fi
+
+fi # Full enrollment only: upgrade mode never changes accounts, SSH keys or sshd.
 
 log "Installing embedded NASitron root helper"
 cat > "$TMP_DIR/nasitron-root-helper" <<'__NASITRON_ROOT_HELPER__'
@@ -1283,7 +1310,18 @@ log "Validating embedded root helper"
 python3 -m py_compile "$TMP_DIR/nasitron-root-helper"
 log "Installing root helper at $HELPER_PATH"
 install -d -o root -g root -m 0755 "$(dirname "$HELPER_PATH")"
-install -o root -g root -m 0755 "$TMP_DIR/nasitron-root-helper" "$HELPER_PATH"
+if [[ "$UPGRADE_ONLY" -eq 1 ]]; then
+  [[ ! -L "$HELPER_PATH" && ! -L "$HELPER_PATH.previous" ]] || die "Helper and backup must not be symlinks"
+  if [[ -f "$HELPER_PATH" ]]; then
+    install -o root -g root -m 0755 "$HELPER_PATH" "$TMP_DIR/previous-helper"
+    install -o root -g root -m 0755 "$TMP_DIR/previous-helper" "$HELPER_PATH.previous"
+  fi
+fi
+# Stage on the destination filesystem so replacing the helper is atomic.
+STAGED_HELPER="$(mktemp "$(dirname "$HELPER_PATH")/.nasitron-helper.XXXXXX")"
+install -o root -g root -m 0755 "$TMP_DIR/nasitron-root-helper" "$STAGED_HELPER"
+mv -f -- "$STAGED_HELPER" "$HELPER_PATH"
+STAGED_HELPER=""
 
 log "Installing restricted sudo policy"
 SUDOERS_PATH="/etc/sudoers.d/nasitron"
@@ -1296,6 +1334,12 @@ chmod 0440 "$TMP_DIR/nasitron.sudoers"
 visudo -cf "$TMP_DIR/nasitron.sudoers" >/dev/null || die "Generated sudoers policy failed validation"
 install -o root -g root -m 0440 "$TMP_DIR/nasitron.sudoers" "$SUDOERS_PATH"
 visudo -cf "$SUDOERS_PATH" >/dev/null || die "Installed sudoers policy failed validation"
+
+if [[ "$UPGRADE_ONLY" -eq 1 ]]; then
+  log "Helper upgrade/reinstall complete. SSH credentials and server registration were preserved."
+  log "Return to NASitron, poll the existing server, then refresh Storage workspace inventory."
+  exit 0
+fi
 
 if command -v systemctl >/dev/null 2>&1; then
   log "Ensuring SSH service is running"

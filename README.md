@@ -1,5 +1,9 @@
 # NASitron
 
+> **1.0.3:** Servers → **Upgrade Server** prepares a checksum-verified command to
+> upgrade or reinstall an existing NAS helper, including 0.x → 1.x upgrades,
+> while preserving SSH credentials, server registration, labels and history.
+
 > **1.0.2:** Browser-verified desktop/mobile layouts, readable stacked property values
 > on phones, clearer action-specific input guidance, and keyboard-accessible horizontal
 > scrolling for drive bays.
