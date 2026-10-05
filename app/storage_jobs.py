@@ -28,6 +28,10 @@ _guard = threading.Lock()
 _stopping = threading.Event()
 
 
+class TransferCancelled(RuntimeError):
+    """An operator deliberately stopped a resumable transfer."""
+
+
 def next_due(cron, zone, now=None):
     now = (
         (now or datetime.now(timezone.utc)).replace(tzinfo=timezone.utc)
@@ -279,8 +283,9 @@ def replicate(source, destination, config, snapshot, run_id):
 
         try:
             send = src.client.get_transport().open_session(timeout=20)
+            channels.append(send)
             receive = dst.client.get_transport().open_session(timeout=20)
-            channels = [send, receive]
+            channels.append(receive)
             for channel in channels:
                 channel.settimeout(30)
             receive.exec_command(shlex.join(receiver))
@@ -292,11 +297,27 @@ def replicate(source, destination, config, snapshot, run_id):
                 thread.start()
             count, started, saved = 0, time.monotonic(), time.monotonic()
             rate = int(config.get("bandwidth_mib", 0)) * 1024**2
-            while True:
+
+            def check_progress(force=False):
+                nonlocal saved
                 if _stopping.is_set():
                     raise RuntimeError(
                         "Service stopping; partial receive retained for resume"
                     )
+                if force or time.monotonic() - saved > 2:
+                    with SessionLocal() as db:
+                        run = db.get(StorageRun, run_id)
+                        if run is None or run.state == "cancel_requested":
+                            raise TransferCancelled(
+                                "Transfer cancelled; partial receive retained for resume"
+                            )
+                        run.bytes_sent = count
+                        db.commit()
+                    saved = time.monotonic()
+
+            check_progress(force=True)
+            while True:
+                check_progress()
                 if send.recv_ready():
                     data = send.recv(262144)
                     if not data:
@@ -315,19 +336,10 @@ def replicate(source, destination, config, snapshot, run_id):
                     raise RuntimeError(
                         "Transfer exceeded 24 hours; resumable receive retained"
                     )
-                if time.monotonic() - saved > 2:
-                    with SessionLocal() as db:
-                        run = db.get(StorageRun, run_id)
-                        if run.state == "cancel_requested":
-                            raise RuntimeError(
-                                "Transfer cancelled; partial receive retained for resume"
-                            )
-                        run.bytes_sent = count
-                        db.commit()
-                    saved = time.monotonic()
             receive.shutdown_write()
             deadline = time.monotonic() + 120
             while not all(c.exit_status_ready() for c in channels):
+                check_progress()
                 if time.monotonic() > deadline:
                     raise RuntimeError(
                         "Transfer acknowledgement timed out; inspect destination before retrying"
@@ -352,6 +364,18 @@ def replicate(source, destination, config, snapshot, run_id):
             ]
             if not matched:
                 raise RuntimeError("No matching snapshot GUID verified after transfer")
+            if not token and snapshot not in matched:
+                raise RuntimeError(
+                    "The requested snapshot GUID was not verified at the destination"
+                )
+            if token and not any(
+                destination_snaps.get(target + "@" + name.split("@")[1])
+                != source_snaps[name]
+                for name in matched
+            ):
+                raise RuntimeError(
+                    "Resumed transfer did not verify a newly received snapshot"
+                )
             newest = sorted(matched)[-1]
             execute(
                 source,
@@ -488,6 +512,8 @@ def run_policy(policy_id, run_id):
             )
             if alert:
                 alert.active, alert.resolved_at = False, datetime.utcnow()
+        except TransferCancelled as exc:
+            run.state, run.detail = "cancelled", str(exc)
         except MaintenanceBusy as exc:
             run.state, run.detail = "deferred", str(exc)
             policy.next_run = min(
@@ -541,6 +567,7 @@ def enqueue(policy_id):
 
 
 def tick():
+    due_ids = []
     with SessionLocal() as db:
         now = datetime.utcnow()
         policies = db.scalars(
@@ -548,10 +575,7 @@ def tick():
         ).all()
         for policy in policies:
             if policy.next_run <= now:
-                try:
-                    enqueue(policy.id)
-                except ValueError:
-                    pass
+                due_ids.append(policy.id)
             config = json.loads(policy.config_json)
             max_age = int(config.get("max_age_hours", 48))
             if (
@@ -574,6 +598,13 @@ def tick():
                     f"No successful run in {max_age} hours. Check schedule and job history.",
                 )
         db.commit()
+    # Enqueue opens its own write transaction; never call it while this session
+    # has pending alert writes (SQLite allows only one writer).
+    for policy_id in due_ids:
+        try:
+            enqueue(policy_id)
+        except ValueError:
+            pass
 
 
 def recover_interrupted():

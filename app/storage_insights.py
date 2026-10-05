@@ -7,16 +7,37 @@ from sqlalchemy import select, func
 from .models import Metric, DriveLabel, Enclosure, BayAssignment, StorageSample
 
 
-def expansion_plan(members, disks, proposed_bytes):
-    """Estimates disk-replacement growth separately from RAIDZ width expansion."""
-    by_path = {}
+def match_disk(member, disks):
+    """Prefer resolved device/alias identity; never guess between serial substrings."""
+    from .parser import _device_matches_disk
+
+    member_id = re.sub(r"-part\d+$", "", member.get("id", "").rsplit("/", 1)[-1])
+    exact = []
     for disk in disks:
         aliases = disk.get("by_id") or []
         if isinstance(aliases, str):
             aliases = [aliases]
-        for key in [disk.get("path"), disk.get("serial"), *aliases]:
-            if isinstance(key, str):
-                by_path[key.rsplit("/", 1)[-1]] = disk
+        path = disk.get("path") or ""
+        if (
+            path
+            and member.get("realpath")
+            and _device_matches_disk(member["realpath"], path)
+        ) or (member_id and member_id in [a.rsplit("/", 1)[-1] for a in aliases]):
+            exact.append(disk)
+    if exact:
+        return exact[0] if len(exact) == 1 else None
+    matches = [
+        d
+        for d in disks
+        if d.get("serial")
+        and member_id.endswith(d["serial"])
+        and (member_id == d["serial"] or member_id[-len(d["serial"]) - 1] in "_-:")
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def expansion_plan(members, disks, proposed_bytes):
+    """Estimates disk-replacement growth separately from RAIDZ width expansion."""
     rows = []
     for root in members:
         if root.get("parent_guid") or root.get("role", "data") != "data":
@@ -30,17 +51,14 @@ def expansion_plan(members, disks, proposed_bytes):
             leaves = [root]
         sizes, checklist = [], []
         for member in leaves:
-            disk = by_path.get(member["id"]) or next(
-                (d for d in disks if d.get("serial") and d["serial"] in member["id"]),
-                None,
-            )
+            disk = match_disk(member, disks)
             size = int((disk or {}).get("size_bytes") or 0)
             sizes.append(size)
             checklist.append(
                 {
                     "id": member["id"],
                     "size": size,
-                    "needs_replacement": size < proposed_bytes,
+                    "needs_replacement": size < proposed_bytes if size else None,
                     "location": (disk or {}).get("location", "Location not assigned"),
                 }
             )
@@ -54,7 +72,19 @@ def expansion_plan(members, disks, proposed_bytes):
             if not root["group"]
             else None
         )
-        known = bool(sizes) and all(sizes) and factor is not None and factor > 0
+        nested = any(
+            m.get("group")
+            and m.get("top_level_guid") == root["guid"]
+            and m["guid"] != root["guid"]
+            for m in members
+        )
+        known = (
+            bool(sizes)
+            and all(sizes)
+            and factor is not None
+            and factor > 0
+            and not nested
+        )
         rows.append(
             {
                 "vdev": root["id"],
@@ -63,7 +93,7 @@ def expansion_plan(members, disks, proposed_bytes):
                 "projected": max(min(sizes), proposed_bytes) * factor
                 if known
                 else None,
-                "remaining": sum(s < proposed_bytes for s in sizes),
+                "remaining": sum(0 < s < proposed_bytes for s in sizes),
                 "disks": checklist,
             }
         )
@@ -92,8 +122,8 @@ def diagnose(db, server_id, snapshot, now):
             (d.get("io") or {}).get("write_latency_ms") or 0,
         )
         for d in drives
-        if (d.get("io") or {}).get("read_iops", 0)
-        + (d.get("io") or {}).get("write_iops", 0)
+        if ((d.get("io") or {}).get("read_iops") or 0)
+        + ((d.get("io") or {}).get("write_iops") or 0)
         > 0
     ]
     typical = median(active) if active else 0
@@ -195,14 +225,11 @@ def vdev_diagnosis(topology, diagnostics):
                 leaves = [root]
             matches = []
             for member in leaves:
-                found = next(
-                    (
-                        r
-                        for r in diagnostics
-                        if r["disk"].get("serial")
-                        and r["disk"]["serial"] in member["id"]
-                    ),
-                    None,
+                disk = match_disk(member, [r["disk"] for r in diagnostics])
+                found = (
+                    next((r for r in diagnostics if r["disk"] is disk), None)
+                    if disk is not None
+                    else None
                 )
                 if found:
                     matches.append(found)

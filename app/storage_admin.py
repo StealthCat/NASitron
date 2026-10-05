@@ -218,6 +218,16 @@ def install(app, templates):
         server = db.get(Server, server_id)
         if not server:
             raise HTTPException(404)
+        if tab not in {
+            "overview",
+            "planner",
+            "datasets",
+            "snapshots",
+            "jobs",
+            "events",
+            "host",
+        }:
+            raise HTTPException(404, "Storage section not found")
         if not 0 < size_tb <= 1000:
             raise HTTPException(400, "Proposed disk size must be 0–1000 TB")
         cache = db.get(StorageHostCache, server_id)
@@ -292,7 +302,9 @@ def install(app, templates):
                 size_tb=size_tb,
                 policies=policies,
                 runs=runs,
-                forecasts=dataset_forecasts(db, server_id, datetime.utcnow()),
+                forecasts=dataset_forecasts(db, server_id, datetime.utcnow())
+                if tab == "datasets"
+                else {},
                 events=events[:50],
                 more=len(events) > 50,
                 page=max(1, page),

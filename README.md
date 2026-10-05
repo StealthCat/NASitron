@@ -1,5 +1,10 @@
 # NASitron
 
+> **1.0.1:** Tighten replication verification, cancellation and destination locking;
+> prevent scheduler database contention; improve disk identity matching and expansion
+> estimates; polish forms and preserve schedule input on validation errors.
+> Update the remote helper from Host & helper for the receive-lock and identity fixes.
+
 > **1.0.0:** A complete storage workspace: expansion planning, snapshots and recovery,
 > scheduled replication/scrubs/SMART tests, disk/vdev diagnosis, dataset administration,
 > capacity forecasts, ZFS events, capability detection and reviewed helper updates.

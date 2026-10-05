@@ -24,5 +24,37 @@
   if (policy) {
     function render(){policy.querySelectorAll('[data-policy-kinds]').forEach(el=>{el.hidden=!el.dataset.policyKinds.split(' ').includes(policy.elements.kind.value);el.querySelectorAll('input,select').forEach(e=>e.disabled=el.hidden);});}
     policy.elements.kind.addEventListener('change',render);render();
+    const feedback = document.getElementById('storage-policy-feedback');
+    const name = policy.elements.namedItem('name'), confirmation = policy.elements.confirm_text;
+    function validateConfirmation() {
+      if (confirmation && name) confirmation.setCustomValidity(confirmation.value === 'ENABLE ' + name.value ? '' : 'Type ENABLE followed by the exact policy name.');
+    }
+    if (name && confirmation) {
+      name.addEventListener('input', validateConfirmation);
+      confirmation.addEventListener('input', validateConfirmation);
+      validateConfirmation();
+    }
+    let pending = false;
+    policy.addEventListener('submit', async event => {
+      if (!feedback) return;
+      event.preventDefault();
+      if (pending) return;
+      const body = new FormData(policy);
+      const button = policy.querySelector('button.primary');
+      const label = button.textContent;
+      pending = true; button.disabled = true; button.textContent = 'Saving…';
+      feedback.hidden = true;
+      try {
+        const response = await fetch(policy.action, {method:'POST', body, credentials:'same-origin'});
+        if (response.redirected && response.ok) { window.location.assign(response.url); return; }
+        let detail = 'Could not save the schedule. Review the fields and try again.';
+        try { const result = await response.json(); if (typeof result.detail === 'string') detail = result.detail; } catch (_) {}
+        feedback.textContent = detail;
+      } catch (_) {
+        feedback.textContent = 'Connection interrupted. Check the schedules list before retrying; the save may have completed.';
+      }
+      pending = false; button.disabled = false; button.textContent = label;
+      feedback.hidden = false; feedback.focus();
+    });
   }
 })();

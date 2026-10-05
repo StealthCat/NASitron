@@ -192,7 +192,8 @@ def test_hold_is_idempotent_without_removing_foreign_tags(remote, monkeypatch):
     assert plan["args"] == ["release", "nasitron", "tank/data@s"]
 
 
-def test_receive_rejects_existing_foreign_dataset(monkeypatch):
+def test_receive_rejects_existing_foreign_dataset(monkeypatch, tmp_path):
+    monkeypatch.setattr(helper, "LOCK_PATH", str(tmp_path / "lock"))
     monkeypatch.setattr(helper, "ZFS", lambda: "zfs")
     monkeypatch.setattr(
         helper, "_run", lambda *a, **kw: CompletedProcess([], 0, "tank/existing", "")
@@ -453,7 +454,10 @@ def test_replication_remote_errors_are_not_missing_datasets():
 
 
 @pytest.mark.parametrize("resume", [False, True])
-def test_replication_stream_verifies_guids_and_preserves_base(monkeypatch, resume):
+@pytest.mark.parametrize("advance", [False, True])
+def test_replication_stream_verifies_guids_and_preserves_base(
+    monkeypatch, resume, advance
+):
     import base64
     import hashlib
     import shlex
@@ -536,13 +540,32 @@ def test_replication_stream_verifies_guids_and_preserves_base(monkeypatch, resum
         side_effect=[
             {old: "101", new: "202"},
             {"backup/data@" + old.split("@")[1]: "101"},
-            {"backup/data@" + new.split("@")[1]: "202"},
+            {
+                "backup/data@" + (new if advance else old).split("@")[1]: "202"
+                if advance
+                else "101"
+            },
         ]
     )
     monkeypatch.setattr(jobs, "_snapshot_guids", snapshots)
     actions = Mock()
     monkeypatch.setattr(jobs, "execute", actions)
     jobs._stopping.clear()
+    if not advance:
+        with pytest.raises(RuntimeError, match="requested snapshot|newly received"):
+            jobs.replicate(
+                source,
+                destination,
+                dict(dataset="tank/data", destination="backup/data", owner=owner),
+                new,
+                2,
+            )
+        assert send.closed and receive.closed
+        assert not any(
+            call.args[1]["action"] == "snapshot-release"
+            for call in actions.call_args_list
+        )
+        return
     detail, stamp = jobs.replicate(
         source,
         destination,
@@ -597,3 +620,181 @@ def test_smart_action_rejects_nonphysical_targets(monkeypatch):
     monkeypatch.setattr(helper, "_lsblk_disk", lambda path: dict(type="lvm"))
     with pytest.raises(helper.HelperError, match="whole physical"):
         helper.action_plan(dict(action="smart-long", pool="host", target="scsi-test"))
+
+
+def test_receive_checks_destination_after_lock_and_fails_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(helper, "LOCK_PATH", str(tmp_path / "lock"))
+    monkeypatch.setattr(helper, "ZFS", lambda: "zfs")
+    locked = []
+    monkeypatch.setattr(helper.fcntl, "flock", lambda *args: locked.append(True))
+
+    def read(*args, **kwargs):
+        assert locked
+        return CompletedProcess([], 1, "", "permission denied")
+
+    monkeypatch.setattr(helper, "_run", read)
+    execute = Mock()
+    monkeypatch.setattr(helper.subprocess, "call", execute)
+    with pytest.raises(helper.HelperError, match="permission denied"):
+        helper.cmd_stream(["receive", "backup/new", "a" * 32])
+    assert not execute.called
+
+
+def test_disk_matching_uses_resolved_paths_and_rejects_ambiguous_serials():
+    from app.storage_insights import match_disk
+
+    disks = [
+        dict(path="/dev/sda", serial="ABC"),
+        dict(path="/dev/sdb", serial="LONG_ABC"),
+    ]
+    assert match_disk(dict(id="wwn-123", realpath="/dev/sdb1"), disks) is disks[1]
+    assert match_disk(dict(id="scsi-LONG_ABC"), disks) is None
+    assert match_disk(dict(id="scsi-ABC123"), disks) is None
+
+
+def test_expansion_nested_replacement_cannot_inflate_capacity():
+    members = [
+        dict(id="raidz2-0", guid="100", parent_guid="", group=True, role="data"),
+        dict(
+            id="replacing-0",
+            guid="200",
+            parent_guid="100",
+            top_level_guid="100",
+            group=True,
+        ),
+    ]
+    drives = []
+    for i in range(4):
+        members.append(
+            dict(
+                id=f"scsi-SERIAL{i}",
+                guid=str(300 + i),
+                parent_guid="200" if i < 2 else "100",
+                top_level_guid="100",
+                group=False,
+            )
+        )
+        drives.append(dict(serial=f"SERIAL{i}", size_bytes=6 * 10**12))
+    assert not expansion_plan(members, drives, 12 * 10**12)[0]["known"]
+
+
+def test_storage_tick_commits_alerts_before_enqueuing(monkeypatch):
+    from app import storage_jobs as jobs
+    from app.models import Alert
+
+    ids = []
+    with SessionLocal() as db:
+        server = Server(
+            name="tick-lock-test", host="192.0.2.100", username="nas", enabled=False
+        )
+        db.add(server)
+        db.flush()
+        sid = server.id
+        for n in range(2):
+            policy = StoragePolicy(
+                server_id=sid,
+                name=f"overdue-{n}",
+                kind="snapshot",
+                cron="0 * * * *",
+                timezone="UTC",
+                next_run=datetime.utcnow() - timedelta(hours=2),
+                created_at=datetime.utcnow() - timedelta(days=3),
+            )
+            db.add(policy)
+            db.flush()
+            ids.append(policy.id)
+        db.commit()
+    calls = []
+
+    def enqueue(pid):
+        if pid not in ids:
+            return
+        with SessionLocal() as db:
+            assert db.query(Alert).filter_by(server_id=sid).count() == 2
+            db.add(StorageRun(policy_id=pid))
+            db.commit()
+        calls.append(pid)
+
+    monkeypatch.setattr(jobs, "enqueue", enqueue)
+    try:
+        jobs.tick()
+        assert calls == ids
+    finally:
+        with SessionLocal() as db:
+            db.delete(db.get(Server, sid))
+            db.commit()
+
+
+def test_diagnostics_accept_null_io_samples():
+    from app.storage_insights import diagnose
+
+    db = Mock()
+    db.scalars.return_value.all.return_value = []
+    db.execute.return_value.all.return_value = []
+    rows = diagnose(
+        db,
+        1,
+        dict(drives=[dict(serial="ABC", io=dict(read_iops=None, write_iops=None))]),
+        datetime.utcnow(),
+    )
+    assert len(rows) == 1 and rows[0]["reasons"] == []
+
+
+def test_cancelled_replication_does_not_raise_failure_alert(monkeypatch):
+    from app import storage_jobs as jobs
+    from app.models import Alert
+
+    with SessionLocal() as db:
+        source = Server(
+            name="cancel-source", host="192.0.2.110", username="nas", enabled=False
+        )
+        destination = Server(
+            name="cancel-dest", host="192.0.2.111", username="nas", enabled=False
+        )
+        db.add_all([source, destination])
+        db.flush()
+        sid, did = source.id, destination.id
+        policy = StoragePolicy(
+            server_id=sid,
+            name="cancel-test",
+            kind="replication",
+            cron="0 * * * *",
+            timezone="UTC",
+            next_run=datetime.utcnow() + timedelta(hours=1),
+            config_json=json.dumps(
+                dict(
+                    owner="a" * 32,
+                    dataset="tank/data",
+                    destination_server=did,
+                    destination="backup/data",
+                    keep=7,
+                )
+            ),
+        )
+        db.add(policy)
+        db.flush()
+        run = StorageRun(policy_id=policy.id)
+        db.add(run)
+        db.commit()
+        pid, rid = policy.id, run.id
+    monkeypatch.setattr(jobs, "execute", Mock())
+    monkeypatch.setattr(
+        jobs,
+        "replicate",
+        Mock(
+            side_effect=jobs.TransferCancelled(
+                "Transfer cancelled; partial receive retained"
+            )
+        ),
+    )
+    try:
+        jobs.run_policy(pid, rid)
+        with SessionLocal() as db:
+            assert db.get(StorageRun, rid).state == "cancelled"
+            assert db.get(StoragePolicy, pid).last_success is None
+            assert db.query(Alert).filter_by(server_id=sid).count() == 0
+    finally:
+        with SessionLocal() as db:
+            db.delete(db.get(Server, sid))
+            db.delete(db.get(Server, did))
+            db.commit()

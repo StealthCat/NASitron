@@ -1,5 +1,9 @@
 # NASitron 1.0 storage workspace
 
+Version 1.0.1 improves transfer verification and cancellation, serial/WWN mapping,
+concurrent scheduling and form usability. Existing 1.0 installations can install
+the 1.0.1 helper through **Host & helper**. No additional database migration is needed.
+
 Open a server and choose **Storage workspace**, or use Maintenance. Administrator access and a secure connection are required. Disk & pool actions remain available from the workspace. Physical disk commands use short `/dev/disk/by-id` basenames, resolved and validated by the remote helper; Linux `zdN` devices remain virtual ZFS volumes.
 
 ## Upgrade from 0.11.x
@@ -13,7 +17,7 @@ Open a server and choose **Storage workspace**, or use Maintenance. Administrato
 
 | Workspace area | What it provides |
 | --- | --- |
-| Expansion planner | Per-vdev current/projected usable capacity, bay locations and a disk-by-disk replacement checklist. Partial replacement does not unlock a RAIDZ vdev's larger capacity. Missing identities/sizes remain unknown. |
+| Expansion planner | Per-vdev current/projected usable capacity, bay locations and a disk-by-disk replacement checklist. Partial replacement does not unlock a RAIDZ vdev's larger capacity. Missing identities/sizes and active nested replacement layouts remain unknown. |
 | Snapshots & recovery | Create/delete exact snapshots, hold/release, clone for inspection and reviewed rollback. Separate hourly/daily/weekly schedules provide retention tiers. |
 | Schedules & replication | Persistent snapshot, replication, scrub and SMART policies; pause/resume/edit/run-now controls; transfer cancellation, byte progress, run history and overdue/failure alerts. |
 | Diagnosis | Disk latency, queue depth, utilization, throughput, SMART findings, seven-day ranges and physical bay links; vdev totals with mapping completeness and outlier counts. |
@@ -35,9 +39,9 @@ Scrub and SMART job success means the host accepted the command, not that the ph
 
 Register both NAS hosts and pin their SSH host-key fingerprints first. Choose an exact source dataset and a dedicated **new child dataset** on the destination, whose parent already exists. Both hosts need the 1.0 helper. Streams pass through NASitron over pinned SSH connections, so its network link and availability affect transfer speed. The optional MiB/s cap applies to the stream bytes forwarded by NASitron.
 
-Replication uses raw ZFS sends, incremental bases matched by snapshot GUID, and resumable receives. The destination stays unmounted and read-only, tagged with its policy owner. An unrelated existing destination is rejected. No forced receive rollback, recursive send or automatic destruction of unrelated snapshots is performed. Source and destination OpenZFS must support the stream features; native errors are recorded when they do not.
+Replication uses raw ZFS sends, incremental bases matched by snapshot GUID, and resumable receives. The destination stays unmounted and read-only, tagged with its policy owner. An unrelated existing destination is rejected. No forced receive rollback, recursive send or automatic destruction of unrelated snapshots is performed. Destination ownership is verified while holding the helper operation lock; failed identity reads abort the receive. Source and destination OpenZFS must support the stream features; native errors are recorded when they do not.
 
-Cancelling a transfer closes the stream and retains the partial receive. A subsequent run checks for a resume token before starting a new incremental transfer. It may finish an earlier snapshot; the freshness timestamp reflects that verified snapshot's creation time. Success requires matching a destination snapshot GUID to the source. The shared incremental base is held on the source with a policy-specific tag. After advancing, the old base's policy hold is released. Failed transfers may leave protective holds requiring inspection before manual cleanup. Policy retention also applies to its destination snapshots after a verified transfer.
+Cancelling a transfer closes the stream and retains the partial receive. A subsequent run checks for a resume token before starting a new incremental transfer. It may finish an earlier snapshot; the freshness timestamp reflects that verified snapshot's creation time. A fresh transfer must verify the requested snapshot GUID; a resumed transfer must verify a newly received matching snapshot. An older shared base alone is not proof of success. The shared incremental base is held on the source with a policy-specific tag. After advancing, the old base's policy hold is released. Failed transfers may leave protective holds requiring inspection before manual cleanup. Policy retention also applies to its destination snapshots after a verified transfer.
 
 ## Reviewed actions and recovery
 

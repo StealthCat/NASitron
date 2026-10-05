@@ -3,6 +3,12 @@
 .storage-toolbar form { margin:0; }
 #storage-policy-form label,#storage-action-form label { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; min-width:0; }
 #storage-policy-form input,#storage-policy-form select { max-width:100%; }
-.panel pre { white-space:pre-wrap; overflow-wrap:anywhere; }
-.panel + .panel { margin-top:20px; }
+.storage-tabs ~ .panel pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.storage-tabs ~ .panel + .panel { margin-top:20px; }
 @media(max-width:650px) { .storage-tabs .button { flex:1 1 40%; text-align:center; } }
+.storage-tabs + .panel { margin-top:20px; }
+.storage-tabs ~ .panel td { vertical-align:top; overflow-wrap:anywhere; }
+.storage-tabs ~ .panel tbody tr:nth-child(even) { background:rgba(127,127,127,.045); }
+.storage-tabs ~ .panel th { font-size:.8rem; letter-spacing:.02em; }
+#storage-policy-feedback:focus { outline:2px solid var(--accent); outline-offset:3px; }
+.storage-tabs ~ .panel details summary { cursor:pointer; padding:6px 0; }

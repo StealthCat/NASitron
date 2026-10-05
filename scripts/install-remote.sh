@@ -689,6 +689,7 @@ def _pool_members(pool: str, aliases: dict) -> list[dict]:
         parent_guid = ancestors[-1]["guid"] if ancestors else ""
         top_level_guid = ancestors[0]["guid"] if ancestors else guid["name"]
         members.append({"parent_guid": parent_guid, "top_level_guid": top_level_guid, "guid": guid["name"], "id": label, "state": row["state"], "group": group,
+                        "realpath": os.path.realpath(BY_ID_DIR / label) if label and not group and (BY_ID_DIR / label).is_symlink() else "",
                         "depth": row["depth"], "role": row["role"], "display": label or f"Unresolved member (GUID {guid['name']})"})
         if group:
             ancestors.append(members[-1])
@@ -932,7 +933,7 @@ def cmd_actions(args: list[str]) -> int:
 
 
 # NASitron 1.0 storage protocol. This remains embedded in the standalone helper.
-HELPER_VERSION = "1.0.0"
+HELPER_VERSION = "1.0.1"
 DATASET_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*)*$")
 SNAP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,200}$")
 DATASET_PROPS = {'compression', 'recordsize', 'quota', 'refquota', 'reservation', 'refreservation', 'atime', 'readonly', 'sync', 'mountpoint'}
@@ -1207,6 +1208,12 @@ def cmd_storage(args):
 
 
 def cmd_stream(args):
+    with open(LOCK_PATH, 'a+', encoding='utf-8') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return _stream_locked(args)
+
+
+def _stream_locked(args):
     # No shell, no force, no recursive send, no receive-side mount or overwrite.
     if not args or args[0] not in {'send', 'receive'}:
         raise HelperError('Invalid replication command')
@@ -1215,6 +1222,8 @@ def cmd_stream(args):
         if '/' not in target or not re.fullmatch(r'[a-f0-9]{32}', owner):
             raise HelperError('Replication requires a dedicated child dataset and policy ID')
         existing = _run([ZFS(), 'list', '-H', '-o', 'name', target])
+        if existing.returncode and 'does not exist' not in existing.stderr.lower():
+            raise HelperError(existing.stderr.strip() or 'Cannot verify replication destination')
         if existing.returncode == 0 and _get_property(target, 'org.nasitron:replication') != owner:
             raise HelperError('Destination is not owned by this replication policy')
         command = [ZFS(), 'receive', '-u', '-s', '-o', 'readonly=on', '-o', f'org.nasitron:replication={owner}', target]
@@ -1235,9 +1244,7 @@ def cmd_stream(args):
             command.append(target)
     else:
         raise HelperError('Invalid stream arguments')
-    with open(LOCK_PATH, 'a+', encoding='utf-8') as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return subprocess.call(command, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'})
+    return subprocess.call(command, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'})
 
 
 def main() -> int:
