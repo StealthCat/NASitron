@@ -86,6 +86,7 @@ jobs:
       NASITRON_WEB_USERNAME: ci-admin
       NASITRON_WEB_PASSWORD: ci-password-strong
       NASITRON_ALLOW_INSECURE_HTTP: "true"
+      NASITRON_ALLOW_INSECURE_MAINTENANCE: "true"
       WEB_CONCURRENCY: "1"
       PYTHONPATH: .
     steps:
@@ -112,6 +113,7 @@ jobs:
             sleep 1
           done
           node tests/ui_smoke.cjs
+          node tests/zfs_actions_smoke.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

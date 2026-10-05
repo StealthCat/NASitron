@@ -198,7 +198,7 @@
             <tr>
               <td>{{ action.created_at|fmt_dt }}</td>
               <td><strong>{{ action.pool }}</strong><div class="subtle">{{ action.old_device }} → {{ action.new_device }}</div></td>
-              <td><span class="badge {{ 'good' if action.success else 'critical' }}">{{ action.state|title if action.success else "Command failed" }}</span></td>
+              <td><span class="badge {{ 'good' if action.success else 'critical' if action.state == 'failed' else 'warning' if action.state in ['unknown', 'executing'] else 'offline' }}">{{ action.state|title }}</span></td>
             </tr>
             {% if action.output %}
             <tr><td colspan="3"><details><summary class="subtle">Command and output</summary><div style="margin-top:8px">{% if action.command %}<div class="command-box">{{ action.command }}</div>{% endif %}<pre style="margin-top:8px">{{ action.output }}</pre></div></details></td></tr>

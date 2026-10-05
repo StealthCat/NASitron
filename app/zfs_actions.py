@@ -1,5 +1,7 @@
 """Previewed, single-use, audited ZFS administration through the root helper."""
 import json
+import logging
+from contextlib import contextmanager
 import shlex
 from datetime import datetime, timedelta
 
@@ -11,10 +13,19 @@ from .collector import SSHCollector
 from .config import REMOTE_HELPER_PATH
 from .experience import effective_role
 from .insights import session
-from .maintenance import maintenance_lock, invalidate_inventory_cache
+from .maintenance import MaintenanceBusy, maintenance_lock, invalidate_inventory_cache
 from .models import MaintenanceAction, Server
 from .scheduler import trigger_now
 from .security import require_csrf, require_secure_maintenance
+
+
+@contextmanager
+def action_lock(server_id):
+    try:
+        with maintenance_lock(server_id):
+            yield
+    except MaintenanceBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 def admin(request):
@@ -56,6 +67,7 @@ def install(app, templates):
             if inventory.get("protocol") != 1:
                 raise ValueError("Update the remote helper to enable ZFS administration.")
         except Exception as exc:
+            inventory = None
             error = str(exc)
         if result_id:
             result = db.scalar(select(MaintenanceAction).where(MaintenanceAction.id == result_id, MaintenanceAction.server_id == server_id))
@@ -76,13 +88,16 @@ def install(app, templates):
         if len(json.dumps(payload)) > 16384:
             raise HTTPException(400, "Action request is too large")
         try:
-            with maintenance_lock(server.id):
+            with action_lock(server.id):
                 plan = helper_json(server, "preview", payload)
+        except HTTPException as exc:
+            return templates.TemplateResponse(request=request, name="zfs_action_preview.html", status_code=exc.status_code,
+                context={"server": server, "error": str(exc.detail), "plan": None})
         except Exception as exc:
             return templates.TemplateResponse(request=request, name="zfs_action_preview.html", status_code=400,
                 context={"server": server, "error": str(exc), "plan": None})
         row = MaintenanceAction(server_id=server.id, actor=request.state.current_user.username,
-            action="zpool_" + action, pool=pool, old_device=target, new_device=", ".join(disks),
+            action="zpool_" + action, pool=pool, old_device=plan.get("target_id", target), new_device=", ".join(disks),
             command=plan["command"], state="preview", success=False, output=json.dumps(plan))
         db.add(row)
         db.commit()
@@ -93,34 +108,50 @@ def install(app, templates):
     def execute(request: Request, server_id: int, action_id: int = Form(...),
                 confirm_text: str = Form(...), db=Depends(session)):
         admin(request)
+        server = db.get(Server, server_id)
+        if server is None:
+            raise HTTPException(404)
+
+        def problem(status, message, plan=None):
+            return templates.TemplateResponse(request=request, name="zfs_action_preview.html", status_code=status,
+                context={"server": server, "error": message, "plan": plan, "action_id": action_id})
+
         row = db.get(MaintenanceAction, action_id)
         if row is None or row.server_id != server_id or row.actor != request.state.current_user.username:
             raise HTTPException(404)
         if row.state != "preview" or row.created_at < datetime.utcnow() - timedelta(minutes=10):
-            raise HTTPException(409, "This preview expired or was already submitted. Generate a new preview.")
+            return problem(409, "This preview expired or was already submitted. Generate a new preview.")
         plan = json.loads(row.output)
         if confirm_text != plan["confirmation"]:
-            raise HTTPException(400, "Confirmation text does not match the preview")
-        server = db.get(Server, server_id)
-        with maintenance_lock(server_id):
-            claimed = db.execute(update(MaintenanceAction).where(MaintenanceAction.id == action_id,
-                MaintenanceAction.state == "preview").values(state="executing"))
-            if claimed.rowcount != 1:
-                db.rollback()
-                raise HTTPException(409, "This action was already submitted")
-            db.commit()  # Persist before remote execution: a retry must never repeat a mutation.
-            try:
-                result = helper_call(server, "execute", plan["request"], plan["fingerprint"])
-                row.state = "accepted" if result["exit"] == 0 else ("unknown" if result["exit"] == 124 else "failed")
-                row.success = result["exit"] == 0
-                row.exit_code = result["exit"]
-                row.output = "\n".join([result.get("stdout", ""), result.get("stderr", "")])[-20000:]
-            except Exception as exc:
-                row.state = "unknown"
-                row.success = False
-                row.output = "Execution outcome is unknown. Inspect pool status before retrying. " + str(exc)[:19000]
-            row.completed_at = datetime.utcnow()
-            db.commit()
-            invalidate_inventory_cache(server_id)
-            trigger_now(server_id)
+            return problem(400, "Confirmation text does not match the preview", plan)
+        try:
+            with action_lock(server_id):
+                claimed = db.execute(update(MaintenanceAction).where(MaintenanceAction.id == action_id,
+                    MaintenanceAction.state == "preview",
+                    MaintenanceAction.created_at >= datetime.utcnow() - timedelta(minutes=10)).values(state="executing"))
+                if claimed.rowcount != 1:
+                    db.rollback()
+                    return problem(409, "This action expired or was already submitted")
+                db.commit()  # Persist before remote execution: a retry must never repeat a mutation.
+                try:
+                    result = helper_call(server, "execute", plan["request"], plan["fingerprint"])
+                    row.state = "accepted" if result["exit"] == 0 else ("unknown" if result["exit"] in {-1, 124, 255} else "failed")
+                    row.success = result["exit"] == 0
+                    row.exit_code = result["exit"]
+                    row.output = "\n".join([result.get("stdout", ""), result.get("stderr", "")])[-20000:]
+                    if row.state == "unknown":
+                        row.output = "Execution outcome is unknown. Inspect pool status before retrying.\n" + row.output
+                except Exception as exc:
+                    row.state = "unknown"
+                    row.success = False
+                    row.output = "Execution outcome is unknown. Inspect pool status before retrying. " + str(exc)[:19000]
+                row.completed_at = datetime.utcnow()
+                db.commit()
+                invalidate_inventory_cache(server_id)
+                try:
+                    trigger_now(server_id)
+                except Exception:
+                    logging.getLogger(__name__).exception("Could not schedule refresh after ZFS action %s", action_id)
+        except HTTPException as exc:
+            return problem(exc.status_code, str(exc.detail))
         return RedirectResponse(f"/servers/{server_id}/zfs-actions?result_id={action_id}", status_code=303)

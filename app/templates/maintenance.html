@@ -15,7 +15,7 @@
 <section class="section-block panel flush">
   <div class="panel-title" style="padding:16px 16px 0"><h2>Maintenance History</h2><span class="badge">{{ actions|length }} recent</span></div>
   <div class="scroll"><table class="readable-table"><thead><tr><th>Time</th><th>Server</th><th>Action</th><th>Pool</th><th>Old device</th><th>New device</th><th>Result</th></tr></thead><tbody>
-  {% for action in actions %}<tr><td>{{ action.created_at|fmt_dt }}</td><td>{{ action.server.name if action.server else "—" }}</td><td>{{ action.action }}</td><td>{{ action.pool or "—" }}</td><td>{{ action.old_device or "—" }}</td><td>{{ action.new_device or "—" }}</td><td><span class="badge {{ 'good' if action.success else 'critical' }}">{{ action.state|title }}</span></td></tr>
+  {% for action in actions %}<tr><td>{{ action.created_at|fmt_dt }}</td><td>{{ action.server.name if action.server else "—" }}</td><td>{{ action.action|replace("zpool_", "")|replace("_", " ")|title }}</td><td>{{ action.pool or "—" }}</td><td>{{ action.old_device or "—" }}</td><td>{{ action.new_device or "—" }}</td><td><span class="badge {{ 'good' if action.success else 'critical' if action.state == 'failed' else 'warning' if action.state in ['unknown', 'executing'] else 'offline' }}">{{ action.state|title }}</span>{% if action.action.startswith("zpool_") %}<a class="subtle" data-admin-only href="/servers/{{ action.server_id }}/zfs-actions?result_id={{ action.id }}">Details →</a>{% endif %}</td></tr>
   {% else %}<tr><td colspan="7" class="muted">No maintenance actions recorded.</td></tr>{% endfor %}
   </tbody></table></div>
 </section>

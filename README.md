@@ -1,5 +1,9 @@
 # NASitron
 
+> **0.11.1:** Correct unknown SSH outcomes and busy-operation responses, require
+> explicit selection from every mirror when splitting, and polish ZFS selection,
+> review, and maintenance history. Update the remote helper for split validation.
+
 > **0.11.0:** Administrator ZFS disk/pool actions with command previews, typed
 > confirmation, live identity checks and short by-id disk names. Update the remote
 > root helper on each NAS to enable the new controls.
@@ -109,6 +113,8 @@ This feature requires the root-owned NASitron helper plus the exact helper-only 
 ## ZFS disk and pool administration (0.11.0)
 
 Open **Maintenance → Manage ZFS disks & pools**, or **ZFS actions** on a server.
+Mirror splitting requires exactly one direct member from every data, special and dedup mirror;
+ZFS is never allowed to fill in an omitted mirror selection automatically.
 An administrator chooses the operation and devices, reviews the generated command,
 and types the displayed confirmation. No SSH terminal is needed for supported actions.
 

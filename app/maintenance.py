@@ -34,12 +34,16 @@ class ReplacementRequest:
     allow_conflicting_operation: bool = False
 
 
+class MaintenanceBusy(RuntimeError):
+    pass
+
+
 @contextmanager
 def maintenance_lock(server_id: int) -> Iterator[None]:
     with _lock_guard:
         lock = _server_locks.setdefault(server_id, threading.Lock())
     if not lock.acquire(blocking=False):
-        raise RuntimeError("Another maintenance operation is already running for this server.")
+        raise MaintenanceBusy("Another maintenance operation is already running for this server.")
     try:
         yield
     finally:

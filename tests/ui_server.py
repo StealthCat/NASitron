@@ -165,6 +165,26 @@ if __name__ == "__main__":
     import app.main as main
     import uvicorn
 
+    from app import zfs_actions
+    from remote.nasitron_root_helper import ACTION_SPECS
+
+    def fake_zfs_json(server, mode, request=None):
+        if mode == "preview":
+            return dict(request=request, command="zpool replace tank scsi-SATA_OLD scsi-SATA_NEW",
+                        confirmation="REPLACE tank", fingerprint="fixture", target_id="scsi-SATA_OLD",
+                        warning="Replaces the selected member and starts reconstruction.", dry_run="")
+        members = [dict(guid="200", id="mirror-0", display="mirror-0", state="ONLINE", group=True, parent_guid="", role="data")]
+        members.extend(dict(guid=str(300+i), id=f"scsi-SATA_WDC_WD60EFAX-68S_WD-DEMO{i}",
+                            display=f"scsi-SATA_WDC_WD60EFAX-68S_WD-DEMO{i}", state="ONLINE", group=False, parent_guid="200", role="data") for i in range(2))
+        return dict(protocol=1, pools=[dict(name="tank", members=members)] if server.id == sid else [],
+                    disks=[dict(id=f"scsi-SATA_ST6000VN001-2BB1_ZR13TAY{i:02d}", size=6000000000000) for i in range(8)] if server.id == sid else [],
+                    importable=[], actions=[dict(id=k, label=v[0], warning=v[1]) for k, v in ACTION_SPECS.items()])
+
+    def reject_zfs_execution(*args, **kwargs):
+        raise RuntimeError("Synthetic fixture: remote execution is disabled")
+
+    zfs_actions.helper_json = fake_zfs_json
+    zfs_actions.helper_call = reject_zfs_execution
     main.start_scheduler = lambda: None
     main.stop_scheduler = lambda: None
     uvicorn.run(main.app, host="127.0.0.1", port=8765, log_level="warning")

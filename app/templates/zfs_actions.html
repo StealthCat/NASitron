@@ -1,28 +1,39 @@
 {% extends 'base.html' %}{% block title %}ZFS administration · {{ server.name }}{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="/static/zfs_actions.css?v=0.11.1">
+<div class="zfs-workspace">
 <div class="page-head"><div><div class="hero-kicker">Storage administration</div><h1>ZFS actions · {{ server.name }}</h1><p class="muted">Choose an action, review its command and affected devices, then confirm.</p></div><a class="button" href="/servers/{{ server.id }}">Pool status</a></div>
-{% if result %}<section class="panel section-block"><h2>{{ result.action }} · {{ result.state|title }}</h2><pre>{{ result.command }}</pre><pre>{{ result.output or 'Command returned without additional output.' }}</pre><p class="subtle">Accepted means the command returned successfully. Resilvering, removal, TRIM and other background work may still be running. See pool status for progress.</p></section>{% endif %}
-{% if error %}<section class="panel"><h2>Unable to load maintenance inventory</h2><p role="alert">{{ error }}</p><p>Install the current <code>remote/nasitron_root_helper.py</code> as <code>/usr/local/sbin/nasitron-root-helper</code>, owned by root and mode 0755. The remote installer also includes this helper.</p><a class="button" href="/servers/{{ server.id }}/zfs-actions">Retry</a></section>{% endif %}
+{% if result %}<section class="panel section-block"><h2>{{ result.action|replace("zpool_", "")|replace("_", " ")|title }} · {{ result.state|title }}</h2><pre>{{ result.command }}</pre>{% if result.state == "preview" %}<p>Preview prepared. No command has been executed.</p>{% else %}<pre>{{ result.output or 'Command returned without additional output.' }}</pre>{% endif %}{% if result.state in ["unknown", "executing"] %}<p class="message" role="alert">Execution is unconfirmed. Inspect pool status before preparing another action.</p>{% endif %}<p class="subtle">Accepted means the command returned successfully. Resilvering, removal, TRIM and other background work may still be running. See pool status for progress.</p></section>{% endif %}
+{% if error %}<section class="panel"><h2>Unable to load maintenance inventory</h2><p role="alert">{{ error }}</p><details><summary>Remote helper setup</summary><p>Install the current <code>remote/nasitron_root_helper.py</code> as <code>/usr/local/sbin/nasitron-root-helper</code>, owned by root and mode 0755. The remote installer also includes this helper.</p></details><a class="button" href="/servers/{{ server.id }}/zfs-actions">Retry</a></section>{% endif %}
 {% if inventory %}
 <form class="panel" method="post" action="/servers/{{ server.id }}/zfs-actions/preview" id="zfs-action-form">
+<noscript><p class="message">Enable JavaScript to select and review ZFS actions.</p></noscript>
+<h2 class="zfs-step"><span>1</span> Action and pool</h2>
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<div class="grid two"><label>Action<select name="action" id="zfs-action">{% for a in inventory.actions %}<option value="{{ a.id }}">{{ a.label }}</option>{% endfor %}</select></label>
+<div class="grid two"><label>Action<select name="action" id="zfs-action">{% for group, ids in {
+'Disks and vdevs':['add','attach','replace','detach','remove','remove-cancel','offline','offline-temporary','online','expand','clear'],
+'Scrub and maintenance':['scrub','scrub-pause','scrub-stop','trim','trim-pause','trim-stop','initialize','initialize-pause','initialize-stop','resilver'],
+'Pool settings':['set','reopen','sync','checkpoint','checkpoint-discard','upgrade','reguid'],
+'Pool lifecycle':['create','import','export','split','destroy']}.items() %}<optgroup label="{{ group }}">{% for a in inventory.actions if a.id in ids %}<option value="{{ a.id }}">{{ a.label }}</option>{% endfor %}</optgroup>{% endfor %}</select></label>
 <label id="zfs-pool-field">Pool<select name="pool" id="zfs-pool" required>{% for p in inventory.pools %}<option value="{{ p.name }}">{{ p.name }}</option>{% endfor %}</select></label>
 <label id="zfs-create-field" hidden>New pool name<input name="pool" id="zfs-create" disabled maxlength="255" required></label>
 <label id="zfs-import-field" hidden>Exported pool<select name="pool" id="zfs-import" disabled required>{% for p in inventory.importable %}<option value="{{ p.guid }}">{{ p.name }} · {{ p.guid }}</option>{% endfor %}</select></label></div>
 <p class="message" id="zfs-warning" role="status"></p>
+<h2 class="zfs-step"><span>2</span> Configure the action</h2>
 <div class="grid two">
 <label id="zfs-target-field">Existing member / vdev<select name="target" id="zfs-target"></select></label>
 <label id="zfs-new-pool-field" hidden>Split destination pool<input name="new_pool" maxlength="255" disabled></label>
 </div>
-<fieldset id="zfs-disks-field"><legend>Select disks</legend><p class="subtle">Names are stable by-id identifiers without the directory prefix. Blank whole disks only; no force, wipe, or repartition shortcuts.</p><div id="zfs-disks" class="drive-choices"></div></fieldset>
+<fieldset id="zfs-disks-field"><legend id="zfs-disk-legend">Select disks</legend><p class="subtle" id="zfs-disk-help">Select blank whole disks by their stable identifiers.</p>
+<div class="zfs-disk-toolbar"><label>Filter disks<input type="search" id="zfs-disk-search" placeholder="ID or mirror name" autocomplete="off"></label><span class="badge" id="zfs-selected-count" role="status">0 selected</span></div>
+<div id="zfs-disks" class="drive-choices"></div><p id="zfs-no-matches" class="subtle" hidden>No matching disks. Clear the filter to see all choices.</p></fieldset>
 <div class="grid two" id="zfs-layout-fields">
 <label>Vdev layout<select name="layout"><option value="mirror">Mirror</option><option value="raidz1">RAIDZ1</option><option value="raidz2">RAIDZ2</option><option value="raidz3">RAIDZ3</option><option value="stripe">Individual disks / stripe (no redundancy)</option></select></label>
 <label>Allocation role<select name="role"><option value="data">Data</option><option value="log">SLOG / log</option><option value="cache">L2ARC / cache</option><option value="spare">Hot spare</option><option value="special">Special (pool-critical)</option><option value="dedup">Dedup (pool-critical)</option></select></label>
 <label>Sector alignment (ashift)<select name="ashift">{% for n in ['9','12','13','14','15','16'] %}<option value="{{ n }}" {{ 'selected' if n=='12' else '' }}>{{ n }}</option>{% endfor %}</select></label></div>
 <div class="grid two" id="zfs-property-fields" hidden><label>Property<select name="property" disabled>{% for p in ['autoexpand','autotrim','autoreplace','failmode','delegation','listsnapshots'] %}<option>{{ p }}</option>{% endfor %}</select></label><label>Value<select name="value" disabled><option>on</option><option>off</option></select></label></div>
 <p class="subtle">One new vdev per add/create operation. Attach to a RAIDZ group expands it only when the installed ZFS version and pool feature support it. ZFS rejects unsupported topology changes; a RAIDZ data member cannot simply be detached or removed.</p>
-<button type="submit" class="primary">Preview action</button><a class="button" href="/maintenance">Cancel</a>
+<div class="zfs-form-footer"><p id="zfs-validation" class="subtle" role="status"></p><div class="row"><button type="submit" class="primary" id="zfs-preview-button" disabled>Review command →</button><a class="button" href="/maintenance">Cancel</a></div></div>
 </form>
-<script id="zfs-inventory" type="application/json">{{ inventory|tojson }}</script><script defer src="/static/zfs_actions.js?v=0.11.0"></script>
-{% endif %}{% endblock %}
+<script id="zfs-inventory" type="application/json">{{ inventory|tojson }}</script><script defer src="/static/zfs_actions.js?v=0.11.1"></script>
+{% endif %}</div>{% endblock %}

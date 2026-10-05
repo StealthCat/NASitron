@@ -670,6 +670,7 @@ def _pool_members(pool: str, aliases: dict) -> list[dict]:
     if named_again.returncode or guids_again.returncode or _config_rows(named_again.stdout) != rows or _config_rows(guids_again.stdout) != ids:
         raise HelperError("Pool topology changed; refresh")
     members = []
+    ancestors = []
     for row, guid in zip(rows[1:], ids[1:]):
         if row["state"] != guid["state"] or row["depth"] != guid["depth"] or row["role"] != guid["role"] or not guid["name"].isdigit():
             raise HelperError("Pool topology changed; refresh")
@@ -683,8 +684,14 @@ def _pool_members(pool: str, aliases: dict) -> list[dict]:
             label = next(iter(aliases.get(os.path.realpath(name), [])), "")
         else:
             label = name if group else ""
-        members.append({"guid": guid["name"], "id": label, "state": row["state"], "group": group,
+        while ancestors and (ancestors[-1]["depth"] >= row["depth"] or ancestors[-1]["role"] != row["role"]):
+            ancestors.pop()
+        parent_guid = ancestors[-1]["guid"] if ancestors else ""
+        top_level_guid = ancestors[0]["guid"] if ancestors else guid["name"]
+        members.append({"parent_guid": parent_guid, "top_level_guid": top_level_guid, "guid": guid["name"], "id": label, "state": row["state"], "group": group,
                         "depth": row["depth"], "role": row["role"], "display": label or f"Unresolved member (GUID {guid['name']})"})
+        if group:
+            ancestors.append(members[-1])
     return members
 
 
@@ -730,14 +737,14 @@ def _action_request(raw: str) -> dict:
     fields = {"action", "pool", "target", "disks", "layout", "role", "new_pool", "property", "value", "ashift"}
     if not isinstance(data, dict) or set(data) - fields:
         raise HelperError("Unknown action fields")
-    if data.get("action") not in ACTION_SPECS:
-        raise HelperError("Unsupported ZFS action")
     for key, value in data.items():
         if key == "disks":
             if not isinstance(value, list) or len(value) > 64 or any(not isinstance(v, str) for v in value):
                 raise HelperError("Choose at most 64 disks")
         elif not isinstance(value, str) or len(value) > 1024 or any(ord(c) < 32 for c in value):
             raise HelperError("Invalid action field")
+    if data.get("action") not in ACTION_SPECS:
+        raise HelperError("Unsupported ZFS action")
     if not POOL_RE.fullmatch(data.get("pool", "")):
         raise HelperError("Invalid pool name or import GUID")
     return data
@@ -798,8 +805,18 @@ def action_plan(data: dict) -> dict:
                     raise HelperError("New disk is smaller than the selected member")
     if len(ids) != len(set(ids)):
         raise HelperError("Select each disk only once")
-    if action == "split" and not ids:
-        raise HelperError("Explicitly select the mirror members to split")
+    if action == "split":
+        # ZFS silently chooses a disk for every unspecified mirror. Require complete
+        # explicit coverage so execution never detaches an unreviewed disk.
+        roots = [m for m in members if not m.get("parent_guid") and m.get("role", "data") in {"data", "special", "dedup"}]
+        if not roots or any(not re.fullmatch(r"mirror-[0-9]+", m["id"]) for m in roots):
+            raise HelperError("Split requires mirrored data/special/dedup vdevs")
+        selected_members = [m for m in members if m["id"] in ids and not m["group"]]
+        root_ids = {m["guid"] for m in roots}
+        if any(m.get("parent_guid") not in root_ids for m in selected_members):
+            raise HelperError("Select direct members of each top-level mirror")
+        if any(sum(m.get("parent_guid") == root["guid"] for m in selected_members) != 1 for root in roots):
+            raise HelperError("Select exactly one disk from every data/special/dedup mirror")
     if action in TOPOLOGY_ACTIONS and action != "create":
         scan = _scan_in_progress(pool)
         if "in progress" in scan.lower():
@@ -873,7 +890,7 @@ def action_plan(data: dict) -> dict:
     signature = json.dumps({"request": data, "members": members, "disks": identities, "pools": sorted(pools)}, sort_keys=True)
     return {"request": data, "args": args, "fingerprint": hashlib.sha256(signature.encode()).hexdigest(),
             "command": shlex.join(["zpool"] + args), "warning": ACTION_SPECS[action][1],
-            "dry_run": dry_output, "confirmation": f"{action.upper()} {pool}"}
+            "target_id": member_id, "dry_run": dry_output, "confirmation": f"{action.upper()} {pool}"}
 
 
 def _run_action(args: list[str]) -> subprocess.CompletedProcess[str]:

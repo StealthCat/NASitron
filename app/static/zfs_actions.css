@@ -1,0 +1,22 @@
+.zfs-workspace { max-width:1180px; margin:0 auto; }
+.zfs-workspace .panel { margin-bottom:20px; }
+.zfs-workspace pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.zfs-workspace form > .grid { gap:18px; margin:18px 0; }
+.zfs-workspace label { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.zfs-workspace select,.zfs-workspace input { max-width:100%; min-width:0; }
+.zfs-step { display:flex; align-items:center; gap:12px; font-size:1rem; margin:8px 0 18px; }
+.zfs-step span { display:grid; place-items:center; border:1px solid var(--border); border-radius:50%; width:30px; height:30px; color:var(--accent); font-size:.8rem; }
+.zfs-workspace fieldset { min-width:0; border:1px solid var(--border); border-radius:12px; padding:16px; margin:18px 0; }
+.zfs-workspace legend { padding:0 8px; font-weight:600; }
+.zfs-disk-toolbar { display:flex; align-items:end; justify-content:space-between; gap:16px; }
+.zfs-disk-toolbar label { flex:1; max-width:500px; }
+.zfs-workspace .drive-choices { max-height:340px; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); }
+.zfs-workspace .drive-choices label { flex-direction:row; cursor:pointer; align-items:flex-start; padding:14px; }
+.zfs-workspace .drive-choices label:has(input:checked) { border-color:var(--accent); background:rgba(252,24,89,.07); }
+.zfs-workspace .drive-choices label:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+.zfs-workspace .drive-choices input { margin:2px 0; }
+.zfs-disk-copy { display:flex; flex-direction:column; gap:6px; overflow-wrap:anywhere; font-size:.83rem; }
+.zfs-form-footer { margin-top:22px; padding-top:16px; border-top:1px solid var(--border); }
+.zfs-form-footer .row { gap:10px; flex-wrap:wrap; }
+#zfs-submit-status { display:block; margin-top:12px; }
+@media(max-width:600px) { .zfs-disk-toolbar { align-items:stretch; flex-direction:column; gap:8px; } .zfs-workspace .page-head { align-items:flex-start; flex-direction:column; } }

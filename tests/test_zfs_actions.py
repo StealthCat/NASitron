@@ -16,8 +16,8 @@ NEW = 'scsi-SATA_ST6000VN001-2BB1_ZR13TAY4Y'
 @pytest.fixture
 def host(monkeypatch, tmp_path):
     calls = []
-    members = [dict(guid='200', id='mirror-0', state='ONLINE', group=True),
-               dict(guid='300', id=OLD, state='ONLINE', group=False)]
+    members = [dict(guid='200', id='mirror-0', state='ONLINE', group=True, parent_guid='', role='data'),
+               dict(guid='300', id=OLD, state='ONLINE', group=False, parent_guid='200', role='data')]
     monkeypatch.setattr(h, 'LOCK_PATH', str(tmp_path / 'lock'))
     monkeypatch.setattr(h, '_aliases', lambda: {})
     monkeypatch.setattr(h, '_pool_names', lambda: {'primary-z2'})
@@ -209,3 +209,53 @@ def test_alias_preference_and_partition_spares(monkeypatch, tmp_path):
     assert h._aliases()['/dev/nasitron-test-disk'][0] == 'scsi-disk'
     rows = h._config_rows('config:\n tank ONLINE 0 0 0\n spares\n   scsi-spare AVAIL\nerrors: none')
     assert rows[-1]['name'] == 'scsi-spare' and rows[-1]['role'] == 'spares'
+
+
+def test_split_never_lets_zfs_choose_unspecified_mirror_disks(host):
+    calls, members = host
+    members.extend([dict(guid='400', id='mirror-1', state='ONLINE', group=True, parent_guid='', role='special'),
+                    dict(guid='500', id='scsi-other', state='ONLINE', group=False, parent_guid='400', role='special')])
+    with pytest.raises(h.HelperError, match='every.*mirror'):
+        h.action_plan(request('split', new_pool='backup', disks=[OLD]))
+    assert not calls
+    assert h.action_plan(request('split', new_pool='backup', disks=[OLD, 'scsi-other']))['args'][-2:] == [OLD, 'scsi-other']
+    members[-1]['parent_guid'] = 'nested-replacing-vdev'
+    with pytest.raises(h.HelperError, match='direct members'):
+        h.action_plan(request('split', new_pool='backup', disks=[OLD, 'scsi-other']))
+
+
+def test_split_rejects_nonmirror_and_duplicate_selection(host):
+    calls, members = host
+    members.append(dict(guid='301', id='scsi-second', state='ONLINE', group=False, parent_guid='200', role='data'))
+    with pytest.raises(h.HelperError, match='exactly one'):
+        h.action_plan(request('split', new_pool='backup', disks=[OLD, 'scsi-second']))
+    members[0]['id'] = 'raidz2-0'
+    with pytest.raises(h.HelperError, match='mirrored'):
+        h.action_plan(request('split', new_pool='backup', disks=[OLD]))
+    assert not calls
+
+
+def test_topology_parentage_and_allocation_roles(monkeypatch):
+    named = f'''config:
+    tank ONLINE 0 0 0
+      mirror-0 ONLINE 0 0 0
+        /dev/disk/by-id/{OLD} ONLINE 0 0 0
+    special
+      mirror-1 ONLINE 0 0 0
+        /dev/disk/by-id/scsi-special ONLINE 0 0 0
+    spares
+      /dev/disk/by-id/scsi-spare AVAIL
+errors: none
+'''
+    guids = named.replace('mirror-0', '200').replace('mirror-1', '400').replace('/dev/disk/by-id/'+OLD,'300').replace('/dev/disk/by-id/scsi-special','500').replace('/dev/disk/by-id/scsi-spare','600')
+    monkeypatch.setattr(h, 'ZPOOL', lambda: 'zpool')
+    monkeypatch.setattr(h, '_run', lambda args, **kw: CompletedProcess(args, 0, guids if '-g' in args else named, ''))
+    members = h._pool_members('tank', {})
+    assert [m['parent_guid'] for m in members] == ['', '200', '', '400', '']
+    assert members[3]['role'] == 'special'
+    assert members[-1]['role'] == 'spares'
+
+
+def test_malformed_action_type_is_validation_error():
+    with pytest.raises(h.HelperError):
+        h._action_request('{"action":[],"pool":"tank"}')

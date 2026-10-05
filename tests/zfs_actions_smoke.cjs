@@ -1,0 +1,55 @@
+/* Uses tests/ui_server.py synthetic inventory; never executes a disk action. */
+const {chromium} = require('playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+(async () => {
+  const browser = await chromium.launch({headless:true, ...(process.env.CHROMIUM_EXECUTABLE ? {executablePath:process.env.CHROMIUM_EXECUTABLE} : {})});
+  const page = await browser.newPage({viewport:{width:1440,height:1080}});
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  fs.mkdirSync('test-results', {recursive:true});
+  try {
+    await page.goto('http://127.0.0.1:8765/login');
+    await page.locator('[name=username]').fill(process.env.NASITRON_WEB_USERNAME || 'ci-admin');
+    await page.locator('[name=password]').fill(process.env.NASITRON_WEB_PASSWORD || 'ci-password-strong');
+    await Promise.all([page.waitForURL('http://127.0.0.1:8765/'), page.locator('button[type=submit]').click()]);
+    await page.goto('http://127.0.0.1:8765/servers/1/zfs-actions');
+    await page.locator('#zfs-action').selectOption('replace');
+    assert.equal(await page.locator('#zfs-preview-button').isDisabled(),true);
+    await page.locator('#zfs-target').selectOption('300');
+    await page.locator('#zfs-disk-search').fill('TAY03');
+    assert.equal(await page.locator('#zfs-disks label:visible').count(),1);
+    await page.locator('#zfs-disks input[value$="TAY03"]').check();
+    assert.equal(await page.locator('#zfs-preview-button').isEnabled(),true);
+    await page.locator('#zfs-disk-search').fill('TAY04');
+    assert.equal(await page.locator('#zfs-disks label:visible').count(),2); // selected stays visible
+    await page.locator('#zfs-disks input[value$="TAY04"]').check();
+    assert.equal(await page.locator('#zfs-disks input:checked').count(),1);
+    await page.locator('#zfs-disk-search').fill('');
+    await page.screenshot({path:'test-results/zfs-actions-desktop.png',fullPage:true});
+    await page.locator('#zfs-preview-button').click();
+    await page.waitForURL('**/zfs-actions/preview');
+    assert.match(await page.locator('.zfs-workspace').textContent(),/REPLACE tank/);
+    await page.screenshot({path:'test-results/zfs-review-desktop.png',fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    await page.screenshot({path:'test-results/zfs-review-mobile.png',fullPage:true});
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'review overflows mobile');
+    await page.goto('http://127.0.0.1:8765/servers/1/zfs-actions');
+    await page.locator('#zfs-action').selectOption('split');
+    await page.locator('[name=new_pool]').fill('backup');
+    await page.locator('#zfs-disks input').first().check();
+    assert.equal(await page.locator('#zfs-preview-button').isEnabled(),true);
+    await page.locator('#zfs-disks input').last().check();
+    assert.equal(await page.locator('#zfs-preview-button').isDisabled(),true);
+    await page.locator('#zfs-action').selectOption('add');
+    await page.screenshot({path:'test-results/zfs-actions-mobile.png',fullPage:true});
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'form overflows mobile');
+    await page.goto('http://127.0.0.1:8765/servers/2/zfs-actions');
+    assert.match(await page.locator('#zfs-validation').textContent(),/No imported pools/);
+    await page.locator('#zfs-action').selectOption('import');
+    assert.match(await page.locator('#zfs-validation').textContent(),/No exported pools/);
+    assert.equal(await page.locator('#zfs-preview-button').isDisabled(),true);
+    assert.deepEqual(errors,[]);
+    console.log('ZFS desktop/mobile, selection, preview and empty-state checks passed');
+  } finally { await browser.close(); }
+})().catch(e => { console.error(e); process.exit(1); });

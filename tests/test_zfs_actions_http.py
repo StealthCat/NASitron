@@ -85,7 +85,9 @@ def test_preview_bound_to_actor_server_and_expiry(web, change, expected):
 
 
 @pytest.mark.parametrize('result,state', [({'exit': 2, 'stderr': 'topology changed'}, 'failed'),
-    ({'exit': 124, 'stderr': 'timeout'}, 'unknown'), (RuntimeError('connection lost'), 'unknown')])
+    ({'exit': 124, 'stderr': 'timeout'}, 'unknown'),
+    ({'exit': 255, 'stderr': 'Remote command deadline exceeded'}, 'unknown'),
+    ({'exit': -1, 'stderr': 'No exit status'}, 'unknown'), (RuntimeError('connection lost'), 'unknown')])
 def test_failed_and_unknown_outcomes_cannot_replay(web, result, state):
     aid = preview(web)
     if isinstance(result, Exception):
@@ -142,3 +144,36 @@ def test_inventory_renders_and_json_is_escaped(web, tmp_path):
     assert 'scsi-</script>' not in response.text
     encoded = re.search(r'<script id="zfs-inventory" type="application/json">(.*?)</script>', response.text)[1]
     assert json.loads(encoded)['protocol'] == 1
+
+
+def test_incompatible_helper_does_not_render_action_form(web):
+    client, sid, helper, runner, _ = web
+    helper.return_value = {'protocol': 2, 'actions': 'invalid'}
+    response = client.get(f'/servers/{sid}/zfs-actions')
+    assert response.status_code == 200
+    assert 'id="zfs-action-form"' not in response.text
+    assert 'Update the remote helper' in response.text
+
+
+def test_busy_preview_and_execute_are_conflicts_without_consuming_preview(web):
+    from app.maintenance import maintenance_lock
+    aid = preview(web)
+    client, sid, helper, runner, _ = web
+    with maintenance_lock(sid):
+        response = client.post(f'/servers/{sid}/zfs-actions/preview', data={
+            'action': 'offline', 'pool': 'primary-z2', 'csrf_token': csrf_token()})
+        assert response.status_code == 409
+        assert submit(web, aid).status_code == 409
+    assert not runner.called
+    with SessionLocal() as db:
+        assert db.get(MaintenanceAction, aid).state == 'preview'
+    assert submit(web, aid).status_code == 303
+
+
+def test_refresh_failure_does_not_hide_successful_execution(web, monkeypatch):
+    aid = preview(web)
+    monkeypatch.setattr(actions, 'trigger_now', Mock(side_effect=RuntimeError('Scheduler unavailable')))
+    assert submit(web, aid).status_code == 303
+    with SessionLocal() as db:
+        assert db.get(MaintenanceAction, aid).state == 'accepted'
+    assert web[3].call_count == 1
