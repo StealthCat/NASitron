@@ -12,3 +12,8 @@
 .storage-tabs ~ .panel th { font-size:.8rem; letter-spacing:.02em; }
 #storage-policy-feedback:focus { outline:2px solid var(--accent); outline-offset:3px; }
 .storage-tabs ~ .panel details summary { cursor:pointer; padding:6px 0; }
+
+.storage-tabs { align-items:stretch; }
+.storage-tabs .button { display:flex; align-items:center; justify-content:center; }
+.storage-capacity th, .storage-capacity td { white-space:nowrap; }
+.storage-capacity td:last-child { white-space:normal; min-width:16ch; }

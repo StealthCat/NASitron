@@ -14,6 +14,7 @@ const fs = require('node:fs');
       height: 1000
     }
   });
+  await page.emulateMedia({reducedMotion:'reduce'});
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   fs.mkdirSync('test-results', {
@@ -36,6 +37,7 @@ const fs = require('node:fs');
       return count;
     });
     assert.ok(plottedPixels > 50, 'Sparse observations must produce visible markers');
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({
       path: 'test-results/dashboard-desktop.png',
       fullPage: true
@@ -53,6 +55,7 @@ const fs = require('node:fs');
     await page.locator('.chart-status').filter({
       hasText: 'Updated'
     }).first().waitFor();
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({
       path: 'test-results/server-performance.png',
       fullPage: true
@@ -69,6 +72,7 @@ const fs = require('node:fs');
     await page.locator('input[type=search]').fill('DEMO-024');
     await page.waitForFunction(() => document.querySelectorAll('tbody tr:not([hidden])').length === 1);
     assert.equal(await page.locator('tbody tr:visible').count(), 1);
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({
       path: 'test-results/drives-filter.png',
       fullPage: true
@@ -104,6 +108,7 @@ const fs = require('node:fs');
 
     await capacity.locator('.pool-datasets summary').click();
     assert.match(await capacity.locator('.pool-datasets').innerText(), /tank\/data/);
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({path: 'test-results/pools-desktop.png', fullPage: true});
     await page.locator('.pool-pane:visible .pool-topology').screenshot({path: 'test-results/topology-desktop.png'});
     assert.equal(await page.locator('.pool-tabs [role=tab]').count(), 2);
@@ -115,6 +120,7 @@ const fs = require('node:fs');
     assert.equal(await page.locator('.pool-tabs [aria-selected=true] .pool-tab-server').innerText(), 'Boreas Demo');
     await page.locator('.pool-pane:visible .pool-raw summary').click();
     assert.match(await page.locator('.pool-pane:visible .pool-raw pre').innerText(), /tank\/data:<0xdeadbeef>/);
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({path: 'test-results/pool-errors-desktop.png', fullPage: true});
     await page.locator('.pool-tabs [aria-selected=true]').focus();
     await page.keyboard.press('Home');
@@ -141,6 +147,7 @@ const fs = require('node:fs');
     await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
     assert.ok(page.url().includes('start='));
     assert.equal(await page.locator('#io-auto').isDisabled(), true);
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({path: 'test-results/disk-io-desktop.png', fullPage: true});
     await page.locator('#io-disk').selectOption('DEMO-001');
     await page.waitForURL(/identity=DEMO-001/);
@@ -153,6 +160,7 @@ const fs = require('node:fs');
     await page.locator('.chart-status').filter({
       hasText: 'Updated'
     }).waitFor();
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({
       path: 'test-results/dashboard-mobile.png',
       fullPage: true
@@ -168,16 +176,19 @@ const fs = require('node:fs');
     const capacityScroll = page.locator('.pool-pane:visible .capacity-scroll').first();
     assert.equal(await capacityScroll.evaluate(el => el.scrollWidth > el.clientWidth), true);
     await capacityScroll.evaluate(el => el.scrollLeft = el.scrollWidth);
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({path: 'test-results/pools-mobile.png', fullPage: true});
     await page.locator('.pool-pane:visible .pool-topology').screenshot({path: 'test-results/topology-mobile.png'});
     await page.locator('.pool-tabs [role=tab]').nth(1).click();
     assert.equal(await page.locator('.pool-pane:visible').count(), 1);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile verbose status overflows');
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({path: 'test-results/pool-errors-mobile.png', fullPage: true});
 
     await page.goto('http://127.0.0.1:8765/disk-io?server_id=1&identity=DEMO-000&hours=0.25');
     await page.locator('#io-charts .chart-status').filter({hasText: 'Updated'}).last().waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile disk I/O overflows');
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({path: 'test-results/disk-io-mobile.png', fullPage: true});
     await page.setViewportSize({width:1440,height:1000});
     await page.goto('http://127.0.0.1:8765/disk-io?server_id=1&identity=DEMO-000');
@@ -187,14 +198,20 @@ const fs = require('node:fs');
     await page.waitForFunction(() => document.querySelectorAll('#io-comparisons canvas').length===3);
     assert.equal(await page.locator('#io-comparisons .chart-status').filter({hasText:'Updated'}).count(),2);
     assert.equal(await page.locator('#io-comparisons .chart-status').filter({hasText:'No samples'}).count(),1);
+    await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     await page.screenshot({path:'test-results/disk-comparison.png',fullPage:true});
     for (const width of [1440,390,320]) {
       await page.setViewportSize({width,height:1000});
       for (const path of ['drive-bays','diagnostics','timeline','settings/database','forecasts','snapshots','operations','preferences']) {
         const response=await page.goto('http://127.0.0.1:8765/'+path);
         assert.equal(response.status(),200,path);
+        if (path==='settings/database' && width<600) {
+          assert.ok(await page.locator('.statlist dd').first().evaluate(el=>el.getBoundingClientRect().width>innerWidth/2), 'Property values are squeezed on mobile');
+        }
+        if(path==='drive-bays') assert.equal(await page.locator('.enclosure-scroll').first().getAttribute('tabindex'),'0');
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${path} overflows at ${width}`);
-        await page.screenshot({path:`test-results/${path.replace('/','-')}-${width}.png`,fullPage:true});
+        await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
+    await page.screenshot({path:`test-results/${path.replace('/','-')}-${width}.png`,fullPage:true});
       }
     }
     assert.deepEqual(errors, []);

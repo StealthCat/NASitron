@@ -5,6 +5,7 @@ const fs = require('node:fs');
 (async () => {
   const browser = await chromium.launch({headless:true});
   const page = await browser.newPage();
+  await page.emulateMedia({reducedMotion:'reduce'});
   const errors=[];page.on('pageerror', e=>errors.push(e.message));
   fs.mkdirSync('test-results',{recursive:true});
   try {
@@ -31,7 +32,8 @@ const fs = require('node:fs');
           assert.equal(await page.locator('[name=destination]').isVisible(),true);
           assert.equal(await page.locator('[name=disk]').isVisible(),false);
         }
-        await page.screenshot({path:`test-results/storage-${tab}-${width}.png`,fullPage:true});
+        await page.evaluate(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
+    await page.screenshot({path:`test-results/storage-${tab}-${width}.png`,fullPage:true});
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), `${tab} overflows at ${width}`);
       }
     }

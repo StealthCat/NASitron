@@ -8,6 +8,14 @@
     function show(id, visible) { const el=document.getElementById(id); el.hidden=!visible; el.querySelectorAll('input,select').forEach(e=>e.disabled=!visible); }
     function render() {
       const a=form.elements.action.value;
+      const smart=a.startsWith('smart-'), snapshot=a.startsWith('snapshot-'), helper=a.startsWith('helper-');
+      const label=document.getElementById('storage-target-label');
+      if(label) label.textContent=smart?'Physical disk by-id name':snapshot?'Snapshot':'Dataset';
+      form.elements.target.placeholder=smart?'scsi-SATA_…':snapshot?'tank/data@daily':'tank/data';
+      if(smart) form.elements.target.removeAttribute('list'); else form.elements.target.setAttribute('list','storage-targets');
+      const hint=document.getElementById('storage-action-hint');
+      if(hint) hint.textContent=smart?'Enter the physical disk’s by-id basename without /dev/disk/by-id/. Review the exact command on the next page.':helper?'Review the helper version and digest, then type the confirmation on the next page.':snapshot?'Use dataset@snapshot. Review the exact command and its recovery implications before confirming.':'Use an existing dataset, or a new child name when creating one. Mountpoint changes are restricted to /mnt and /srv. Review the command before confirming.';
+
       show('storage-target', !a.startsWith('helper-'));
       show('storage-property', ['dataset-set','dataset-inherit'].includes(a));
       show('storage-value', ['dataset-set','zvol-create'].includes(a));

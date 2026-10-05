@@ -301,3 +301,10 @@ button.bay-empty { width:100%; text-align:left; font:inherit; cursor:pointer; bo
 .bay-dialog::backdrop { background:rgba(0,0,0,.7); backdrop-filter:blur(4px); }
 .bay-dialog select { width:100%; min-width:0; margin:8px 0; }
 .bay-dialog .row { justify-content:flex-end; margin-top:22px; }
+
+/* Stack long property values instead of squeezing them into a narrow column. */
+@media(max-width:600px) {
+  .statlist { grid-template-columns:minmax(0,1fr); gap:4px; }
+  .statlist dd { margin:0 0 12px; }
+}
+.enclosure-scroll:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }

@@ -1,5 +1,9 @@
 # NASitron
 
+> **1.0.2:** Browser-verified desktop/mobile layouts, readable stacked property values
+> on phones, clearer action-specific input guidance, and keyboard-accessible horizontal
+> scrolling for drive bays.
+
 > **1.0.1:** Tighten replication verification, cancellation and destination locking;
 > prevent scheduler database contention; improve disk identity matching and expansion
 > estimates; polish forms and preserve schedule input on validation errors.

@@ -7,7 +7,7 @@
   <title>{% block title %}NASitron{% endblock %}</title>
   <link rel="icon" href="/static/nasitron-logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
-  <link rel="stylesheet" href="/static/ui.css?v=0.10.2">
+  <link rel="stylesheet" href="/static/ui.css?v=1.0.2">
   <script defer src="/static/app.js?v=0.10.0"></script>
 </head>
 <body data-timezone="{{ display_timezone() }}" data-role="{{ effective_role(request.state.current_user) }}" data-section="{{ request.url.path.split('/')[1] or 'overview' }}">
