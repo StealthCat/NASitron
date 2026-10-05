@@ -17,7 +17,7 @@ const fs = require('node:fs');
       for(const tab of ['overview','planner','datasets','snapshots','jobs','events','host']) {
         const response=await page.goto(`http://127.0.0.1:8765/servers/1/storage?tab=${tab}`);
         assert.equal(response.status(),200);
-        assert.equal(await page.locator('[aria-current=page]').count(),1);
+        assert.equal(await page.locator('.storage-tabs [aria-current=page]').count(),1);
         if(tab==='datasets') {
           await page.locator('#storage-action-form [name=action]').selectOption('dataset-inherit');
           assert.equal(await page.locator('#storage-value').isVisible(),false);
@@ -31,8 +31,8 @@ const fs = require('node:fs');
           assert.equal(await page.locator('[name=destination]').isVisible(),true);
           assert.equal(await page.locator('[name=disk]').isVisible(),false);
         }
-        assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), `${tab} overflows at ${width}`);
         await page.screenshot({path:`test-results/storage-${tab}-${width}.png`,fullPage:true});
+        assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), `${tab} overflows at ${width}`);
       }
     }
     assert.deepEqual(errors,[]);
