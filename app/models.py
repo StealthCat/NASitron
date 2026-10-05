@@ -279,3 +279,49 @@ class SavedView(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('web_users.id',ondelete='CASCADE'),index=True)
     name: Mapped[str] = mapped_column(String(80))
     path: Mapped[str] = mapped_column(Text)
+
+
+class StoragePolicy(Base):
+    __tablename__ = 'storage_policies'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey('servers.id', ondelete='CASCADE'))
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(30))
+    config_json: Mapped[str] = mapped_column(Text, default='{}')
+    cron: Mapped[str] = mapped_column(String(120))
+    timezone: Mapped[str] = mapped_column(String(100), default='UTC')
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_run: Mapped[datetime] = mapped_column(DateTime, index=True)
+    last_success: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class StorageRun(Base):
+    __tablename__ = 'storage_runs'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    policy_id: Mapped[int] = mapped_column(ForeignKey('storage_policies.id', ondelete='CASCADE'), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    state: Mapped[str] = mapped_column(String(30), default='queued')
+    bytes_sent: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[str] = mapped_column(Text, default='')
+
+
+class StorageSample(Base):
+    __tablename__ = 'storage_samples'
+    __table_args__ = (Index('ix_storage_sample', 'server_id', 'name', 'captured_at'),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey('servers.id', ondelete='CASCADE'))
+    name: Mapped[str] = mapped_column(String(255))
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    used: Mapped[int] = mapped_column(Integer)
+    available: Mapped[int] = mapped_column(Integer)
+
+
+class StorageHostCache(Base):
+    __tablename__ = 'storage_host_cache'
+    server_id: Mapped[int] = mapped_column(ForeignKey('servers.id', ondelete='CASCADE'), primary_key=True)
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payload_json: Mapped[str] = mapped_column(Text, default='{}')
+    error: Mapped[str] = mapped_column(Text, default='')

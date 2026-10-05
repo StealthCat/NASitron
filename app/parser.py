@@ -480,6 +480,11 @@ def parse_smart(text: str, command_exit: int | None = None) -> dict[str, Any]:
         temp = nvme.get("temperature")
     result["temperature_c"] = temp
     result["power_on_hours"] = (data.get("power_on_time") or {}).get("hours")
+    self_test = (data.get("ata_smart_data") or {}).get("self_test") or {}
+    result["self_test_status"] = (self_test.get("status") or {}).get("string")
+    result["self_test_polling_minutes"] = self_test.get("polling_minutes") or {}
+    logs = data.get("ata_smart_self_test_log") or {}
+    result["self_test_history"] = ((logs.get("extended") or logs.get("standard") or {}).get("table") or [])[:32]
     result["percentage_used"] = nvme.get("percentage_used")
     result["media_errors"] = nvme.get("media_errors")
 

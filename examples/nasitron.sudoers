@@ -1,3 +1,5 @@
+# Version 1.0: the fixed helper also validates storage inventory, dataset/snapshot
+# actions, SMART tests, owned replication streams and reviewed helper updates.
 # /etc/sudoers.d/nasitron
 #
 # Install remote/nasitron_root_helper.py as:

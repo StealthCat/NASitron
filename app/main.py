@@ -79,6 +79,7 @@ from .insights import install as install_insights
 from .observability import install as install_observability
 from .personalization import install as install_personalization, user_timezone
 from .zfs_actions import install as install_zfs_actions
+from .storage_admin import install as install_storage_admin
 from .service import latest_snapshot
 from .settings_store import ensure_defaults, get_many, get_setting, set_setting, get_int
 from .support import sanitize_diagnostics, support_bundle_lock
@@ -2472,3 +2473,5 @@ install_insights(app, templates)
 install_observability(app, templates)
 install_personalization(app, templates)
 install_zfs_actions(app, templates)
+
+install_storage_admin(app, templates)

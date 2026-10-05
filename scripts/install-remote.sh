@@ -710,7 +710,8 @@ def action_inventory() -> dict:
         except (HelperError, OSError):
             continue
     return {"protocol": 1, "pools": pools, "disks": disks, "importable": _importable_pools(),
-            "actions": [{"id": key, "label": value[0], "warning": value[1]} for key, value in ACTION_SPECS.items()]}
+            "capabilities": capabilities(),
+            "actions": [{"id": key, "label": value[0], "warning": value[1]} for key, value in ACTION_SPECS.items() if key not in STORAGE_ACTIONS]}
 
 
 def _importable_pools() -> list[dict]:
@@ -754,6 +755,8 @@ def action_plan(data: dict) -> dict:
     import hashlib
     import shlex
     action, pool = data["action"], data["pool"]
+    if action in STORAGE_ACTIONS:
+        return _storage_plan(data)
     aliases = _aliases()
     pools = _pool_names()
     members = []
@@ -779,6 +782,10 @@ def action_plan(data: dict) -> dict:
             _by_id(selected["id"])
         if selected["group"] and action not in {"attach", "remove"}:
             raise HelperError("This action requires a disk, not a vdev group")
+    if action == "attach" and selected and selected["id"].startswith("raidz"):
+        feature = _run([ZPOOL(), "get", "-H", "-o", "value", "feature@raidz_expansion", pool], timeout=15)
+        if feature.returncode or feature.stdout.strip() not in {"enabled", "active"}:
+            raise HelperError("RAIDZ expansion is not supported and enabled for this pool")
     ids = data.get("disks", [])
     if ids and action not in NEW_DISKS | {"split"}:
         raise HelperError("This action does not accept new disks")
@@ -921,7 +928,316 @@ def cmd_actions(args: list[str]) -> int:
             return 0
         if len(args) != 3 or args[2] != plan["fingerprint"]:
             raise HelperError("Pool topology or disk identity changed. Generate a new preview.")
-        return _forward(_run_action(plan["args"]))
+        return _forward(_execute_plan(plan))
+
+
+# NASitron 1.0 storage protocol. This remains embedded in the standalone helper.
+HELPER_VERSION = "1.0.0"
+DATASET_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*)*$")
+SNAP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,200}$")
+DATASET_PROPS = {'compression', 'recordsize', 'quota', 'refquota', 'reservation', 'refreservation', 'atime', 'readonly', 'sync', 'mountpoint'}
+STORAGE_ACTIONS = {
+    'dataset-mount': ('Mount filesystem', 'Mounts the filesystem at its configured mountpoint.'),
+    'dataset-unmount': ('Unmount filesystem', 'Unmounts the filesystem; busy filesystems are not forced.'),
+    'dataset-create': ('Create filesystem', 'Creates a child filesystem.'),
+    'zvol-create': ('Create zvol', 'Creates a volume with the specified capacity; space is reserved by default.'),
+    'dataset-set': ('Set dataset property', 'Changes this property locally; children may inherit it. Record size and compression affect new writes.'),
+    'dataset-inherit': ('Inherit dataset property', 'Removes the local override and uses the inherited property.'),
+    'snapshot-create': ('Create snapshot', 'Creates a point-in-time snapshot of one dataset.'),
+    'snapshot-destroy': ('Delete snapshot', 'Permanently deletes this recovery point. Holds and clones block deletion.'),
+    'snapshot-hold': ('Hold snapshot', 'Protects this snapshot from deletion with a NASitron hold.'),
+    'snapshot-release': ('Release snapshot hold', 'Removes the NASitron hold; other holds are preserved.'),
+    'snapshot-clone': ('Clone for recovery', 'Creates an unmounted clone for inspection; the original dataset is unchanged.'),
+    'snapshot-rollback': ('Rollback dataset', 'Discards all changes since this snapshot. Newer snapshots are never automatically deleted.'),
+    'smart-short': ('Start short SMART test', 'Starts a self-test on this physical disk.'),
+    'smart-long': ('Start extended SMART test', 'Starts a potentially lengthy self-test on this physical disk.'),
+    'helper-update': ('Update remote helper', 'Installs the reviewed helper from StealthCat/NASitron main, retaining a root-owned rollback copy.'),
+    'helper-rollback': ('Roll back remote helper', 'Restores the previous root-owned helper. Older helpers may not support current features.'),
+}
+ACTION_SPECS.update(STORAGE_ACTIONS)
+
+
+def ZFS():
+    return _tool('zfs', ['/usr/sbin/zfs', '/usr/bin/zfs'])
+
+
+def _dataset(name, snapshot=False):
+    if not isinstance(name, str) or len(name) > 255:
+        raise HelperError('Invalid dataset name')
+    fields = name.split('@')
+    if len(fields) != (2 if snapshot else 1) or not DATASET_RE.fullmatch(fields[0]):
+        raise HelperError('Choose an exact dataset name')
+    if snapshot and not SNAP_RE.fullmatch(fields[1]):
+        raise HelperError('Invalid snapshot name')
+    return name
+
+
+def _zfs(args):
+    result = _run([ZFS()] + args, timeout=120)
+    if result.returncode:
+        if args[0] == 'list' and 'no datasets available' in (result.stdout + result.stderr).lower():
+            return ''
+        raise HelperError(result.stderr.strip() or 'ZFS command failed')
+    return result.stdout
+
+
+def _get_property(name, prop):
+    return _zfs(['get', '-Hp', '-o', 'value', prop, name]).strip()
+
+
+def storage_inventory():
+    columns = ['name', 'type', 'used', 'available', 'referenced', 'usedbysnapshots', 'usedbydataset', 'usedbychildren', 'usedbyrefreservation', 'quota', 'refquota', 'reservation', 'refreservation', 'mountpoint', 'guid']
+    datasets = []
+    for line in _zfs(['list', '-Hp', '-t', 'filesystem,volume', '-o', ','.join(columns)]).splitlines():
+        values = line.split('\t')
+        if len(values) == len(columns):
+            datasets.append(dict(zip(columns, values)))
+    props = []
+    if datasets:
+        for line in _zfs(['get', '-Hp', '-t', 'filesystem,volume', '-o', 'name,property,value,source', ','.join(sorted(DATASET_PROPS))]).splitlines():
+            values = line.split('\t')
+            if len(values) == 4:
+                props.append(dict(zip(['name', 'property', 'value', 'source'], values)))
+    snaps = []
+    for line in _zfs(['list', '-Hp', '-t', 'snapshot', '-o', 'name,creation,used,referenced,userrefs,clones,guid', '-s', 'creation']).splitlines():
+        values = line.split('\t')
+        if len(values) == 7:
+            snaps.append(dict(zip(['name', 'creation', 'used', 'referenced', 'holds', 'clones', 'guid'], values)))
+    events = _run([ZPOOL(), 'events', '-v'], timeout=20)
+    return {'protocol': 2, 'helper_version': HELPER_VERSION, 'datasets': datasets, 'properties': props,
+            'snapshots': snaps, 'events': events.stdout[-200000:], 'capabilities': capabilities(),
+            'actions': [{'id': k, 'label': v[0], 'warning': v[1]} for k, v in STORAGE_ACTIONS.items()]}
+
+
+def capabilities():
+    version = _run([ZPOOL(), '--version'], timeout=10)
+    commands = {}
+    for command in ['attach', 'remove', 'trim', 'initialize', 'checkpoint', 'resilver', 'split']:
+        result = _run([ZPOOL(), command, '-?'], timeout=10)
+        text = result.stdout + result.stderr
+        commands[command] = bool(re.search(r'usage:.*', text, re.I)) and 'unrecognized command' not in text.lower()
+    features = _run([ZPOOL(), 'get', '-H', '-o', 'name,property,value', 'feature@raidz_expansion'], timeout=10)
+    return {'version': version.stdout.strip() or version.stderr.strip(), 'commands': commands,
+            'raidz_expansion': [line.split('\t') for line in features.stdout.splitlines() if len(line.split('\t')) == 3]}
+
+
+def _property_value(prop, value):
+    if prop not in DATASET_PROPS:
+        raise HelperError('Unsupported dataset property')
+    if prop in {'quota', 'refquota', 'reservation', 'refreservation'}:
+        valid = value == 'none' or bool(re.fullmatch(r'[0-9]+(?:[KMGTPE]i?B?)?', value, re.I))
+    elif prop == 'recordsize':
+        valid = value in {'4K', '8K', '16K', '32K', '64K', '128K', '256K', '512K', '1M'}
+    elif prop == 'compression':
+        valid = value in {'on', 'off', 'lz4', 'zstd', 'gzip', 'lzjb', 'zle'} or bool(re.fullmatch(r'(gzip-[1-9]|zstd-(?:[1-9]|1[0-9]))', value))
+    elif prop in {'atime', 'readonly'}:
+        valid = value in {'on', 'off'}
+    elif prop == 'sync':
+        valid = value in {'standard', 'always'}
+    else:
+        valid = value in {'none', 'legacy'} or bool(re.fullmatch(r'/(?:mnt|srv)/[A-Za-z0-9_./-]+', value)) and '..' not in value.split('/')
+    if not valid:
+        raise HelperError('Unsupported property value')
+    return f'{prop}={value}'
+
+
+def _release_candidate():
+    import hashlib
+    import urllib.request
+    def download(url, limit):
+        req = urllib.request.Request(url, headers={'User-Agent': 'NASitron-helper/1.0'})
+        with urllib.request.urlopen(req, timeout=20) as response:
+            content = response.read(limit + 1)
+        if len(content) > limit:
+            raise HelperError('Release exceeds size limit')
+        return content
+    metadata = json.loads(download('https://api.github.com/repos/StealthCat/NASitron/commits/main', 2000000))
+    commit = metadata.get('sha', '')
+    if not re.fullmatch(r'[a-f0-9]{40}', commit):
+        raise HelperError('Invalid release commit')
+    content = download(f'https://raw.githubusercontent.com/StealthCat/NASitron/{commit}/remote/nasitron_root_helper.py', 1000000)
+    compile(content, '<NASitron release>', 'exec')
+    return content, {'commit': commit, 'sha256': hashlib.sha256(content).hexdigest()}
+
+
+def _helper_backup():
+    path = Path(__file__).resolve().with_suffix('.previous')
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise HelperError('Rollback file must be a root-owned regular file without group/other write permission')
+    return path
+
+
+def _storage_plan(data):
+    import hashlib
+    import shlex
+    action = data['action']
+    target = data.get('target', '')
+    identity = {}
+    kind = 'zfs'
+    noop = False
+    if action.startswith('helper-'):
+        kind = 'helper'
+        if action == 'helper-update':
+            _content, identity = _release_candidate()
+        else:
+            identity = {'sha256': hashlib.sha256(_helper_backup().read_bytes()).hexdigest()}
+        args = [action]
+    elif action.startswith('smart-'):
+        kind = 'smart'
+        _by_id(target)
+        _path, real = _device(str(BY_ID_DIR / target), require_by_id=True)
+        if re.fullmatch(r'zd\d+', Path(real).name):
+            raise HelperError('Virtual volumes cannot run physical SMART tests')
+        identity = {'real': real, 'disk': _lsblk_disk(real)}
+        if identity['disk'].get('type') != 'disk':
+            raise HelperError('SMART tests require a whole physical disk')
+        for pool in _pool_names():
+            if 'in progress' in _scan_in_progress(pool).lower():
+                raise HelperError('Wait for active pool scans before running disk tests')
+        status = _run([SMARTCTL(), '-c', '-j', real], timeout=20)
+        if 'in progress' in status.stdout.lower():
+            raise HelperError('A SMART test is already in progress')
+        args = ['-t', action.split('-')[1], target]
+    else:
+        snap = action.startswith('snapshot-')
+        _dataset(target, snapshot=snap)
+        parent = target.split('@')[0]
+        if parent.split('/')[0] != data['pool']:
+            raise HelperError('Dataset must belong to the selected pool')
+        _validate_pool(data['pool'])
+        if action in {'dataset-create', 'zvol-create'}:
+            if '/' not in target:
+                raise HelperError('Create a child dataset, not a pool root')
+            identity['parent'] = _get_property(target.rsplit('/', 1)[0], 'guid')
+            if action == 'zvol-create':
+                size = data.get('value', '')
+                if not re.fullmatch(r'[1-9][0-9]*(?:[KMGT]i?B?)?', size, re.I):
+                    raise HelperError('Specify a positive zvol size, for example 100G')
+                args = ['create', '-V', size, target]
+            else:
+                args = ['create', target]
+        else:
+            identity['guid'] = _get_property(parent if action == 'snapshot-create' else target, 'guid')
+            if action == 'dataset-set':
+                prop = data.get('property', '')
+                args = ['set', _property_value(prop, data.get('value', '')), target]
+                identity['old_value'] = _get_property(target, prop)
+            elif action == 'dataset-inherit':
+                prop = data.get('property', '')
+                if prop not in DATASET_PROPS:
+                    raise HelperError('Unsupported inherited property')
+                args = ['inherit', prop, target]
+            elif action == 'snapshot-create':
+                args = ['snapshot', target]
+            elif action == 'snapshot-destroy':
+                args = ['destroy', target]
+            elif action in {'snapshot-hold', 'snapshot-release'}:
+                tag = data.get('value') or 'nasitron'
+                if tag != 'nasitron' and not re.fullmatch(r'nasitron-[a-f0-9]{32}', tag):
+                    raise HelperError('Invalid NASitron hold tag')
+                holds = _zfs(['holds', '-H', target])
+                present = any(len(row.split('\t')) >= 2 and row.split('\t')[1] == tag for row in holds.splitlines())
+                noop = present if action == 'snapshot-hold' else not present
+                identity['tag_present'] = present
+                args = [action.split('-')[1], tag, target]
+            elif action in {'dataset-mount', 'dataset-unmount'}:
+                args = [action.split('-')[1], target]
+            elif action == 'snapshot-clone':
+                destination = _dataset(data.get('new_pool', ''))
+                if destination.split('/')[0] != data['pool'] or '/' not in destination:
+                    raise HelperError('Clone must be a new child dataset in the source pool')
+                args = ['clone', '-o', 'readonly=on', target, destination] if _get_property(parent, 'type') == 'volume' else ['clone', '-o', 'canmount=noauto', '-o', 'mountpoint=none', target, destination]
+            else:
+                args = ['rollback', target]
+    signature = json.dumps({'request': data, 'identity': identity}, sort_keys=True)
+    return {'request': data, 'kind': kind, 'args': args, 'identity': identity, 'noop': noop,
+            'target_id': target, 'fingerprint': hashlib.sha256(signature.encode()).hexdigest(),
+            'command': shlex.join(([{'zfs': 'zfs', 'smart': 'smartctl', 'helper': 'nasitron-root-helper'}[kind]]) + args),
+            'confirmation': f'{action.upper()} {data["pool"]}', 'warning': STORAGE_ACTIONS[action][1],
+            'dry_run': json.dumps(identity, indent=2) if kind == 'helper' else ''}
+
+
+def _execute_plan(plan):
+    if plan.get('kind') == 'zfs':
+        if plan.get('noop'):
+            return subprocess.CompletedProcess([], 0, 'Requested hold state already applied.\n', '')
+        return _run([ZFS()] + plan['args'])
+    if plan.get('kind') == 'smart':
+        result = subprocess.run([SMARTCTL()] + plan['args'], cwd=str(BY_ID_DIR), env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+        # SMART health bits do not mean the command failed; preserve reported health output.
+        return subprocess.CompletedProcess(result.args, result.returncode & 7, result.stdout, result.stderr)
+    if plan.get('kind') == 'helper':
+        import hashlib
+        import tempfile
+        path = Path(__file__).resolve()
+        if plan['request']['action'] == 'helper-update':
+            content, identity = _release_candidate()
+            if identity != plan['identity']:
+                raise HelperError('Release changed after review; prepare a new preview')
+        else:
+            content = _helper_backup().read_bytes()
+        if hashlib.sha256(content).hexdigest() != plan['identity']['sha256']:
+            raise HelperError('Helper digest changed')
+        previous = path.read_bytes()
+        def atomic_write(dest, data):
+            fd, temporary = tempfile.mkstemp(prefix='.nasitron-', dir=dest.parent)
+            try:
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.chmod(temporary, 0o755)
+                os.chown(temporary, 0, 0)
+                os.replace(temporary, dest)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+        atomic_write(path.with_suffix('.previous'), previous)
+        atomic_write(path, content)
+        return subprocess.CompletedProcess([], 0, 'Verified helper installed. Previous helper retained for rollback.\n', '')
+    return _run_action(plan['args'])
+
+
+def cmd_storage(args):
+    if args != ['inventory']:
+        raise HelperError('Usage: storage inventory')
+    print(json.dumps(storage_inventory()))
+    return 0
+
+
+def cmd_stream(args):
+    # No shell, no force, no recursive send, no receive-side mount or overwrite.
+    if not args or args[0] not in {'send', 'receive'}:
+        raise HelperError('Invalid replication command')
+    if args[0] == 'receive' and len(args) == 3:
+        target, owner = _dataset(args[1]), args[2]
+        if '/' not in target or not re.fullmatch(r'[a-f0-9]{32}', owner):
+            raise HelperError('Replication requires a dedicated child dataset and policy ID')
+        existing = _run([ZFS(), 'list', '-H', '-o', 'name', target])
+        if existing.returncode == 0 and _get_property(target, 'org.nasitron:replication') != owner:
+            raise HelperError('Destination is not owned by this replication policy')
+        command = [ZFS(), 'receive', '-u', '-s', '-o', 'readonly=on', '-o', f'org.nasitron:replication={owner}', target]
+    elif args[0] == 'send' and len(args) == 4:
+        target, base, token = args[1:]
+        _dataset(target, snapshot=True)
+        if token:
+            if len(token) > 16384 or not re.fullmatch(r'[A-Za-z0-9_-]+', token):
+                raise HelperError('Invalid resume token')
+            command = [ZFS(), 'send', '-t', token]
+        else:
+            command = [ZFS(), 'send', '-w']
+            if base:
+                _dataset(base, snapshot=True)
+                if base.split('@')[0] != target.split('@')[0]:
+                    raise HelperError('Incremental base must belong to the same dataset')
+                command += ['-i', base]
+            command.append(target)
+    else:
+        raise HelperError('Invalid stream arguments')
+    with open(LOCK_PATH, 'a+', encoding='utf-8') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return subprocess.call(command, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'})
 
 
 def main() -> int:
@@ -936,6 +1252,8 @@ def main() -> int:
         "wipefs-check": cmd_wipefs_check,
         "replace": cmd_replace,
         "actions": cmd_actions,
+        "storage": cmd_storage,
+        "stream": cmd_stream,
     }
     handler = handlers.get(command)
     if handler is None:

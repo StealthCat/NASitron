@@ -12,7 +12,8 @@
   </div>
   <div class="row" data-operator-only>
     <form method="post" action="/servers/{{ server.id }}/poll" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">↻ Poll now</button></form>
-    <a class="button primary" href="/servers/{{ server.id }}/zfs-actions" data-admin-only>ZFS actions</a>
+    <a class="button primary" href="/servers/{{ server.id }}/storage" data-admin-only>Storage workspace</a>
+    <a class="button" href="/servers/{{ server.id }}/zfs-actions" data-admin-only>ZFS actions</a>
     <a class="button" href="/servers/{{ server.id }}/replace-drive" data-operator-only>Replace failed drive</a>
     <form method="post" action="/servers/{{ server.id }}/support-bundle" class="inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

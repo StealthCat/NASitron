@@ -145,6 +145,11 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    from .storage_jobs import tick, recover_interrupted
+    from .storage_admin import refresh_due
+    recover_interrupted()
+    _scheduler.add_job(tick, "interval", seconds=30, id="storage-jobs", max_instances=1, coalesce=True)
+    _scheduler.add_job(refresh_due, "interval", minutes=5, id="storage-inventory", max_instances=1, coalesce=True)
     _scheduler.start()
     _schedule_due()
 
@@ -157,6 +162,10 @@ def stop_scheduler() -> None:
     # NASitron process during restart and write the same SQLite database.
     if _scheduler.running:
         _scheduler.shutdown(wait=True)
+    from .storage_jobs import shutdown as stop_storage_jobs
+    from .storage_admin import shutdown as stop_storage_inventory
+    stop_storage_jobs()
+    stop_storage_inventory()
     if _pool is not None:
         _pool.shutdown(wait=True, cancel_futures=True)
         _pool = None

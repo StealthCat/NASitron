@@ -1,5 +1,11 @@
 # NASitron
 
+> **1.0.0:** A complete storage workspace: expansion planning, snapshots and recovery,
+> scheduled replication/scrubs/SMART tests, disk/vdev diagnosis, dataset administration,
+> capacity forecasts, ZFS events, capability detection and reviewed helper updates.
+> **Upgrade the remote helper on each NAS once** to enable the new features.
+> See the [1.0 workspace and upgrade guide](docs/STORAGE_WORKSPACE.md).
+
 > **0.11.1:** Correct unknown SSH outcomes and busy-operation responses, require
 > explicit selection from every mirror when splitting, and polish ZFS selection,
 > review, and maintenance history. Update the remote helper for split validation.

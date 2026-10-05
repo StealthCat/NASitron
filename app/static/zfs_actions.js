@@ -6,6 +6,11 @@
   const required = ['attach', 'replace', 'detach', 'remove', 'offline', 'offline-temporary', 'online', 'expand'];
   const optional = ['clear', 'trim', 'trim-pause', 'trim-stop', 'initialize', 'initialize-pause', 'initialize-stop'];
   const newDisks = ['add', 'create', 'attach', 'replace'];
+  const capabilities = data.capabilities || {};
+  for (const option of action.options) {
+    const base = option.value.split('-')[0];
+    if (capabilities.commands?.[base] === false) { option.disabled = true; option.textContent += ' — unsupported on this host'; }
+  }
   let submitted = false;
   function show(id, visible) {
     const el = document.getElementById(id);
@@ -22,7 +27,8 @@
     show('zfs-target-field', required.includes(a) || optional.includes(a));
     target.required = required.includes(a);
     target.replaceChildren(new Option(target.required ? 'Choose a member' : 'Entire pool', ''));
-    current.filter(m => m.id && (!m.group || ['attach', 'remove'].includes(a)))
+    const expansion = (capabilities.raidz_expansion || []).some(row => row[0] === pool.value && ['enabled','active'].includes(row[2]));
+    current.filter(m => m.id && (!m.group || ['attach', 'remove'].includes(a)) && !(a === 'attach' && /^raidz/.test(m.id) && data.capabilities && !expansion))
       .forEach(m => target.add(new Option(`${m.display} · ${m.role || 'data'} · ${m.state}`, m.guid)));
     show('zfs-new-pool-field', a === 'split');
     form.elements.new_pool.required = a === 'split';

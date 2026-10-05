@@ -7,7 +7,7 @@ from pathlib import Path
 from app.db import init_db, SessionLocal
 from app.parser import parse_pool_status
 from app.pool_capacity import parse_capacity
-from app.models import Server, CurrentState, Metric, Alert, DriveLabel, MonitorEvent, Enclosure, BayAssignment
+from app.models import Server, CurrentState, Metric, Alert, DriveLabel, MonitorEvent, Enclosure, BayAssignment, StorageHostCache
 from app.security import ensure_bootstrap_admin
 from app.settings_store import ensure_defaults
 
@@ -83,6 +83,14 @@ with SessionLocal() as db:
     db.flush()
     sid = server.id
     db.add(CurrentState(server_id=sid, payload_json=json.dumps(payload)))
+    from remote.nasitron_root_helper import STORAGE_ACTIONS
+    db.add(StorageHostCache(server_id=sid, captured_at=now, payload_json=json.dumps(dict(
+        protocol=2, helper_version="1.0.0", capabilities=dict(version="zfs-2.3.0", commands=dict(attach=True, trim=True)),
+        datasets=[dict(name="tank/data", type="filesystem", used="1000000000", available="2000000000", referenced="900000000", usedbysnapshots="100000000", usedbydataset="900000000", usedbychildren="0", usedbyrefreservation="0", quota="0", refquota="0", mountpoint="/mnt/data")],
+        snapshots=[dict(name="tank/data@daily", creation=str(int(now.timestamp())), used="100000000", referenced="900000000", holds="0", clones="-")],
+        properties=[dict(name="tank/data", property="compression", value="lz4", source="local")], topology=dict(pools=[]),
+        actions=[dict(id=k,label=v[0],warning=v[1]) for k,v in STORAGE_ACTIONS.items()]
+    ))))
     db.add(
         Alert(
             server_id=sid,

@@ -1,0 +1,8 @@
+.storage-toolbar,.storage-tabs { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:16px 0; }
+.storage-tabs { border-bottom:1px solid var(--border); padding-bottom:16px; }
+.storage-toolbar form { margin:0; }
+#storage-policy-form label,#storage-action-form label { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; min-width:0; }
+#storage-policy-form input,#storage-policy-form select { max-width:100%; }
+.panel pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.panel + .panel { margin-top:20px; }
+@media(max-width:650px) { .storage-tabs .button { flex:1 1 40%; text-align:center; } }

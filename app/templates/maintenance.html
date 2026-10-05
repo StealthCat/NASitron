@@ -8,7 +8,8 @@
     <div class="panel-title"><div><h2 style="margin-bottom:4px">{{ server.name }}</h2><a class="subtle" href="/servers/{{ server.id }}">{{ server.host }}</a></div>
     {% set freshness=server_state(server,row.snapshot) %}{% if freshness[0] != 'good' %}<span class="badge {{ freshness[0] }}">{{ freshness[1] }}</span>{% elif row.unhealthy_pools or row.failed_drives %}<span class="badge critical"><span class="dot"></span>Action recommended</span>{% elif not row.snapshot %}<span class="badge offline">No telemetry</span>{% else %}<span class="badge good"><span class="dot"></span>No failure detected</span>{% endif %}</div>
     <div class="server-card-metrics"><div class="mini-stat"><span>Unhealthy pools</span><strong>{{ row.unhealthy_pools|length }}</strong></div><div class="mini-stat"><span>SMART failed</span><strong>{{ row.failed_drives|length }}</strong></div><div class="mini-stat"><span>Active alerts</span><strong>{{ row.alerts|length }}</strong></div></div>
-    <a class="button primary" href="/servers/{{ server.id }}/zfs-actions" data-admin-only>Manage ZFS disks &amp; pools</a><a class="button" href="/servers/{{ server.id }}/replace-drive" data-operator-only>Failed-drive replacement</a>
+    <a class="button primary" href="/servers/{{ server.id }}/storage" data-admin-only>Storage workspace</a>
+    <a class="button" href="/servers/{{ server.id }}/zfs-actions" data-admin-only>Manage ZFS disks &amp; pools</a><a class="button" href="/servers/{{ server.id }}/replace-drive" data-operator-only>Failed-drive replacement</a>
   </div>
 {% else %}<div class="panel"><p class="muted">Add a server before using maintenance tools.</p></div>{% endfor %}
 </section>
