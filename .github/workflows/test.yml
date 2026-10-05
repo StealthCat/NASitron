@@ -99,6 +99,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: npm install --no-save playwright@1.62.1 jsdom@26.1.0
       - run: node tests/ui_logic.cjs
+      - run: PYTHON=python node tests/zfs_actions_logic.cjs
       - run: npx playwright install --with-deps chromium
       - name: Desktop and mobile interaction checks
         shell: bash

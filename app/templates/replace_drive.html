@@ -38,7 +38,7 @@
         <div>
           <div class="hero-kicker" style="margin-bottom:4px;font-size:.68rem">Drive Replacement Required</div>
           <strong style="font-size:1rem">A device in pool “{{ failed.pool }}” requires replacement.</strong>
-          <div class="step-copy" style="margin-top:4px">{{ failed.device }} is {{ failed.state }} · role {{ failed.role }} · errors {{ failed.read_errors }}/{{ failed.write_errors }}/{{ failed.checksum_errors }}</div>
+          <div class="step-copy" style="margin-top:4px">{{ failed.by_id or failed.device|replace("/dev/disk/by-id/", "") }} is {{ failed.state }} · role {{ failed.role }} · errors {{ failed.read_errors }}/{{ failed.write_errors }}/{{ failed.checksum_errors }}</div>
         </div>
         <span class="badge critical">{{ failed.state }}</span>
       </section>
@@ -65,7 +65,7 @@
           {% for failed in inventory.failed %}
             <tr>
               <td><strong>{{ failed.pool }}</strong></td>
-              <td>{{ failed.device }}</td>
+              <td>{{ failed.by_id or failed.device|replace("/dev/disk/by-id/", "") }}</td>
               <td><span class="badge critical"><span class="dot"></span>{{ failed.state }}</span></td>
               <td>{{ failed.role }}</td>
               <td>{{ failed.read_errors }} / {{ failed.write_errors }} / {{ failed.checksum_errors }}</td>
@@ -85,11 +85,11 @@
       </div>
       <div class="scroll">
         <table>
-          <thead><tr><th>Stable Device Path</th><th>Kernel</th><th>Model / Serial</th><th>Size</th><th>Media</th><th>Transport</th></tr></thead>
+          <thead><tr><th>Stable Device ID</th><th>Kernel</th><th>Model / Serial</th><th>Size</th><th>Media</th><th>Transport</th></tr></thead>
           <tbody>
           {% for disk in inventory.candidates %}
             <tr>
-              <td><span class="table-device"><span class="device-dot"></span><strong>{{ disk.device }}</strong></span></td>
+              <td><span class="table-device"><span class="device-dot"></span><strong>{{ disk.device|replace("/dev/disk/by-id/", "") }}</strong></span></td>
               <td>{{ disk.path }}</td>
               <td>{{ disk.model or "Unknown model" }}<div class="subtle">{{ disk.serial or "No serial" }}</div></td>
               <td><strong>{{ disk.size_bytes|human_bytes }}</strong></td>
@@ -109,14 +109,14 @@
       <div class="panel-title" style="padding:16px 16px 0"><h2>Rejected Drives</h2><span class="badge warning">{{ inventory.rejected_candidates|length }}</span></div>
       <div class="scroll"><table><thead><tr><th>Device</th><th>Model</th><th>Reason</th></tr></thead><tbody>
       {% for disk in inventory.rejected_candidates %}
-      <tr><td>{{ disk.device }}</td><td>{{ disk.model or "Unknown model" }}</td><td class="subtle">{{ disk.reason }}</td></tr>
+      <tr><td>{{ disk.device|replace("/dev/disk/by-id/", "") }}</td><td>{{ disk.model or "Unknown model" }}</td><td class="subtle">{{ disk.reason }}</td></tr>
       {% endfor %}
       </tbody></table></div>
     </section>
     {% endif %}
 
     {% for failed in inventory.failed %}
-    <form method="post" action="/servers/{{ server.id }}/replace-drive" class="panel accent-panel replace-form"
+    <form method="post" action="/servers/{{ server.id }}/replace-drive" class="panel accent-panel replace-form" data-old-id="{{ failed.by_id or '' }}"
           onsubmit="return confirm('Start this ZFS drive replacement and resilver?')">
       <input type="hidden" name="pool" value="{{ failed.pool }}">
       <input type="hidden" name="old_guid" value="{{ failed.guid }}">
@@ -124,7 +124,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <div class="panel-title">
-        <h2>Replacement for {{ failed.device }}</h2>
+        <h2>Replacement for {{ failed.by_id or failed.device|replace("/dev/disk/by-id/", "") }}</h2>
         <span class="badge critical">{{ failed.pool }}</span>
       </div>
 
@@ -134,7 +134,7 @@
           <option value="">Select a blank drive…</option>
           {% for disk in inventory.candidates %}
           {% if not failed.size_bytes or disk.size_bytes >= failed.size_bytes %}
-          <option value="{{ disk.device }}">{{ disk.device }} — {{ disk.size_bytes|human_bytes }} — {{ disk.model or "Unknown model" }}{% if disk.serial %} — {{ disk.serial }}{% endif %}</option>
+          <option value="{{ disk.device }}">{{ disk.device|replace("/dev/disk/by-id/", "") }} — {{ disk.size_bytes|human_bytes }} — {{ disk.model or "Unknown model" }}{% if disk.serial %} — {{ disk.serial }}{% endif %}</option>
           {% endif %}
           {% endfor %}
         </select>
@@ -142,7 +142,7 @@
 
       <div class="field">
         <label>Command Preview</label>
-        <div class="command-box command-preview"><span class="cmd">sudo -n /usr/local/sbin/nasitron-root-helper replace</span> <span class="cmd-accent">{{ failed.pool }}</span> {{ failed.guid }} &lt;replacement-by-id&gt; 0</div>
+        <div class="command-box command-preview">zpool replace {{ failed.pool }} {{ failed.by_id or '<unresolved by-id>' }} &lt;replacement-by-id&gt;</div>
       </div>
 
       {% if failed.operation_active %}
@@ -155,7 +155,7 @@
       </div>
       <div class="row between">
         <div class="subtle">The selected disk is inventoried again immediately before NASitron executes the command. NASitron never adds <code>-f</code>.</div>
-        <button class="danger" type="submit" {{ 'disabled' if not inventory.candidates else '' }}>Replace Failed Drive ›</button>
+        <button class="danger" type="submit" {{ 'disabled' if not inventory.candidates or not failed.by_id else '' }}>Replace Failed Drive ›</button>
       </div>
     </form>
     {% endfor %}
@@ -217,7 +217,7 @@
         <span>Only live failed/offline leaf vdevs are eligible</span>
         <span>Only blank whole disks are offered as candidates</span>
         <span>Stable whole-disk <code>/dev/disk/by-id</code> paths are required</span>
-        <span>Failed vdevs are targeted by immutable ZFS GUID</span>
+        <span>Failed vdev identity is validated by GUID; commands use its stable by-id name</span>
         <span>The root-owned helper validates signatures, holders, ZFS membership and size</span>
         <span>The privileged helper holds a remote lock while revalidating and executing</span>
         <span>No force, wipe, repartition or arbitrary shell action</span>
@@ -233,12 +233,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const select = form.querySelector(".replacement-select");
     const preview = form.querySelector(".command-preview");
     const pool = form.querySelector('input[name="pool"]').value;
-    const oldDevice = form.querySelector('input[name="old_device"]').value;
+    const oldDevice = form.dataset.oldId;
     function updatePreview() {
-      const next = select.value || "<replacement-drive>";
-      const guid = form.querySelector('input[name="old_guid"]').value;
-      const allow = form.querySelector('input[name="allow_conflicting_operation"]')?.checked ? "1" : "0";
-      preview.textContent = "sudo -n /usr/local/sbin/nasitron-root-helper replace " + pool + " " + guid + " " + next + " " + allow;
+      const next = (select.value || "<replacement-drive>").replace("/dev/disk/by-id/", "");
+      preview.textContent = oldDevice ? "zpool replace " + pool + " " + oldDevice + " " + next : "Stable by-id name unavailable. Resolve the device identity before replacement.";
     }
     select.addEventListener("change", updatePreview);
     form.querySelector('input[name="allow_conflicting_operation"]')?.addEventListener("change", updatePreview);

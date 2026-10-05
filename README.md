@@ -1,5 +1,9 @@
 # NASitron
 
+> **0.11.0:** Administrator ZFS disk/pool actions with command previews, typed
+> confirmation, live identity checks and short by-id disk names. Update the remote
+> root helper on each NAS to enable the new controls.
+
 > **0.10.5:** Linux ZFS volume devices (`/dev/zdN`) are labeled as virtual volumes,
 > with SMART checks and physical bay/replacement assignment disabled.
 >
@@ -90,7 +94,7 @@ Each server page includes **Replace failed drive**, which performs a fresh live 
 
 Before a replacement can run, NASitron shows the exact guarded replacement command, requires typed confirmation and CSRF validation, and then **re-runs the live disk inventory immediately before execution**. If the selected replacement disk has become mounted, partitioned, assigned to ZFS, or otherwise ineligible, the operation is refused.
 
-NASitron runs only:
+The existing failed-drive form sends this structured request to the helper:
 
 ```bash
 sudo -n /usr/local/sbin/nasitron-root-helper replace <pool> <failed-guid> <replacement-by-id> <allow-conflict:0|1>
@@ -101,6 +105,76 @@ It deliberately does **not** add `-f`, wipe filesystem signatures, repartition d
 Every attempted replacement is written to the local maintenance history with the selected devices, command, exit status, and returned pool status/output.
 
 This feature requires the root-owned NASitron helper plus the exact helper-only sudo rule in [examples/nasitron.sudoers](examples/nasitron.sudoers). The helper revalidates the failed GUID and replacement disk and invokes `zpool replace` without a shell.
+
+## ZFS disk and pool administration (0.11.0)
+
+Open **Maintenance → Manage ZFS disks & pools**, or **ZFS actions** on a server.
+An administrator chooses the operation and devices, reviews the generated command,
+and types the displayed confirmation. No SSH terminal is needed for supported actions.
+
+| Area | Available actions |
+| --- | --- |
+| Disk / vdev | Add, attach, replace healthy or failed members, detach mirrors, remove supported devices/vdevs, cancel evacuation |
+| Disk state | Offline (persistent or temporary), online, expand capacity, clear member/pool errors |
+| Background work | Start/resume, pause and cancel scrub, TRIM and free-space initialization; restart deferred resilver |
+| Pool lifecycle | Create, discover/import by pool GUID, export, destroy, split selected mirror members |
+| Pool maintenance | Create/discard checkpoint, reopen devices, sync, regenerate GUID, enable supported features |
+| Pool settings | autoexpand, autotrim, autoreplace, delegation, listsnapshots and failmode |
+
+Add/create supports one vdev per operation: individual disks, mirrors, RAIDZ1/2/3.
+Add also supports log, cache, spare, special and dedup allocation classes, subject to
+ZFS restrictions. Attach can expand a RAIDZ group only on a host with the required
+OpenZFS support and pool feature. Native ZFS validation remains authoritative: a RAIDZ
+data member cannot simply be detached, and top-level removal is not available for all
+pool layouts. Unsupported operations return the installed ZFS command's error.
+
+### Disk naming
+
+Disk choices and executed `zpool` disk arguments use **by-id basenames**, for example:
+
+```text
+zpool replace primary-z2 scsi-SATA_WDC_WD60EFAX-68S_WD-WX31D49KSU3H scsi-SATA_ST6000VN001-2BB1_ZR13TAY4Y
+```
+
+The helper prefers `scsi-` aliases for available disks, then `wwn-`, and preserves
+existing member identifiers. It sets `ZPOOL_IMPORT_PATH=/dev/disk/by-id` and runs in
+that directory. It never substitutes `/dev/sdX` as a disk argument. Existing members
+are selected internally by GUID, then resolved to their stored by-id name; an
+unresolvable identity blocks the action. Missing members can retain the stored
+by-id name from ZFS's `was` entry. Vdev groups use their ZFS names, such as `raidz2-0`.
+Pool import uses its numeric GUID and searches the by-id directory.
+
+### Review and execution
+
+Previews are scoped to the administrator and server, expire after ten minutes,
+and can be submitted once. Before execution the helper recomputes the preview under
+its remote lock, checks topology and candidate identities/capacities, and rejects
+changes. Native dry runs supplement validation for add, create, remove and split.
+New disks must be blank, unmounted whole disks with no holders, partitions, storage
+signatures or pool membership; zvols are excluded. No force, wiping, repartitioning,
+arbitrary flags or shell commands are exposed. External CLI activity is not covered
+by NASitron's lock, so avoid concurrent manual pool administration.
+
+Every prepared action and execution outcome appears in maintenance history.
+**Accepted** means the command returned successfully, not that background work has
+finished; follow the pool status/Operations page. A timeout or lost connection records
+**Unknown** and prevents replay: inspect the pool before preparing another action.
+These controls cover disk/pool administration; dataset/snapshot administration,
+recovery/rewind flags, arbitrary properties and advanced CLI options are outside this UI.
+
+### Updating existing NAS hosts
+
+Update NASitron and install the matching helper on **each managed NAS**. From the
+updated repository on that host:
+
+```bash
+sudo install -o root -g root -m 0755 remote/nasitron_root_helper.py /usr/local/sbin/nasitron-root-helper
+```
+
+Use your configured helper destination if different. The existing helper-only sudo
+rule is unchanged; never grant unrestricted `zpool` sudo access. Fresh installations
+receive the helper through `scripts/install-remote.sh`. An older helper reports an
+update instruction in the UI and cannot execute the new action protocol.
 
 ## Tuning/support bundle
 
@@ -266,7 +340,7 @@ The scheduler can monitor multiple servers concurrently. Each host's collection 
 - Keep `NASITRON_SECRET_KEY` outside source control and back it up with the persistent database.
 - The web UI uses a signed, HttpOnly session cookie after form-based sign-in; HTTP Basic authentication is disabled.
 - Do not grant unrestricted passwordless sudo to the monitoring account.
-- The optional drive-replacement page is intentionally the only current feature that mutates ZFS state; it is limited to `zpool replace` and records every attempt.
+- ZFS mutations are available through guarded maintenance forms. General disk/pool administration requires an administrator; the existing failed-drive replacement workflow remains available to operators. Actions are audited.
 - Install the root helper as `root:root` and grant sudo only to that helper path; do not grant the monitoring account direct passwordless access to `zpool`, `wipefs`, `flock`, or arbitrary `smartctl` arguments.
 - TOFU is convenient for initial setup; strict host-key verification is preferable once keys are known.
 - Monitoring, tuning-bundle collection, and all other current NASitron functions remain read-only.
@@ -295,7 +369,7 @@ python -m pytest -q
 
 ## Current scope
 
-NASitron is read-only for monitoring and tuning collection, with one deliberately narrow maintenance exception: the guarded failed-drive replacement workflow can execute `zpool replace`. It does not expose general remote shell access or arbitrary ZFS administration. Future extensions can add more specialized views (per-vdev latency, snapshot-growth analysis, ZED event ingestion, Prometheus export, and additional notification transports) without changing the collection model.
+NASitron monitoring and tuning collection remain read-only. The maintenance UI separately exposes structured, confirmed ZFS disk/pool administration through a root-owned helper. It does not expose a remote shell or arbitrary command arguments. Future extensions can add more specialized views (per-vdev latency, snapshot-growth analysis, ZED event ingestion, Prometheus export, and additional notification transports) without changing the collection model.
 
 
 ## 0.4 hardening changes
@@ -344,7 +418,7 @@ sudo install -o root -g root -m 0440 examples/nasitron.sudoers /etc/sudoers.d/na
 sudo visudo -cf /etc/sudoers.d/nasitron
 ~~~
 
-The helper accepts only four operations: SMART collection, dmesg collection, read-only wipefs inspection, and guarded drive replacement. Replacement requires a whole-disk /dev/disk/by-id path and is revalidated under a remote lock before zpool replace is executed. The helper invokes tools with argv arrays rather than a shell and never adds -f.
+The helper supports SMART collection, dmesg collection, read-only wipefs inspection, guarded drive replacement, and the structured ZFS actions protocol. New disks must be blank whole disks identified through /dev/disk/by-id. Commands use by-id basenames, with a controlled ZPOOL_IMPORT_PATH. The helper revalidates identities under a remote lock, invokes tools with argv arrays rather than a shell, and never adds -f.
 
 ### SSH identity
 

@@ -84,7 +84,7 @@ def _best_stable_path(paths: list[str]) -> str | None:
     preferred = sorted(
         paths,
         key=lambda p: (
-            0 if "/wwn-" in p else 1 if "/nvme-" in p else 2 if "/ata-" in p else 3,
+            0 if "/scsi-" in p else 1 if "/wwn-" in p else 2 if "/nvme-" in p else 3 if "/ata-" in p else 4,
             len(p),
             p,
         ),
@@ -205,7 +205,19 @@ def _discover_with_ssh(ssh: SSHCollector) -> dict[str, Any]:
             if name.startswith("/dev/"):
                 used_vdev_paths.add(name)
 
-        failed.extend(
+        stable_result = ssh.run(f"zpool status -P {quoted}", timeout=20)
+        stable_names = {}
+        if stable_result["exit"] == 0 and not stable_result.get("stdout_truncated"):
+            resolved_rows = parse_pool_status(text_result["stdout"])["vdevs"]
+            stable_rows = parse_pool_status(stable_result["stdout"])["vdevs"]
+            if len(resolved_rows) == len(stable_rows):
+                for resolved, stored in zip(resolved_rows, stable_rows):
+                    if resolved["state"] != stored["state"] or resolved["indent"] != stored["indent"]:
+                        continue
+                    name = stored["detail"][4:] if stored["detail"].startswith("was ") else stored["name"]
+                    if name.startswith("/dev/disk/by-id/"):
+                        stable_names[resolved["name"]] = name.rsplit("/", 1)[-1]
+        pool_failed = (
             _failed_leaf_vdevs(
                 pool,
                 text_result["stdout"],
@@ -217,6 +229,9 @@ def _discover_with_ssh(ssh: SSHCollector) -> dict[str, Any]:
                 else "",
             )
         )
+        for entry in pool_failed:
+            entry["by_id"] = stable_names.get(entry["device"], "")
+        failed.extend(pool_failed)
 
     lsblk_result = ssh.run(
         "lsblk -J -b -o NAME,KNAME,PATH,TYPE,SIZE,ROTA,TRAN,MODEL,SERIAL,FSTYPE,UUID,PTTYPE,PARTTYPE,MOUNTPOINTS",
@@ -236,7 +251,6 @@ def _discover_with_ssh(ssh: SSHCollector) -> dict[str, Any]:
         r"""for p in /dev/disk/by-id/*; do
   [ -e "$p" ] || continue
   [ -b "$p" ] || continue
-  case "$(basename "$p")" in *-part*) continue ;; esac
   printf '%s\t%s\n' "$(readlink -f "$p")" "$p"
 done""",
         timeout=20,
@@ -250,6 +264,9 @@ done""",
     disks = _whole_disks(block.get("blockdevices", []))
     disk_by_path = {str(d.get("path") or ""): d for d in disks}
     for failed_disk in failed:
+        if not failed_disk.get("by_id"):
+            stable = _best_stable_path(stable_map.get(str(failed_disk.get("device") or ""), []))
+            failed_disk["by_id"] = stable.rsplit("/", 1)[-1] if stable else ""
         if failed_disk.get("size_bytes"):
             continue
         device = str(failed_disk.get("device") or "")

@@ -5,7 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 APP_NAME = "NASitron"
-APP_VERSION = "0.10.5"
+APP_VERSION = "0.11.0"
 
 _CONFIG_ERRORS: list[str] = []
 

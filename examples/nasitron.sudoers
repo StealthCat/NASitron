@@ -8,6 +8,7 @@
 #   smartctl <device>
 #   dmesg
 #   wipefs-check <device>
+#   actions inventory | preview <json> | execute <json> <fingerprint>
 #   replace <pool> <failed-guid> <replacement-by-id> <allow-conflict:0|1>
 #
 # Do not replace this with wildcard rules for zpool, smartctl, wipefs, or flock.
