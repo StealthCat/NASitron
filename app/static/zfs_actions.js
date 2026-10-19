@@ -11,6 +11,10 @@
     const base = option.value.split('-')[0];
     if (capabilities.commands?.[base] === false) { option.disabled = true; option.textContent += ' — unsupported on this host'; }
   }
+  const requested = new URLSearchParams(window.location.search).get('action');
+  const available = [...action.options].filter(option => !option.disabled).map(option => option.value);
+  const initial = available.includes(requested) ? requested : (data.pools.length ? 'add' : 'create');
+  if (available.includes(initial)) action.value = initial;
   let submitted = false;
   function show(id, visible) {
     const el = document.getElementById(id);
@@ -79,7 +83,10 @@
   function validate() {
     const a = action.value, selected = [...choices.querySelectorAll('input:checked')];
     let message = '';
-    if (a === 'create' && !document.getElementById('zfs-create').value.trim()) message = 'Enter a name for the new pool.';
+    const name = document.getElementById('zfs-create').value;
+    if (a === 'create' && !name.trim()) message = 'Enter a name for the new pool.';
+    else if (a === 'create' && !/^[A-Za-z][A-Za-z0-9_.:-]{0,254}$/.test(name)) message = 'Start the pool name with a letter and use only letters, numbers, dots, underscores, colons or hyphens.';
+    else if (a === 'create' && data.pools.some(p => p.name === name)) message = 'A pool with this name already exists. Choose an unused name.';
     else if (a === 'import' && !document.getElementById('zfs-import').value) message = 'No exported pools were discovered.';
     else if (!['create', 'import'].includes(a) && !pool.value) message = 'No imported pools. Choose Create or Import to begin.';
     else if (required.includes(a) && !target.value) message = 'Choose the existing member or vdev.';
