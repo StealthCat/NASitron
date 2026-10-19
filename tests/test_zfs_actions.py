@@ -83,6 +83,32 @@ def test_create_and_import(host):
         h.action_plan(dict(action='import', pool='123'))
 
 
+@pytest.mark.parametrize('layout,count', [('stripe', 1), ('mirror', 2), ('raidz1', 2), ('raidz2', 3), ('raidz3', 4)])
+def test_create_first_pool_dry_run_and_revalidation(host, monkeypatch, capsys, layout, count):
+    calls, _ = host
+    pools = set()
+    monkeypatch.setattr(h, '_pool_names', lambda: pools)
+    disks = [f'scsi-new{i}' for i in range(count)]
+    monkeypatch.setattr(h, '_validate_blank_disk', lambda p: ('/dev/sdz' + Path(p).name, 6000))
+    original_stat = h.os.stat
+    monkeypatch.setattr(h.os, 'stat', lambda p, **kw: SimpleNamespace(st_rdev=123)
+                        if str(p).startswith('/dev/sdz') else original_stat(p, **kw))
+    raw = json.dumps(dict(action='create', pool='firstpool', disks=disks, layout=layout, ashift='12'))
+    assert h.cmd_actions(['preview', raw]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    args = ['create', '-o', 'ashift=12', 'firstpool'] + ([] if layout == 'stripe' else [layout]) + disks
+    assert plan['args'] == args
+    assert plan['confirmation'] == 'CREATE firstpool'
+    assert calls == [['create', '-n'] + args[1:]]
+    assert h.cmd_actions(['execute', raw, plan['fingerprint']]) == 0
+    assert calls[-1] == args and '-f' not in args
+    pools.add('firstpool')
+    count_before = len(calls)
+    with pytest.raises(h.HelperError, match='already imported'):
+        h.cmd_actions(['execute', raw, plan['fingerprint']])
+    assert len(calls) == count_before
+
+
 @pytest.mark.parametrize('value', ['/dev/sda', '/dev/disk/by-id/'+NEW, '../sda', '-f', 'foo;reboot', '123', 'bad\nname'])
 def test_rejects_paths_flags_and_shell(host, value):
     with pytest.raises(h.HelperError):

@@ -146,6 +146,36 @@ def test_inventory_renders_and_json_is_escaped(web, tmp_path):
     assert json.loads(encoded)['protocol'] == 1
 
 
+def test_missing_creation_support_links_to_server_upgrade(web):
+    client, sid, helper, _, _ = web
+    helper.return_value = {'protocol': 1, 'actions': [{'id': 'add', 'label': 'Add', 'warning': ''}],
+                          'pools': [], 'disks': [], 'importable': []}
+    response = client.get(f'/servers/{sid}/zfs-actions?action=create')
+    assert response.status_code == 200
+    assert 'helper does not offer pool creation' in response.text
+    assert f'/servers/upgrade?server_id={sid}' in response.text
+
+
+def test_create_pool_preview_and_confirmed_execution(web):
+    client, sid, helper, runner, plan = web
+    payload = dict(action='create', pool='newpool', target='', disks=['scsi-new1', 'scsi-new2'],
+                   layout='mirror', role='data', ashift='12', new_pool='', property='', value='')
+    plan.update(request=payload, command='zpool create -o ashift=12 newpool mirror scsi-new1 scsi-new2',
+                confirmation='CREATE newpool', target_id='', dry_run='would create mirror')
+    response = client.post(f'/servers/{sid}/zfs-actions/preview', data={**payload, 'csrf_token': csrf_token()})
+    assert response.status_code == 200
+    assert 'CREATE newpool' in response.text and 'would create mirror' in response.text
+    helper.assert_called_once()
+    assert helper.call_args.args[1:] == ('preview', payload)
+    assert not runner.called
+    aid = int(re.search(r'name="action_id" value="(\d+)"', response.text)[1])
+    assert submit(web, aid, confirm_text='CREATE newpool').status_code == 303
+    assert runner.call_args.args[1:] == ('execute', payload, 'abc')
+    with SessionLocal() as db:
+        row = db.get(MaintenanceAction, aid)
+        assert row.action == 'zpool_create' and row.pool == 'newpool' and row.state == 'accepted'
+
+
 def test_incompatible_helper_does_not_render_action_form(web):
     client, sid, helper, runner, _ = web
     helper.return_value = {'protocol': 2, 'actions': 'invalid'}
