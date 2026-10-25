@@ -132,6 +132,13 @@ This feature requires the root-owned NASitron helper plus the exact helper-only 
 ## ZFS disk and pool administration (0.11.0)
 
 Open **Maintenance → Manage ZFS disks & pools**, or **ZFS actions** on a server.
+To create a pool, click **+ Create zpool** on the server or ZFS actions page.
+Enter an unused pool name, select blank disks by their stable by-id identifiers,
+choose a mirror, RAIDZ1/2/3 or stripe layout and sector alignment, then review the
+native ZFS dry run and type `CREATE <pool-name>` to execute. Servers without an
+imported pool start with creation selected. Creation uses one data vdev; additional
+vdevs, cache, log and spare devices can be added afterward. If the helper does not
+offer creation, use **Upgrade Server** for that host and reload ZFS actions.
 Mirror splitting requires exactly one direct member from every data, special and dedup mirror;
 ZFS is never allowed to fill in an omitted mirror selection automatically.
 An administrator chooses the operation and devices, reviews the generated command,

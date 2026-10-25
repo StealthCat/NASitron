@@ -178,6 +178,10 @@ if __name__ == "__main__":
 
     def fake_zfs_json(server, mode, request=None):
         if mode == "preview":
+            if request['action'] == 'create':
+                return dict(request=request, command=f"zpool create -o ashift=12 {request['pool']} mirror " + ' '.join(request['disks']),
+                            confirmation=f"CREATE {request['pool']}", fingerprint="fixture", target_id="",
+                            warning="Creates a new pool on selected blank disks.", dry_run="would create mirror")
             return dict(request=request, command="zpool replace tank scsi-SATA_OLD scsi-SATA_NEW",
                         confirmation="REPLACE tank", fingerprint="fixture", target_id="scsi-SATA_OLD",
                         warning="Replaces the selected member and starts reconstruction.", dry_run="")
