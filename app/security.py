@@ -31,6 +31,7 @@ _SCRYPT_N = 2**14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 _SCRYPT_DKLEN = 32
+_LOGIN_TRACKED_CLIENTS = 4096
 _login_lock = threading.Lock()
 _login_failures: dict[str, list[float]] = {}
 _login_blocked_until: dict[str, float] = {}
@@ -54,7 +55,12 @@ def csrf_token() -> str:
 def verify_csrf(token: str) -> bool:
     if not token:
         return False
-    return any(hmac.compare_digest(token, _token_for(offset)) for offset in (0, -1))
+    # compare_digest() raises TypeError for non-ASCII str input; compare bytes.
+    supplied = token.encode("utf-8", errors="replace")
+    return any(
+        hmac.compare_digest(supplied, _token_for(offset).encode("ascii"))
+        for offset in (0, -1)
+    )
 
 
 def require_csrf(csrf_token: str = Form(...)) -> None:
@@ -221,7 +227,9 @@ def verify_session_token(
     user = db.get(WebUser, user_id)
     if user is None or not user.enabled:
         return None
-    if not hmac.compare_digest(str(payload.get("u", "")), user.username):
+    if not hmac.compare_digest(
+        str(payload.get("u", "")).encode("utf-8"), user.username.encode("utf-8")
+    ):
         return None
     if session_version != int(user.session_version):
         return None
@@ -239,7 +247,14 @@ def request_is_authenticated(request: Request, db: Session) -> bool:
 def safe_next_url(value: str | None) -> str:
     if not value:
         return "/"
-    if not value.startswith("/") or value.startswith("//") or "\x00" in value:
+    if (
+        not value.startswith("/")
+        or value.startswith("//")
+        # Browsers treat "\" as "/" and strip tab/CR/LF, so "/\evil" or
+        # "/\t/evil" would become a protocol-relative off-site redirect.
+        or "\\" in value
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+    ):
         return "/"
     return value[:2048]
 
@@ -269,10 +284,24 @@ def login_is_rate_limited(request: Request, *, now: float | None = None) -> bool
         return False
 
 
+def _prune_login_state(current: float) -> None:
+    """Drop expired per-client entries so the tables cannot grow without bound."""
+    for key in [k for k, until in _login_blocked_until.items() if until <= current]:
+        _login_blocked_until.pop(key, None)
+    for key in [
+        k
+        for k, stamps in _login_failures.items()
+        if not stamps or current - stamps[-1] > _LOGIN_WINDOW_SECONDS
+    ]:
+        _login_failures.pop(key, None)
+
+
 def record_login_failure(request: Request, *, now: float | None = None) -> None:
     current = time.monotonic() if now is None else now
     key = _client_key(request)
     with _login_lock:
+        if len(_login_failures) + len(_login_blocked_until) > _LOGIN_TRACKED_CLIENTS:
+            _prune_login_state(current)
         failures = [
             stamp
             for stamp in _login_failures.get(key, [])

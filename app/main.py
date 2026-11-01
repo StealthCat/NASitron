@@ -24,9 +24,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from sqlalchemy import func, select, or_
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .alerts import send_email
 from .collector import CollectorError, SSHCollector
@@ -40,7 +42,7 @@ from .config import (
     validate_runtime_config,
 )
 from .crypto import decrypt, encrypt
-from .db import SessionLocal, init_db
+from .db import SessionLocal, init_db, utcnow
 from .instance_lock import InstanceLock
 from .topology import pool_topology
 from .parser import parse_status_sections
@@ -83,7 +85,7 @@ from .zfs_actions import install as install_zfs_actions
 from .storage_admin import install as install_storage_admin
 from .service import latest_snapshot
 from .settings_store import ensure_defaults, get_many, get_setting, set_setting, get_int
-from .support import sanitize_diagnostics, support_bundle_lock
+from .support import SupportBundleBusy, sanitize_diagnostics, support_bundle_lock
 from .tls_manager import (
     ACME_CA_ROOT_PATH,
     MANUAL_CERT_PATH,
@@ -204,18 +206,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestBodyLimitMiddleware)
-app.add_middleware(RequireHTTPSMiddleware)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
-@app.middleware("http")
+
 async def require_web_session(request: Request, call_next):
     path = request.url.path
+    # Static assets and the health probe never need the signed-in user.
+    if path == "/healthz" or path.startswith("/static/"):
+        return await call_next(request)
+    # CSRF tokens are not bound to a session, so additionally refuse state-changing
+    # requests that the browser itself reports as originating from another site.
+    if request.method not in _SAFE_METHODS and request.headers.get(
+        "sec-fetch-site", ""
+    ).lower() in {"cross-site", "same-site"}:
+        return PlainTextResponse("Cross-site request refused.", status_code=403)
     public_path = (
-        path in {"/healthz", "/login", "/install-remote.sh"}
-        or path.startswith("/static/")
+        path in {"/login", "/install-remote.sh"}
         or path.startswith("/api/enroll/")
     )
 
@@ -255,6 +263,15 @@ async def require_web_session(request: Request, call_next):
         "/login?next=" + quote(safe_next_url(next_url), safe="/"),
         status_code=303,
     )
+
+
+# Starlette runs the most recently added middleware first. Keep the session/role
+# gate innermost so its redirects and 403s still receive security headers and the
+# HTTPS requirement is enforced before any session lookup.
+app.add_middleware(BaseHTTPMiddleware, dispatch=require_web_session)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestBodyLimitMiddleware)
+app.add_middleware(RequireHTTPSMiddleware)
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -313,7 +330,7 @@ def login(
         )
 
     clear_login_failures(request)
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = utcnow()
     db.commit()
     response = RedirectResponse(next_url, status_code=303)
     response.set_cookie(
@@ -433,7 +450,7 @@ def download_enrollment_installer(
     enrollment = db.get(RemoteEnrollment, enrollment_id)
     if enrollment is None:
         raise HTTPException(status_code=404)
-    now = datetime.utcnow()
+    now = utcnow()
     if enrollment.used_at is not None:
         raise HTTPException(status_code=409, detail="Enrollment token has already been used.")
     if enrollment.expires_at <= now:
@@ -483,16 +500,18 @@ async def complete_remote_enrollment(
     if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", enrollment_id):
         raise HTTPException(status_code=404)
 
+    # Read the body before checking one-time state: nothing below awaits, so two
+    # concurrent callbacks cannot both observe an unused enrollment.
+    body = await request.body()
     enrollment = db.get(RemoteEnrollment, enrollment_id)
     if enrollment is None:
         raise HTTPException(status_code=404)
-    now = datetime.utcnow()
+    now = utcnow()
     if enrollment.used_at is not None:
         raise HTTPException(status_code=409, detail="Enrollment token has already been used.")
     if enrollment.expires_at <= now:
         raise HTTPException(status_code=410, detail="Enrollment token has expired.")
 
-    body = await request.body()
     supplied_signature = request.headers.get(
         "X-NASitron-Enrollment-Signature", ""
     ).strip().lower()
@@ -584,8 +603,17 @@ async def complete_remote_enrollment(
         if fingerprint:
             server.host_key_fingerprint = fingerprint
 
-    enrollment.used_at = now
-    enrollment.server_id = server.id
+    # Claim the enrollment atomically and drop its secrets: the server row now
+    # holds its own encrypted key and the bootstrap secret must not be reusable.
+    claimed = db.execute(
+        update(RemoteEnrollment)
+        .where(RemoteEnrollment.id == enrollment.id, RemoteEnrollment.used_at.is_(None))
+        .values(used_at=now, server_id=server.id, secret_enc="", private_key_enc="")
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if claimed != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Enrollment token has already been used.")
     db.commit()
     trigger_now(server.id)
     return {
@@ -614,7 +642,7 @@ def remote_enrollment_status(
             "phase": ("reporting" if enrolled_server.last_ok_at else
                       "ssh_error" if enrolled_server.last_error else "verifying"),
         }
-    if enrollment.expires_at <= datetime.utcnow():
+    if enrollment.expires_at <= utcnow():
         return {"status": "expired"}
     return {"status": "pending"}
 
@@ -1167,12 +1195,20 @@ def new_server(request: Request, db: Session = Depends(get_db)):
     ).decode("utf-8")
     public_key += f" nasitron-enrollment-{enrollment_id}"
 
+    # Every visit mints an enrollment holding an encrypted private key; discard
+    # abandoned ones (kept a day past expiry so status polls still say "expired").
+    db.execute(
+        delete(RemoteEnrollment).where(
+            RemoteEnrollment.used_at.is_(None),
+            RemoteEnrollment.expires_at < utcnow() - timedelta(days=1),
+        )
+    )
     enrollment = RemoteEnrollment(
         id=enrollment_id,
         secret_enc=encrypt(enrollment_secret) or "",
         public_key=public_key,
         private_key_enc=encrypt(private_key) or "",
-        expires_at=datetime.utcnow() + timedelta(minutes=30),
+        expires_at=utcnow() + timedelta(minutes=30),
     )
     db.add(enrollment)
     db.commit()
@@ -1571,7 +1607,7 @@ def forget_expected_pool(
             ]
             state.payload_json = json.dumps(current, separators=(",", ":"))
 
-    now = datetime.utcnow()
+    now = utcnow()
     for alert in db.scalars(
         select(Alert).where(Alert.server_id == server.id, Alert.active.is_(True))
     ).all():
@@ -1740,6 +1776,18 @@ def perform_drive_replacement(
     )
 
 
+def _utc_range(start: datetime, end: datetime) -> tuple[datetime, datetime]:
+    if start.tzinfo is None or end.tzinfo is None:
+        raise HTTPException(400, "Start and end must include a timezone offset.")
+    try:
+        return (
+            start.astimezone(timezone.utc).replace(tzinfo=None),
+            end.astimezone(timezone.utc).replace(tzinfo=None),
+        )
+    except (OverflowError, ValueError):
+        raise HTTPException(400, "Start and end must be valid dates.")
+
+
 @app.get("/api/servers/{server_id}/metrics")
 def metric_history(
     server_id: int,
@@ -1757,13 +1805,10 @@ def metric_history(
 
     if (start is None) != (end is None):
         raise HTTPException(400, "Provide both start and end.")
-    until = datetime.utcnow()
+    until = utcnow()
     since = until - timedelta(hours=hours)
     if start is not None and end is not None:
-        if start.tzinfo is None or end.tzinfo is None:
-            raise HTTPException(400, "Start and end must include a timezone offset.")
-        since = start.astimezone(timezone.utc).replace(tzinfo=None)
-        until = end.astimezone(timezone.utc).replace(tzinfo=None)
+        since, until = _utc_range(start, end)
         if not timedelta(0) < until - since <= timedelta(days=365):
             raise HTTPException(400, "Choose an end after start and a range of at most 365 days.")
     from .history import history_series
@@ -1794,15 +1839,12 @@ def metric_batch(server_id: int, names: list[str] = Query([]), scopes: list[str]
         scopes = list(dict.fromkeys(p[1] for p in selected_pairs))
     elif not 1 <= len(names) <= 8 or not 1 <= len(scopes) <= 4 or any(n not in METRIC_NAMES for n in names) or any(len(s)>255 for s in scopes):
         raise HTTPException(400, "Select up to eight known metrics and four drives.")
-    until = datetime.utcnow()
+    until = utcnow()
     since = until - timedelta(hours=hours)
     if (start is None) != (end is None):
         raise HTTPException(400, "Provide both start and end.")
     if start is not None:
-        if start.tzinfo is None or end.tzinfo is None:
-            raise HTTPException(400, "Start and end must include a timezone offset.")
-        since = start.astimezone(timezone.utc).replace(tzinfo=None)
-        until = end.astimezone(timezone.utc).replace(tzinfo=None)
+        since, until = _utc_range(start, end)
         if not timedelta(0) < until-since <= timedelta(days=365):
             raise HTTPException(400, "Choose a range of at most 365 days.")
     from .history import history_series
@@ -1819,51 +1861,59 @@ def support_bundle(
     if not server:
         raise HTTPException(404)
 
-    with support_bundle_lock(server_id):
-        with SSHCollector(server) as collector:
-            raw = collector.deep_collect()
-        diagnostics = sanitize_diagnostics(raw)
-        payload = {
-            "format": "nasitron-support-bundle",
-            "format_version": 3,
-            "generated_at_utc": datetime.utcnow().isoformat() + "Z",
-            "nasitron_version": APP_VERSION,
-            "server": {
-                "name": server.name,
-                "host": server.host,
-                "port": server.port,
-                "username": server.username,
-                "poll_interval_seconds": server.poll_interval_seconds,
-                "smart_interval_minutes": server.smart_interval_minutes,
-                "sudo_for_smart": server.sudo_for_smart,
-            },
-            "latest_snapshot": {k: v for k, v in (latest_snapshot(db, server_id) or {}).items() if not k.startswith("_")},
-            "diagnostics": diagnostics,
-            "privacy_note": (
-                "SSH/SMTP credentials are excluded. Sensitive ZFS native values "
-                "and all administrator-defined ZFS user-property values are redacted."
-            ),
-        }
-
-        handle = tempfile.NamedTemporaryFile(
-            prefix="nasitron-bundle-",
-            suffix=".json.gz",
-            delete=False,
-        )
-        temp_path = handle.name
-        handle.close()
-        try:
-            with gzip.open(temp_path, "wt", encoding="utf-8", compresslevel=6) as gz:
-                json.dump(payload, gz, indent=2, default=str)
-        except Exception:
+    try:
+        with support_bundle_lock(server_id):
             try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-            raise
+                with SSHCollector(server) as collector:
+                    raw = collector.deep_collect()
+            except CollectorError as exc:
+                raise HTTPException(
+                    status_code=502, detail=f"Support bundle collection failed: {exc}"
+                ) from exc
+            diagnostics = sanitize_diagnostics(raw)
+            payload = {
+                "format": "nasitron-support-bundle",
+                "format_version": 3,
+                "generated_at_utc": utcnow().isoformat() + "Z",
+                "nasitron_version": APP_VERSION,
+                "server": {
+                    "name": server.name,
+                    "host": server.host,
+                    "port": server.port,
+                    "username": server.username,
+                    "poll_interval_seconds": server.poll_interval_seconds,
+                    "smart_interval_minutes": server.smart_interval_minutes,
+                    "sudo_for_smart": server.sudo_for_smart,
+                },
+                "latest_snapshot": {k: v for k, v in (latest_snapshot(db, server_id) or {}).items() if not k.startswith("_")},
+                "diagnostics": diagnostics,
+                "privacy_note": (
+                    "SSH/SMTP credentials are excluded. Sensitive ZFS native values "
+                    "and all administrator-defined ZFS user-property values are redacted."
+                ),
+            }
+
+            handle = tempfile.NamedTemporaryFile(
+                prefix="nasitron-bundle-",
+                suffix=".json.gz",
+                delete=False,
+            )
+            temp_path = handle.name
+            handle.close()
+            try:
+                with gzip.open(temp_path, "wt", encoding="utf-8", compresslevel=6) as gz:
+                    json.dump(payload, gz, indent=2, default=str)
+            except Exception:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                raise
+    except SupportBundleBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", server.name).strip("-") or f"server-{server.id}"
-    filename = f"nasitron-{safe}-{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.json.gz"
+    filename = f"nasitron-{safe}-{utcnow().strftime('%Y%m%dT%H%M%SZ')}.json.gz"
     return FileResponse(
         temp_path,
         media_type="application/gzip",
@@ -2161,9 +2211,12 @@ def settings_page(request: Request, db: Session = Depends(get_db)):
         "tls_acme_ca",
     ]
     values = get_many(db, keys)
-    values["smtp_password_configured"] = bool(get_setting(db, "smtp_password"))
-    values["mailjet_api_key_configured"] = bool(get_setting(db, "mailjet_api_key"))
-    values["mailjet_secret_key_configured"] = bool(get_setting(db, "mailjet_secret_key"))
+    # Presence checks only: never decrypt secrets just to render the form (and do
+    # not fail the page when a stored secret predates a NASITRON_SECRET_KEY change).
+    for secret_key in ("smtp_password", "mailjet_api_key", "mailjet_secret_key"):
+        values[f"{secret_key}_configured"] = bool(
+            get_setting(db, secret_key, reveal_secret=False)
+        )
     values["tls_status"] = manual_certificate_status()
     active_tab = request.query_params.get("tab", "smtp").strip().lower()
     if active_tab not in {"smtp", "health", "history", "enrollment", "tls", "display"}:
@@ -2451,7 +2504,9 @@ async def save_tls_settings(
             acme_ca=ca_url,
             use_acme_ca_root=ACME_CA_ROOT_PATH.exists(),
         )
-        persist_and_apply_caddyfile(caddyfile)
+        # Blocking file I/O plus an HTTP call to Caddy (10 s timeout): keep it off
+        # the event loop so other requests are not stalled.
+        await run_in_threadpool(persist_and_apply_caddyfile, caddyfile)
     except Exception as exc:
         if old_cert is None:
             MANUAL_CERT_PATH.unlink(missing_ok=True)

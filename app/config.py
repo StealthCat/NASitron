@@ -148,7 +148,7 @@ def validate_runtime_config() -> None:
         errors.append("NASITRON_CADDY_SHARED_TLS_DIR must be a short absolute path")
     try:
         ZoneInfo(TIMEZONE)
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError):
         errors.append(f"NASITRON_TIMEZONE is not a valid IANA timezone: {TIMEZONE}")
     if errors:
         raise RuntimeError("Invalid NASitron configuration: " + "; ".join(errors))

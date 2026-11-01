@@ -5,11 +5,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .db import Base
-
-
-def utcnow() -> datetime:
-    return datetime.utcnow()
+from .db import Base, utcnow
 
 
 class WebUser(Base):

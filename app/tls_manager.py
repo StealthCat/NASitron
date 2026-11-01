@@ -153,7 +153,18 @@ def validate_acme_directory_url(value: str) -> str:
         )
     if parsed.fragment:
         raise TLSConfigurationError("ACME directory URL must not contain a fragment.")
+    if not _caddy_safe(url):
+        raise TLSConfigurationError(
+            "ACME directory URL must not contain spaces, quotes, braces or backslashes."
+        )
     return url
+
+
+def _caddy_safe(value: str) -> bool:
+    # Caddy expands {$ENV}/{placeholder} syntax even inside quoted tokens, and
+    # quotes/whitespace/backslashes could break out of a token. None of these
+    # characters are needed in a hostname, e-mail address or ACME directory URL.
+    return not any(ch in '{}"\\`' or ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in value)
 
 
 def _quote(value: str) -> str:
@@ -225,6 +236,10 @@ https:// {
         raise TLSConfigurationError("TLS mode must be internal, manual, or acme.")
     if not domain:
         raise TLSConfigurationError("A TLS hostname or IP address is required.")
+    if not all(_caddy_safe(value) for value in (domain, email, acme_ca)):
+        raise TLSConfigurationError(
+            "TLS hostname, e-mail or ACME URL contains characters Caddy cannot accept safely."
+        )
     site = _site_address(domain)
     if not acme_ca:
         raise TLSConfigurationError("An ACME directory URL is required.")

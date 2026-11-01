@@ -35,19 +35,34 @@ class RequestBodyLimitMiddleware:
                 return
 
         total = 0
+        exceeded = False
+        response_started = False
 
         async def limited_receive() -> Message:
-            nonlocal total
+            nonlocal total, exceeded
             message = await receive()
             if message["type"] == "http.request":
                 total += len(message.get("body", b""))
                 if total > limit:
+                    exceeded = True
                     raise RequestTooLarge
             return message
 
+        async def guarded_send(message: Message) -> None:
+            nonlocal response_started
+            # Body parsers (e.g. FastAPI form parsing) may convert the overflow
+            # into their own 400 response; discard it in favour of a 413.
+            if exceeded and not response_started:
+                return
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
         try:
-            await self.app(scope, limited_receive, send)
+            await self.app(scope, limited_receive, guarded_send)
         except RequestTooLarge:
+            pass
+        if exceeded and not response_started:
             response = PlainTextResponse("Request body too large", status_code=413)
             await response(scope, receive, send)
 

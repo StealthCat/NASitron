@@ -5,6 +5,8 @@ import math
 import re
 from statistics import mean
 
+from .db import utcnow as _utcnow
+
 
 def effective_role(user):
     return "admin" if user.is_admin else (user.role or "viewer")
@@ -33,7 +35,7 @@ def server_state(server, snapshot=None):
     )
     if not snapshot or not captured:
         return "unknown", "Waiting for first collection"
-    if datetime.utcnow() - captured > timedelta(
+    if _utcnow() - captured > timedelta(
         seconds=max(180, (server.poll_interval_seconds or 60) * 3)
     ):
         return "warning", "Stale telemetry"
@@ -149,7 +151,7 @@ def update_operations(db, server, snapshot):
                     )
                 ):
                     action.state = "complete"
-                    action.completed_at = datetime.utcnow()
+                    action.completed_at = _utcnow()
         if action.state != previous_state:
             db.add(MonitorEvent(server_id=server.id,kind="replacement",severity="good" if action.state=="complete" else "info",message=f"{action.pool}: {action.state} (action #{action.id})"))
 

@@ -10,12 +10,16 @@ _lock_guard = threading.Lock()
 _bundle_locks: dict[int, threading.Lock] = {}
 
 
+class SupportBundleBusy(RuntimeError):
+    pass
+
+
 @contextmanager
 def support_bundle_lock(server_id: int) -> Iterator[None]:
     with _lock_guard:
         lock = _bundle_locks.setdefault(server_id, threading.Lock())
     if not lock.acquire(blocking=False):
-        raise RuntimeError("A support bundle is already being generated for this server.")
+        raise SupportBundleBusy("A support bundle is already being generated for this server.")
     try:
         yield
     finally:

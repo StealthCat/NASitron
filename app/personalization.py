@@ -3,6 +3,7 @@
 from .devices import is_zvol
 
 from contextvars import ContextVar
+from functools import lru_cache
 from urllib.parse import urlsplit
 from zoneinfo import available_timezones
 from fastapi import Depends, Form, HTTPException, Request
@@ -16,6 +17,17 @@ from .service import latest_snapshot
 from .settings_store import set_setting, get_int
 
 user_timezone = ContextVar("user_timezone", default=TIMEZONE)
+
+
+@lru_cache(maxsize=1)
+def _timezones() -> tuple[str, ...]:
+    # available_timezones() walks the tzdata tree on every call.
+    return tuple(sorted(available_timezones()))
+
+
+@lru_cache(maxsize=1)
+def _timezone_set() -> frozenset[str]:
+    return frozenset(_timezones())
 
 
 def session():
@@ -35,7 +47,7 @@ def install(app, templates):
             request=request,
             name="preferences.html",
             context={
-                "zones": sorted(available_timezones()),
+                "zones": list(_timezones()),
                 "views": views,
                 "default_timezone": TIMEZONE,
             },
@@ -45,7 +57,7 @@ def install(app, templates):
     def save_preferences(
         request: Request, timezone: str = Form(""), db=Depends(session)
     ):
-        if timezone and timezone not in available_timezones():
+        if timezone and timezone not in _timezone_set():
             raise HTTPException(400, "Choose a valid timezone.")
         db.get(WebUser, request.state.current_user.id).timezone = timezone
         db.commit()
