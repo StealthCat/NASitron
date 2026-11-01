@@ -4,10 +4,11 @@ import hashlib
 import json
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo, available_timezones
 from concurrent.futures import ThreadPoolExecutor
 import threading
+from functools import lru_cache
 
 from fastapi import Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -33,11 +34,16 @@ from .storage_insights import (
 )
 from .zfs_actions import admin, helper_json
 from .security import require_csrf
-from .db import SessionLocal
+from .db import SessionLocal, utcnow as _utcnow
 
 _refresh_pool = None
 _refresh_guard = threading.Lock()
 _refreshing = set()
+
+
+@lru_cache(maxsize=1)
+def _zones():
+    return tuple(sorted(available_timezones()))
 
 
 def validate_policy(kind, config, cron, zone):
@@ -88,13 +94,13 @@ def refresh_host(server_id):
             if cache is None:
                 cache = StorageHostCache(server_id=server_id)
                 db.add(cache)
-            cache.attempted_at = datetime.utcnow()
+            cache.attempted_at = _utcnow()
             db.commit()
             try:
                 data = remote_inventory(server)
                 # Include live topology/by-id choices for planning and host capabilities.
                 data["topology"] = helper_json(server, "inventory")
-                now = datetime.utcnow()
+                now = _utcnow()
                 latest_sample = db.scalar(
                     select(StorageSample.captured_at)
                     .where(StorageSample.server_id == server_id)
@@ -186,7 +192,7 @@ def refresh_due():
             if (
                 cache is None
                 or cache.attempted_at is None
-                or datetime.utcnow() - cache.attempted_at > timedelta(hours=1)
+                or _utcnow() - cache.attempted_at > timedelta(hours=1)
             ):
                 request_refresh(server.id)
 
@@ -234,13 +240,13 @@ def install(app, templates):
         data = json.loads(cache.payload_json) if cache else {}
         for snapshot_row in data.get("snapshots", []):
             try:
-                snapshot_row["created_at"] = datetime.utcfromtimestamp(
-                    int(snapshot_row["creation"])
-                )
+                snapshot_row["created_at"] = datetime.fromtimestamp(
+                    int(snapshot_row["creation"]), dt_timezone.utc
+                ).replace(tzinfo=None)
             except (ValueError, OverflowError, OSError):
                 snapshot_row["created_at"] = None
         snapshot = latest_snapshot(db, server_id) or {}
-        diagnostics = diagnose(db, server_id, snapshot, datetime.utcnow())
+        diagnostics = diagnose(db, server_id, snapshot, _utcnow())
         pools = data.get("topology", {}).get("pools", [])
         selected = next(
             (p for p in pools if p["name"] == pool), pools[0] if pools else None
@@ -302,7 +308,7 @@ def install(app, templates):
                 size_tb=size_tb,
                 policies=policies,
                 runs=runs,
-                forecasts=dataset_forecasts(db, server_id, datetime.utcnow())
+                forecasts=dataset_forecasts(db, server_id, _utcnow())
                 if tab == "datasets"
                 else {},
                 events=events[:50],
@@ -312,7 +318,7 @@ def install(app, templates):
                 kind=kind,
                 audits=audits,
                 servers=db.scalars(select(Server).order_by(Server.name)).all(),
-                zones=sorted(available_timezones()),
+                zones=_zones(),
                 message=request.query_params.get("message", ""),
             ),
         )

@@ -192,11 +192,10 @@ def _validate_blank_disk(by_id: str) -> tuple[str, int]:
     status = _run([ZPOOL(), "status", "-P", "-L"], timeout=30)
     if status.returncode != 0 and "no pools available" not in (status.stdout + status.stderr).lower():
         raise HelperError(status.stderr.strip() or "Unable to verify ZFS membership")
-    for token in status.stdout.split():
-        if token == real or token.startswith(real + "p") or (
-            token.startswith(real) and token[len(real):].isdigit()
-        ):
-            raise HelperError("Replacement disk is already a ZFS member")
+    # Exact disk or a real partition (sda1, nvme0n1p1); /dev/sdap is another disk.
+    partition = re.compile(re.escape(real) + (r"(?:p\d+|-part\d+)?" if real[-1:].isdigit() else r"(?:\d+|-part\d+)?"))
+    if any(partition.fullmatch(token) for token in status.stdout.split()):
+        raise HelperError("Replacement disk is already a ZFS member")
 
     size = int(node.get("size") or 0)
     if size <= 0:
@@ -658,7 +657,7 @@ def cmd_actions(args: list[str]) -> int:
 
 
 # NASitron 1.0 storage protocol. This remains embedded in the standalone helper.
-HELPER_VERSION = "1.0.1"
+HELPER_VERSION = "1.0.2"
 DATASET_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*)*$")
 SNAP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,200}$")
 DATASET_PROPS = {'compression', 'recordsize', 'quota', 'refquota', 'reservation', 'refreservation', 'atime', 'readonly', 'sync', 'mountpoint'}
@@ -673,7 +672,7 @@ STORAGE_ACTIONS = {
     'snapshot-destroy': ('Delete snapshot', 'Permanently deletes this recovery point. Holds and clones block deletion.'),
     'snapshot-hold': ('Hold snapshot', 'Protects this snapshot from deletion with a NASitron hold.'),
     'snapshot-release': ('Release snapshot hold', 'Removes the NASitron hold; other holds are preserved.'),
-    'snapshot-clone': ('Clone for recovery', 'Creates an unmounted clone for inspection; the original dataset is unchanged.'),
+    'snapshot-clone': ('Clone for recovery', 'Creates an unmounted clone for inspection with setuid and device files disabled; the original dataset is unchanged.'),
     'snapshot-rollback': ('Rollback dataset', 'Discards all changes since this snapshot. Newer snapshots are never automatically deleted.'),
     'smart-short': ('Start short SMART test', 'Starts a self-test on this physical disk.'),
     'smart-long': ('Start extended SMART test', 'Starts a potentially lengthy self-test on this physical disk.'),
@@ -767,6 +766,25 @@ def _property_value(prop, value):
     return f'{prop}={value}'
 
 
+def _replication_derived(name):
+    """True when a dataset holds stream-supplied content: a replication
+    destination (owner tag, inherited by children) or a clone descended from one."""
+    seen = set()
+    while name and name not in seen and len(seen) < 64:
+        seen.add(name)
+        if re.fullmatch(r'[a-f0-9]{32}', _get_property(name, 'org.nasitron:replication')):
+            return True
+        origin = _get_property(name, 'origin')
+        name = origin.split('@')[0] if '@' in origin else ''
+    return False
+
+
+def _safe_mountpoint(mountpoint):
+    # zfs mount/set follow symbolic links; never let one redirect a mount.
+    if mountpoint.startswith('/') and os.path.realpath(mountpoint) != os.path.normpath(mountpoint):
+        raise HelperError('Mountpoint must not traverse symbolic links')
+
+
 def _release_candidate():
     import hashlib
     import urllib.request
@@ -848,11 +866,15 @@ def _storage_plan(data):
             if action == 'dataset-set':
                 prop = data.get('property', '')
                 args = ['set', _property_value(prop, data.get('value', '')), target]
+                if prop == 'mountpoint':
+                    _safe_mountpoint(data.get('value', ''))
                 identity['old_value'] = _get_property(target, prop)
             elif action == 'dataset-inherit':
                 prop = data.get('property', '')
                 if prop not in DATASET_PROPS:
                     raise HelperError('Unsupported inherited property')
+                if prop == 'mountpoint' and _replication_derived(target):
+                    raise HelperError('Replicated data keeps an explicit mountpoint under /mnt or /srv')
                 args = ['inherit', prop, target]
             elif action == 'snapshot-create':
                 args = ['snapshot', target]
@@ -868,6 +890,16 @@ def _storage_plan(data):
                 identity['tag_present'] = present
                 args = [action.split('-')[1], tag, target]
             elif action in {'dataset-mount', 'dataset-unmount'}:
+                if action == 'dataset-mount':
+                    mountpoint = _get_property(target, 'mountpoint')
+                    _safe_mountpoint(mountpoint)
+                    if _replication_derived(target):
+                        # Stream-supplied content must never appear at an inherited or
+                        # received path (for example under /etc or /root).
+                        source = _zfs(['get', '-H', '-o', 'source', 'mountpoint', target]).strip()
+                        if (source != 'local' or '..' in mountpoint.split('/')
+                                or not re.fullmatch(r'/(?:mnt|srv)/[A-Za-z0-9_./-]+', mountpoint)):
+                            raise HelperError('Replicated data mounts only at an explicit mountpoint under /mnt or /srv; clone it for recovery')
                 args = [action.split('-')[1], target]
             elif action == 'snapshot-clone':
                 destination = _dataset(data.get('new_pool', ''))
@@ -888,7 +920,14 @@ def _execute_plan(plan):
     if plan.get('kind') == 'zfs':
         if plan.get('noop'):
             return subprocess.CompletedProcess([], 0, 'Requested hold state already applied.\n', '')
-        return _run([ZFS()] + plan['args'])
+        result = _run([ZFS()] + plan['args'])
+        if result.returncode == 0 and plan['args'][0] == 'clone' and 'canmount=noauto' in plan['args']:
+            # Recovery clones may expose replicated (stream-supplied) files.
+            hardened = _run([ZFS(), 'set', 'setuid=off', 'devices=off', plan['args'][-1]])
+            if hardened.returncode:
+                return subprocess.CompletedProcess(result.args, hardened.returncode, result.stdout,
+                                                   result.stderr + hardened.stderr + 'Clone created but setuid/devices could not be disabled; do not mount it.\n')
+        return result
     if plan.get('kind') == 'smart':
         result = subprocess.run([SMARTCTL()] + plan['args'], cwd=str(BY_ID_DIR), env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'}, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
         # SMART health bits do not mean the command failed; preserve reported health output.
@@ -933,9 +972,29 @@ def cmd_storage(args):
 
 
 def cmd_stream(args):
+    Path(LOCK_PATH).parent.mkdir(parents=True, exist_ok=True)
     with open(LOCK_PATH, 'a+', encoding='utf-8') as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise HelperError('Another NASitron ZFS operation is running') from exc
         return _stream_locked(args)
+
+
+def _harden_received(target):
+    # The stream is caller-supplied: never let received filesystems auto-mount at
+    # boot or honour setuid/device files, whatever properties the stream carried.
+    listing = _run([ZFS(), 'list', '-H', '-r', '-o', 'name,type', target])
+    if listing.returncode:
+        if 'does not exist' in listing.stderr.lower():
+            return
+        raise HelperError(listing.stderr.strip() or 'Cannot inspect received datasets')
+    for row in listing.stdout.splitlines():
+        fields = row.split('\t')
+        if len(fields) == 2 and fields[1] == 'filesystem':
+            result = _run([ZFS(), 'set', 'canmount=noauto', 'setuid=off', 'devices=off', fields[0]])
+            if result.returncode:
+                raise HelperError(result.stderr.strip() or 'Cannot secure received dataset')
 
 
 def _stream_locked(args):
@@ -969,7 +1028,10 @@ def _stream_locked(args):
             command.append(target)
     else:
         raise HelperError('Invalid stream arguments')
-    return subprocess.call(command, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'})
+    code = subprocess.call(command, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C'})
+    if code == 0 and args[0] == 'receive':
+        _harden_received(target)
+    return code
 
 
 def main() -> int:

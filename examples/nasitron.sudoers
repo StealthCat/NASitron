@@ -4,7 +4,8 @@
 #
 # Install remote/nasitron_root_helper.py as:
 #   /usr/local/sbin/nasitron-root-helper
-# owned by root:root and mode 0755.
+# owned by root:root and mode 0755, in a directory chain that only root can
+# write (otherwise the monitoring account could replace the helper).
 #
 # The helper is the authorization boundary. It accepts only:
 #   smartctl <device>
@@ -12,6 +13,8 @@
 #   wipefs-check <device>
 #   actions inventory | preview <json> | execute <json> <fingerprint>
 #   replace <pool> <failed-guid> <replacement-by-id> <allow-conflict:0|1>
+#   storage inventory
+#   stream send <snapshot> <base> <resume-token> | stream receive <dataset> <policy-id>
 #
 # Do not replace this with wildcard rules for zpool, smartctl, wipefs, or flock.
 # sudo argument wildcards can match whitespace and additional arguments.

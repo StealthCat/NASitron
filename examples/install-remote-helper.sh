@@ -10,8 +10,12 @@ if [ ! -f "$SOURCE" ]; then
   exit 1
 fi
 
+POLICY="$(dirname "$0")/nasitron.sudoers"
+
+# Validate before installing: a broken file in /etc/sudoers.d disables sudo.
+sudo visudo -cf "$POLICY"
 sudo install -o root -g root -m 0755 "$SOURCE" "$DEST"
-sudo install -o root -g root -m 0440 examples/nasitron.sudoers "$SUDOERS"
+sudo install -o root -g root -m 0440 "$POLICY" "$SUDOERS"
 sudo visudo -cf "$SUDOERS"
 
 echo "Installed $DEST and validated $SUDOERS"
