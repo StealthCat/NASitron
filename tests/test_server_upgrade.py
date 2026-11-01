@@ -151,7 +151,10 @@ def test_upgrade_only_rejects_key_rotation():
 
 
 @pytest.mark.parametrize("existing", [True, False])
-def test_upgrade_installer_preserves_keys_and_never_enrolls(tmp_path, existing):
+@pytest.mark.parametrize("helper_directory", ["secure", "non-root", "writable"])
+def test_upgrade_installer_preserves_keys_and_never_enrolls(
+    tmp_path, existing, helper_directory
+):
     # Isolate every write in a temporary directory. Simulate root ownership commands
     # so this regression test also runs as an unprivileged CI user.
     bindir = tmp_path / "bin"
@@ -200,6 +203,30 @@ while args:
 raise SystemExit(subprocess.call(['/usr/bin/install',*clean]))
 """,
     )
+    # Model the root-only ancestry expected by the real installer. Rejecting
+    # unsafe ownership or write access must still happen before helper replacement.
+    ancestors = [str(target.parent), *(str(p) for p in target.parent.parents)]
+    ownership_checks = tmp_path / "ownership-checks"
+    stub(
+        "stat",
+        "import sys\nfrom pathlib import Path\n"
+        + f"ancestors = {ancestors!r}\n"
+        + "assert sys.argv[1:4] == ['-c', '%u', '--']\n"
+        + "assert sys.argv[4] in ancestors\n"
+        + f"with Path({str(ownership_checks)!r}).open('a') as log:\n"
+        + "    log.write(sys.argv[4] + '\\n')\n"
+        + f"print(1000 if {helper_directory!r} == 'non-root' "
+        + f"and sys.argv[4] == {str(target.parent)!r} else 0)\n",
+    )
+    stub(
+        "runuser",
+        "import sys\n"
+        + "assert sys.argv[1:5] == ['-u', 'custom-monitor', '--', 'test']\n"
+        + "assert sys.argv[5] == '-w'\n"
+        + f"assert sys.argv[6] in {ancestors!r}\n"
+        + f"raise SystemExit(0 if {helper_directory!r} == 'writable' "
+        + f"and sys.argv[6] == {str(target.parent)!r} else 1)\n",
+    )
     script = Path("scripts/install-remote.sh").read_text()
     script = script.replace('[[ "$EUID" -eq 0 ]]', "true")
     script = script.replace("/etc/sudoers.d/nasitron", str(sudoers))
@@ -229,8 +256,20 @@ raise SystemExit(subprocess.call(['/usr/bin/install',*clean]))
         capture_output=True,
         text=True,
     )
-    assert response.returncode == 0, response.stderr
     assert keys.read_text() == "existing-key-that-must-remain\n"
+    if helper_directory != "secure":
+        assert response.returncode != 0
+        expected = "root-owned directory" if helper_directory == "non-root" else "writable"
+        assert expected in response.stderr
+        assert not sudoers.exists()
+        assert not Path(str(target) + ".previous").exists()
+        if existing:
+            assert target.read_text() == "old helper"
+        else:
+            assert not target.exists()
+        return
+    assert response.returncode == 0, response.stderr
+    assert ownership_checks.read_text().splitlines() == ancestors
     assert target.read_text() == Path("remote/nasitron_root_helper.py").read_text()
     assert f"custom-monitor ALL=(root) NOPASSWD: {target}" in sudoers.read_text()
     assert "preserved" in response.stdout
