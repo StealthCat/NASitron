@@ -1,8 +1,11 @@
 # NASitron 1.0 storage workspace
 
-Version 1.0.1 improves transfer verification and cancellation, serial/WWN mapping,
-concurrent scheduling and form usability. Existing 1.0 installations can install
-the 1.0.1 helper through **Host & helper**. No additional database migration is needed.
+Version 1.0.4 ships helper 1.0.2, which hardens replicated and cloned datasets
+(see *Replication* below). Existing 1.0 installations can install the 1.0.2 helper
+through **Host & helper** or **Servers → Upgrade Server**. No database migration is needed.
+
+Version 1.0.1 improved transfer verification and cancellation, serial/WWN mapping,
+concurrent scheduling and form usability.
 
 Open a server and choose **Storage workspace**, or use Maintenance. Administrator access and a secure connection are required. Disk & pool actions remain available from the workspace. Physical disk commands use short `/dev/disk/by-id` basenames, resolved and validated by the remote helper; Linux `zdN` devices remain virtual ZFS volumes.
 
@@ -10,7 +13,7 @@ Open a server and choose **Storage workspace**, or use Maintenance. Administrato
 
 1. Back up NASitron's persistent data volume, including the SQLite database and encryption key, before updating the container. Version 1.0 adds tables for schedules, job runs, storage inventory and capacity samples; it preserves existing servers, labels, bays and historical telemetry.
 2. Open **Servers → Upgrade Server**, select the existing NAS and copy the generated command. Run it on that NAS using an account with sudo. The `--upgrade-only` mode reinstalls the packaged helper and restricted sudo policy without generating keys, changing sshd, enrolling a second server or altering stored history and bay assignments. It requires the existing monitoring account and dependencies, verifies the downloaded installer checksum and defers while a NASitron storage operation holds the host lock. An existing helper is saved as `.previous`. After completion, use **Poll server**, then refresh the storage inventory. This works with older 0.x helpers because installation runs directly under sudo. The [remote installation instructions](../README.md#privileged-remote-helper) remain available for new installations.
-3. Open the workspace, select **Refresh live inventory**, then reload after collection finishes. Host & helper should report 1.0.0. Cached inventory also refreshes hourly for enabled servers; normal disk statistics keep their configured collection cadence.
+3. Open the workspace, select **Refresh live inventory**, then reload after collection finishes. Host & helper should report 1.0.2. Cached inventory also refreshes hourly for enabled servers; normal disk statistics keep their configured collection cadence.
 4. Create schedules explicitly. Upgrading alone does not create jobs or change pools, datasets or snapshots. Keep NASitron configured as a single application worker, as required by its scheduler and host-operation locks.
 
 ## Features
@@ -39,13 +42,13 @@ Scrub and SMART job success means the host accepted the command, not that the ph
 
 Register both NAS hosts and pin their SSH host-key fingerprints first. Choose an exact source dataset and a dedicated **new child dataset** on the destination, whose parent already exists. Both hosts need the 1.0 helper. Streams pass through NASitron over pinned SSH connections, so its network link and availability affect transfer speed. The optional MiB/s cap applies to the stream bytes forwarded by NASitron.
 
-Replication uses raw ZFS sends, incremental bases matched by snapshot GUID, and resumable receives. The destination stays unmounted and read-only, tagged with its policy owner. An unrelated existing destination is rejected. No forced receive rollback, recursive send or automatic destruction of unrelated snapshots is performed. Destination ownership is verified while holding the helper operation lock; failed identity reads abort the receive. Source and destination OpenZFS must support the stream features; native errors are recorded when they do not.
+Replication uses raw ZFS sends, incremental bases matched by snapshot GUID, and resumable receives. The destination stays unmounted and read-only, tagged with its policy owner. After every receive the helper sets `canmount=noauto`, `setuid=off` and `devices=off` on the received filesystems and fails the run if it cannot. Replicated datasets, and clones of them, may only be mounted at a mountpoint under `/mnt` or `/srv`, cannot inherit a mountpoint, and are never mounted through a symlinked path. An unrelated existing destination is rejected. No forced receive rollback, recursive send or automatic destruction of unrelated snapshots is performed. Destination ownership is verified while holding the helper operation lock; failed identity reads abort the receive. Source and destination OpenZFS must support the stream features; native errors are recorded when they do not.
 
 Cancelling a transfer closes the stream and retains the partial receive. A subsequent run checks for a resume token before starting a new incremental transfer. It may finish an earlier snapshot; the freshness timestamp reflects that verified snapshot's creation time. A fresh transfer must verify the requested snapshot GUID; a resumed transfer must verify a newly received matching snapshot. An older shared base alone is not proof of success. The shared incremental base is held on the source with a policy-specific tag. After advancing, the old base's policy hold is released. Failed transfers may leave protective holds requiring inspection before manual cleanup. Policy retention also applies to its destination snapshots after a verified transfer.
 
 ## Reviewed actions and recovery
 
-Interactive changes follow command preview, typed confirmation and single-use submission. The helper rechecks identities/properties at execution. Snapshot rollback does not use recursive or force flags, so newer dependent snapshots must be addressed separately. Filesystem clones start with `canmount=noauto` and `mountpoint=none`; choose a permitted mountpoint under `/mnt` or `/srv`, then mount explicitly. Zvol recovery clones start read-only.
+Interactive changes follow command preview, typed confirmation and single-use submission. The helper rechecks identities/properties at execution. Snapshot rollback does not use recursive or force flags, so newer dependent snapshots must be addressed separately. Filesystem clones start with `canmount=noauto` and `mountpoint=none`; choose a permitted mountpoint under `/mnt` or `/srv`, then mount explicitly. Recovery clones also get `setuid=off` and `devices=off`. Zvol recovery clones start read-only.
 
 Editable properties are compression, recordsize, quota, refquota, reservation, refreservation, atime, readonly, sync and mountpoint. Values are validated on the NAS. `sync=disabled` and arbitrary root mountpoints are not exposed. Zvol creation uses a specified, reserved size. Property tables show local, inherited and default sources.
 

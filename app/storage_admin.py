@@ -14,6 +14,7 @@ from fastapi import Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, delete
 
+from .config import RECOMMENDED_HELPER_VERSION
 from .insights import session
 from .models import (
     Server,
@@ -301,6 +302,7 @@ def install(app, templates):
                 snapshot=snapshot,
                 vdevs=vdev_diagnosis(data.get("topology", {}), diagnostics),
                 active_tab=tab,
+                recommended_helper=RECOMMENDED_HELPER_VERSION,
                 diagnostics=diagnostics,
                 pools=pools,
                 selected=selected,

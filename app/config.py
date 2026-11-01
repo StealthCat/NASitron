@@ -5,7 +5,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 APP_NAME = "NASitron"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
+# Must match HELPER_VERSION in remote/nasitron_root_helper.py (enforced by tests).
+RECOMMENDED_HELPER_VERSION = "1.0.2"
 
 _CONFIG_ERRORS: list[str] = []
 
