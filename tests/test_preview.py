@@ -3,6 +3,7 @@ import gzip
 import io
 import json
 import sqlite3
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -224,7 +225,10 @@ def test_notification_windows_and_snoozes_preserve_pending_alerts(monkeypatch):
         set_setting(db, "smtp_enabled", "true")
         db.commit()
         server = Server(
-            name="preview-muted", host="localhost", username="nasitron", enabled=False
+            name=f"preview-muted-{uuid.uuid4().hex[:8]}",
+            host="localhost",
+            username="nasitron",
+            enabled=False,
         )
         db.add(server)
         db.flush()
@@ -259,6 +263,10 @@ def test_notification_windows_and_snoozes_preserve_pending_alerts(monkeypatch):
         db.flush()
         assert alerts.deliver_pending_notifications(db) >= 1 and sent
         db.rollback()
+        # Delivery commits, so remove the fixture server explicitly.
+        leftover = db.get(Server, server.id)
+        if leftover is not None:
+            db.delete(leftover)
         set_setting(db, "smtp_enabled", "false")
         db.commit()
 

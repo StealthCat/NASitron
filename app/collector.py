@@ -115,9 +115,13 @@ class SSHCollector:
 
     @staticmethod
     def fetch_host_key(server: Server) -> dict[str, str]:
-        sock = socket.create_connection((server.host, server.port), timeout=10)
-        transport = paramiko.Transport(sock)
         try:
+            sock = socket.create_connection((server.host, server.port), timeout=10)
+        except OSError as exc:
+            raise CollectorError(f"Unable to fetch SSH host key: {exc}") from exc
+        transport = None
+        try:
+            transport = paramiko.Transport(sock)
             transport.start_client(timeout=10)
             key = transport.get_remote_server_key()
             digest = hashlib.sha256(key.asbytes()).digest()
@@ -131,7 +135,8 @@ class SSHCollector:
         except Exception as exc:
             raise CollectorError(f"Unable to fetch SSH host key: {exc}") from exc
         finally:
-            transport.close()
+            if transport is not None:
+                transport.close()
             sock.close()
 
     @staticmethod
@@ -192,7 +197,9 @@ class SSHCollector:
                         for keytype, key in entries.items():
                             latest.add(hostname, keytype, key)
                     _save_host_keys_atomic(latest, Path(KNOWN_HOSTS_PATH))
-        except (paramiko.SSHException, socket.error, OSError, CollectorError) as exc:
+        except Exception as exc:
+            # Any failure (including EOFError or ValueError raised from deep
+            # inside paramiko) must not leak the transport thread and socket.
             client.close()
             if isinstance(exc, CollectorError):
                 raise
@@ -239,6 +246,7 @@ class SSHCollector:
             + command
         )
 
+        channel = None
         try:
             stdin, stdout, _stderr = self.client.exec_command(full_command, timeout=timeout)
             stdin.close()
@@ -310,6 +318,9 @@ class SSHCollector:
                 "stdout_truncated": False,
                 "stderr_truncated": False,
             }
+        finally:
+            if channel is not None:
+                channel.close()
 
     @staticmethod
     def _strict_pool_names(result: dict[str, Any]) -> list[str]:
@@ -432,7 +443,18 @@ class SSHCollector:
                 raw["smart_inventory_ok"] = False
             if raw["smart_inventory_ok"]:
                 helper = shlex.quote(REMOTE_HELPER_PATH)
-                for device in self._disk_paths(block.get("blockdevices", [])):
+                devices = self._smart_order(
+                    self._disk_paths(block.get("blockdevices", []))
+                )
+                for position, device in enumerate(devices):
+                    deadline = getattr(self, "collection_deadline", None)
+                    if deadline is not None and deadline - time.monotonic() < 10:
+                        # Slow or spun-down drives must not push the whole host
+                        # collection past its deadline (which would fail every
+                        # poll until SMART succeeds). Defer the rest; the next
+                        # SMART cycle samples them first.
+                        raw["smart_deferred"] = devices[position:]
+                        break
                     if self.server.sudo_for_smart:
                         command = (
                             f"sudo -n {helper} smartctl {shlex.quote(device)} 2>/dev/null"
@@ -475,6 +497,20 @@ class SSHCollector:
                 max_output_bytes=MAX_DIAGNOSTIC_OUTPUT_BYTES,
             )
         return raw
+
+    def _smart_order(self, devices: list[str]) -> list[str]:
+        """Least recently sampled drives first, so deferrals rotate fairly."""
+        previous = getattr(self, "previous", None) or {}
+        sampled: dict[str, str] = {}
+        for drive in previous.get("drives") or []:
+            if not isinstance(drive, dict) or not drive.get("path"):
+                continue
+            smart = drive.get("smart") or {}
+            sampled[str(drive["path"])] = max(
+                str(smart.get("sampled_at") or ""),
+                str(smart.get("attempted_at") or ""),
+            )
+        return sorted(devices, key=lambda device: (sampled.get(device, ""), device))
 
     @staticmethod
     def _disk_paths(nodes: list[dict[str, Any]]) -> list[str]:

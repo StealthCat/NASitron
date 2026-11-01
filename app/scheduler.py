@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select
@@ -20,6 +20,11 @@ _inflight: set[int] = set()
 _states: dict[int, dict] = {}
 
 
+def _utcnow() -> datetime:
+    """Naive UTC, matching how timestamps are stored in the database."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def collector_states():
     with _lock:
         return {key: dict(value) for key, value in _states.items()}
@@ -27,7 +32,7 @@ def collector_states():
 
 def _collect_worker(server_id: int) -> None:
     with _lock:
-        _states[server_id] = {"state": "running", "at": datetime.utcnow()}
+        _states[server_id] = {"state": "running", "at": _utcnow()}
     result = "completed"
     try:
         with SessionLocal() as db:
@@ -38,7 +43,7 @@ def _collect_worker(server_id: int) -> None:
     finally:
         with _lock:
             _inflight.discard(server_id)
-            _states[server_id] = {"state": result, "at": datetime.utcnow()}
+            _states[server_id] = {"state": result, "at": _utcnow()}
 
 
 def trigger_now(server_id: int) -> bool:
@@ -49,7 +54,7 @@ def trigger_now(server_id: int) -> bool:
         if _pool is None:
             return False
         _inflight.add(server_id)
-        _states[server_id] = {"state": "queued", "at": datetime.utcnow()}
+        _states[server_id] = {"state": "queued", "at": _utcnow()}
         pool = _pool
     try:
         pool.submit(_collect_worker, server_id)
@@ -62,7 +67,7 @@ def trigger_now(server_id: int) -> bool:
 
 
 def _schedule_due() -> None:
-    now = datetime.utcnow()
+    now = _utcnow()
     with SessionLocal() as db:
         servers = db.scalars(select(Server).where(Server.enabled.is_(True))).all()
         for server in servers:
@@ -105,7 +110,7 @@ def _housekeeping() -> None:
                 str(round(time.monotonic() - started, 2)),
             )
             set_setting(
-                db, "history_housekeeping_attempt", datetime.utcnow().isoformat()
+                db, "history_housekeeping_attempt", _utcnow().isoformat()
             )
             db.commit()
 

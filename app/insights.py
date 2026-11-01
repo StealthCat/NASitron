@@ -1,6 +1,6 @@
 """Read-only insights and explicitly authorized monitoring controls."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import gzip
 import io
 import json
@@ -28,6 +28,11 @@ from .security import require_csrf
 from .service import latest_snapshot, current_states
 from .support import sanitize_diagnostics
 from .settings_store import get_int
+
+
+def _utcnow() -> datetime:
+    """Naive UTC, matching how timestamps are stored in the database."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def session():
@@ -146,7 +151,7 @@ def install(app, templates):
                 )
         windows = db.scalars(
             select(MaintenanceWindow)
-            .where(MaintenanceWindow.ends_at > datetime.utcnow())
+            .where(MaintenanceWindow.ends_at > _utcnow())
             .order_by(MaintenanceWindow.starts_at)
         ).all()
         actions = db.scalars(
@@ -184,7 +189,7 @@ def install(app, templates):
             or len(reason) > 255
         ):
             raise HTTPException(400, "Invalid window duration or reason")
-        now = datetime.utcnow()
+        now = _utcnow()
         if minutes == 0:
             for w in db.scalars(
                 select(MaintenanceWindow).where(
@@ -214,7 +219,7 @@ def install(app, templates):
         if not 0 <= minutes <= 10080:
             raise HTTPException(400, "Maximum snooze is 7 days")
         alert.snoozed_until = (
-            datetime.utcnow() + timedelta(minutes=minutes) if minutes else None
+            _utcnow() + timedelta(minutes=minutes) if minutes else None
         )
         db.commit()
         return RedirectResponse("/alerts", status_code=303)
@@ -326,7 +331,7 @@ def install(app, templates):
         for server in servers:
             snapshot = states.get(server.id) or {}
             from .history import history_series
-            now = datetime.utcnow()
+            now = _utcnow()
             scopes = [p["name"] for p in snapshot.get("pools", [])]
             history = history_series(db, server, ["pool.capacity_pct"], scopes, now-timedelta(days=30), now, bucket_seconds=86400, latest_exact=False) if scopes else []
             history_by_pool = {h["scope"]: [(datetime.fromisoformat(p["t"].removesuffix("Z")), p["v"]) for p in h["points"]] for h in history}
