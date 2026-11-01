@@ -3,6 +3,12 @@ name: Test
 on:
   push:
   pull_request:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Exact release commit to validate
+        required: true
+        type: string
 
 jobs:
   test:
@@ -17,6 +23,9 @@ jobs:
       WEB_CONCURRENCY: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -91,6 +100,9 @@ jobs:
       PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

@@ -377,6 +377,12 @@ The scheduler can monitor multiple servers concurrently. Each host's collection 
 - TOFU is convenient for initial setup; strict host-key verification is preferable once keys are known.
 - Monitoring, tuning-bundle collection, and all other current NASitron functions remain read-only.
 
+## Releases and Docker Hub
+
+Stable GitHub releases can publish multi-platform images to `stealthcat128/nasitron`,
+using the same release validation and publishing flow as Blockinator Web.
+See the [release pipeline guide](docs/RELEASING.md) for setup, publishing, and retries.
+
 ## Development
 
 ```bash
