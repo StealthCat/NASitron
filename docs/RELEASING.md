@@ -28,6 +28,12 @@ tag to a commit SHA, then calls the existing test workflow with that exact SHA.
 Both the application/Docker smoke tests and browser UI checks must pass before
 the publisher logs into Docker Hub.
 
+Validation uses the tagged application and packaged helper. The installer test
+fixture is taken from the immutable publishing-workflow commit so its simulation
+of root-owned directories works on unprivileged runners, including when validating
+older tags. Other release source files are unchanged. The Docker image is built
+from a separate clean checkout of the release commit.
+
 Both tag forms publish the same Docker version (for example, `1.0.4` or
 `v1.0.4` produces `stealthcat128/nasitron:1.0.4`).
 
