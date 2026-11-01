@@ -22,11 +22,11 @@ jobs:
       NASITRON_ALLOW_INSECURE_MAINTENANCE: "true"
       WEB_CONCURRENCY: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
@@ -99,16 +99,17 @@ jobs:
       WEB_CONCURRENCY: "1"
       PYTHONPATH: .
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
+          package-manager-cache: false
       - run: pip install -r requirements-dev.txt
       - run: npm install --no-save playwright@1.62.1 jsdom@26.1.0
       - run: node tests/ui_logic.cjs
@@ -128,7 +129,7 @@ jobs:
           node tests/ui_smoke.cjs
           node tests/zfs_actions_smoke.cjs
           node tests/storage_smoke.cjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: preview-ui-screenshots
