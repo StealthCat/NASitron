@@ -1,7 +1,9 @@
 /* A single timezone for server-rendered timestamps and client charts. */
 window.NASitronTime = (() => {
-  const zone=document.body.dataset.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const format=(date,options={})=>new Date(date).toLocaleString([], {...options,timeZone:zone});
+  let zone=document.body.dataset.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  try { new Intl.DateTimeFormat([], {timeZone:zone}); } catch (_) { zone=Intl.DateTimeFormat().resolvedOptions().timeZone; }
+  // 24-hour clock to match server-rendered timestamps (YYYY-MM-DD HH:MM:SS).
+  const format=(date,options={})=>new Date(date).toLocaleString([], {hourCycle:'h23',...options,timeZone:zone});
   const localValue=date=>new Intl.DateTimeFormat('sv-SE',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(date)).replace(' ','T');
   function toUTC(value) {
     if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value)) return new Date(NaN);
@@ -88,6 +90,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
     return n.toFixed(1) + ' ' + u[i] + '/s';
   })() : value.toFixed(options.decimals ?? 1) + (options.suffix || '');
 
+  const duration = seconds => seconds >= 86400 && seconds % 86400 === 0 ? seconds / 86400 + 'd' : seconds >= 3600 ? +(seconds / 3600).toFixed(1) + 'h' : seconds >= 60 ? +(seconds / 60).toFixed(1) + 'm' : seconds + 's';
   const connected = (a,b) => b.t-a.t <= Math.max(a.resolution,b.resolution)*3000;
   function draw() {
     const width = Math.max(1, canvas.getBoundingClientRect().width),
@@ -180,9 +183,10 @@ window.NASitronChart = function(canvas, source, options = {}) {
       minute: '2-digit'
     });
     ctx.fillStyle = '#a9b7cb';
-    ctx.fillText(time(start), left, height - 12);
-    const last = time(end);
-    ctx.fillText(last, width - right - ctx.measureText(last).width, height - 12);
+    const first = time(start), last = time(end), lastX = width - right - ctx.measureText(last).width;
+    // Narrow charts cannot fit both full labels; keep the latest one readable.
+    if (left + ctx.measureText(first).width + 12 <= lastX) ctx.fillText(first, left, height - 12);
+    ctx.fillText(last, Math.max(left, lastX), height - 12);
     canvas._timeAt = px => start + Math.max(0, Math.min(1, (px - left) / (width - left - right))) * (end - start);
   }
   async function load() {
@@ -213,7 +217,7 @@ window.NASitronChart = function(canvas, source, options = {}) {
         t: Date.parse(p.t),
         resolution: Math.max(data.expected_interval_seconds || 60, p.resolution_seconds || data.bucket_seconds || 1), partial: !!p.partial, coverage: [p.coverage_start,p.coverage_end], v: displayValue(p.v), low: displayValue(p.min ?? p.v), high: displayValue(p.max ?? p.v)
       })).filter(p => Number.isFinite(p.t) && Number.isFinite(p.v)).sort((a, b) => a.t - b.t);
-      status.textContent = points.length ? 'Updated ' + NASitronTime.format(Date.now(),{hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' · ' + (data.sample_count ?? points.length) + ' readings / ' + points.length + ' buckets · timezone ' + NASitronTime.zone + '' + (data.retained_resolution_seconds > 1 ? ' · retained resolution ' + (data.retained_resolution_seconds / 3600) + 'h' : '') : 'No samples in this time range.';
+      status.textContent = points.length ? 'Updated ' + NASitronTime.format(Date.now(),{hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' · ' + (data.sample_count ?? points.length) + ' readings / ' + points.length + ' buckets · timezone ' + NASitronTime.zone + '' + (data.retained_resolution_seconds > 1 ? ' · retained resolution ' + duration(data.retained_resolution_seconds) : '') : 'No samples in this time range.';
       if (data.partial_bucket_count) status.textContent += ' · ' + data.partial_bucket_count + ' overlapping summary buckets (approximate boundaries)';
       summaryText.textContent = points.length ? `Minimum ${format(Math.min(...points.map(p=>p.low)))}; maximum ${format(Math.max(...points.map(p=>p.high)))}; latest ${format(points[points.length-1].v)} at ${NASitronTime.format(points[points.length-1].t)}. Missing intervals are gaps. Use left/right arrows on the chart for individual samples.` : 'No data available.';
       draw();
@@ -508,7 +512,10 @@ document.addEventListener('DOMContentLoaded', () => {
       await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent);
       button.textContent = 'Copied';
     } catch (_) {
-      button.textContent = 'Select the command and copy manually';
+      // Clipboard API needs a secure context; pre-select the text for manual copying.
+      const target = document.getElementById(button.dataset.copy), selection = getSelection();
+      if (target && selection) { const range = document.createRange(); range.selectNodeContents(target); selection.removeAllRanges(); selection.addRange(range); }
+      button.textContent = 'Command selected · copy it manually';
     }
   }));
   const tabs = [...document.querySelectorAll('[data-page-tab]')].filter(t => t.getClientRects().length),

@@ -25,6 +25,7 @@ assert.equal(d.getElementById('zfs-target-field').hidden, false);
 assert.equal(form.elements.target.required,true);
 assert.equal(form.elements.target.options.length,2); // only leaf, no RAIDZ group
 assert.equal(form.querySelector('[name=disks]').value,'scsi-new');
+assert.match(form.querySelector('#zfs-disks .subtle').textContent,/^5\.46 TiB · Blank disk$/);
 assert.equal(form.textContent.includes('/dev/disk/by-id/'),false);
 assert.equal(values().getAll('pool').length,1);
 choose('attach');

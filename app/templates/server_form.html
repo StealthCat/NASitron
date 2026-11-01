@@ -137,6 +137,8 @@ toggleAuth();
   let attempts = 0;
 
   async function poll() {
+    // Background tabs do not need two-second status checks; resume when visible.
+    if (document.hidden) { window.setTimeout(poll, 2000); return; }
     attempts += 1;
     try {
       const response = await fetch("/api/enrollments/" + encodeURIComponent(enrollmentId) + "/status", {
@@ -161,6 +163,10 @@ toggleAuth();
           status.classList.add("warning");
           return;
         }
+      } else if (response.status === 401 || response.status === 404) {
+        status.textContent = response.status === 401 ? "Your session expired. Sign in again, then check the server list for the completed enrollment." : "This enrollment is no longer available. Reload Add Server to generate a new command.";
+        status.classList.add("warning");
+        return;
       }
     } catch (_error) {
       // Keep polling; a transient browser/network failure should not cancel enrollment.

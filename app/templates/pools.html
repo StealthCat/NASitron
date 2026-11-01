@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Pools · NASitron{% endblock %}
 {% block content %}
-<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">OpenZFS</div><h1>Pools</h1><a class="button" href="/tanks">Pool & root dataset accounting</a><p class="muted">Complete pool inventory and topology across every monitored server.</p></div></div>
+<div class="page-head"><div class="page-title-wrap"><div class="hero-kicker">OpenZFS</div><h1>Pools</h1><p class="muted">Complete pool inventory and topology across every monitored server.</p></div><div class="row"><a class="button" href="/tanks">Pool &amp; root dataset accounting</a></div></div>
 <nav class="page-tabs pool-tabs" role="tablist" aria-label="Pools">
 {% for row in pool_rows %}{% set health=pool_state(row.pool,row.server,row.snapshot) %}
 <button type="button" role="tab" data-page-tab="{{ row.tab_key }}"><span class="pool-tab-name">{{ row.pool.name }} <span class="badge {{ health[0] }}">{{ health[1] }}</span></span><span class="pool-tab-server">{{ row.server.name }}</span></button>

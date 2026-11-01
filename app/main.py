@@ -325,6 +325,7 @@ def login(
             context={
                 "request": request,
                 "next_url": next_url,
+                "username": username[:150],
                 "error": "Invalid username or password.",
             },
         )

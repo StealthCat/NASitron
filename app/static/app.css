@@ -9,11 +9,12 @@
   --panel-glow: rgba(252,24,89,.09);
   --text: #f4f7fc;
   --muted: #8e9bb0;
-  --muted-2: #68768b;
+  --muted-2: #7686a0; /* 4.5:1+ on panel backgrounds */
   --border: #202b3b;
   --border-soft: #172131;
   --accent: #FC1859;
   --accent-bright: #ff4a80;
+  --accent-fill: #e8104f; /* white text on this fill meets 4.5:1 */
   --accent-soft: rgba(252,24,89,.13);
   --accent-line: rgba(252,24,89,.32);
   --good: #38dfa3;
@@ -144,6 +145,7 @@ footer { max-width: 1680px; margin: 0 auto; padding: 0 26px 28px; color: var(--m
 .page-hero.dashboard-art { background-image: linear-gradient(90deg, rgba(7,11,18,.92) 0%, rgba(7,11,18,.58) 47%, rgba(7,11,18,.08) 100%), url('/static/hero-dashboard.svg'); background-size: cover; background-position: center; }
 .page-hero.maintenance-art { background-image: linear-gradient(90deg, rgba(7,11,18,.94) 0%, rgba(7,11,18,.6) 50%, rgba(7,11,18,.12) 100%), url('/static/hero-maintenance.svg'); background-size: cover; background-position: center; }
 .hero-copy { max-width: 590px; position: relative; z-index: 2; }
+.hero-corner-action { position: absolute; right: 22px; top: 18px; z-index: 3; }
 .hero-kicker { display: flex; gap: 8px; align-items: center; color: var(--accent-bright); font-size: .76rem; text-transform: uppercase; letter-spacing: .14em; font-weight: 760; margin-bottom: 9px; }
 .hero-kicker::before { content: ""; width: 24px; height: 2px; background: var(--accent); box-shadow: 0 0 9px var(--accent); }
 .hero-copy h1 { margin: 0 0 7px; font-size: clamp(2rem, 3vw, 3.35rem); letter-spacing: -.045em; line-height: 1; }
@@ -178,6 +180,7 @@ footer { max-width: 1680px; margin: 0 auto; padding: 0 26px 28px; color: var(--m
 }
 .panel { padding: 17px; }
 .panel.flush { padding: 0; overflow: hidden; }
+.panel.flush.scroll { overflow-x: auto; }
 .panel.accent-panel { border-color: var(--accent-line); box-shadow: 0 12px 28px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.025); }
 .panel-title {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -370,7 +373,9 @@ pre {
 
 @media (max-width: 1180px) {
   .grid.four { grid-template-columns: repeat(2, minmax(0,1fr)); }
-  .maintenance-grid { grid-template-columns: 1fr; }
+  .maintenance-grid { grid-template-columns: minmax(0,1fr); }
+  .page-hero:has(.hero-corner-action) { flex-direction: column; align-items: stretch; }
+  .hero-corner-action { position: static; order: -1; margin-bottom: 14px; }
 }
 @media (max-width: 900px) {
   :root { --sidebar-width: 0px; }
@@ -396,10 +401,10 @@ pre {
   main { padding: 14px; }
   footer { padding: 0 14px 20px; }
   .page-hero { min-height: 185px; padding: 24px; }
-  .grid.two, .grid.three { grid-template-columns: 1fr; }
+  .grid.two, .grid.three { grid-template-columns: minmax(0,1fr); }
 }
 @media (max-width: 620px) {
-  .grid.four { grid-template-columns: 1fr; }
+  .grid.four { grid-template-columns: minmax(0,1fr); }
   .page-hero { min-height: 205px; background-position: 62% center !important; }
   .hero-copy { max-width: 100%; }
   .page-head, .hero { align-items: flex-start; flex-direction: column; }
@@ -545,7 +550,7 @@ pre {
   border-radius: 50%;
   color: #fff;
   font-weight: 760;
-  background: var(--accent);
+  background: var(--accent-fill);
   box-shadow: 0 0 14px rgba(252,24,89,.24);
 }
 .installer-command { margin-top: 10px; line-height: 1.55; }
@@ -556,7 +561,7 @@ pre {
 @media (max-width: 700px) {
   .prep-accordion-summary { flex-direction: column; align-items: stretch; }
   .prep-summary-meta { justify-content: space-between; }
-  .prep-step-card { grid-template-columns: 1fr; }
+  .prep-step-card { grid-template-columns: minmax(0,1fr); }
 }
 
 
@@ -1047,6 +1052,10 @@ pre {
 .capacity-item { display:grid; grid-template-columns:1fr auto; gap:6px; margin-bottom:16px; }
 .capacity-item progress,.capacity-item .subtle { grid-column:1/-1; }
 progress { width:100%; height:10px; accent-color:var(--accent); }
+progress { appearance:none; -webkit-appearance:none; border:0; border-radius:99px; overflow:hidden; background:#1b2738; color:var(--accent); }
+progress::-webkit-progress-bar { background:#1b2738; border-radius:99px; }
+progress::-webkit-progress-value { background:var(--accent); border-radius:99px; }
+progress::-moz-progress-bar { background:var(--accent); border-radius:99px; }
 .chart { width:100%; height:220px; }
 .chart-status { min-height:2em; }
 .chart-tooltip { background:var(--panel-2); padding:8px; }

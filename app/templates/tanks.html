@@ -4,9 +4,10 @@
 <div class="page-head">
   <div class="page-title-wrap">
     <div class="hero-kicker">OpenZFS Storage</div>
-    <h1>Pool &amp; root dataset</h1><a class="button" href="/pools">Pool topology</a>
+    <h1>Pool &amp; root dataset</h1>
     <p class="muted">Root ZFS filesystems paired with their backing pools across every monitored server.</p>
   </div>
+  <div class="row"><a class="button" href="/pools">Pool topology</a></div>
 </div>
 
 <section class="grid four">
@@ -16,7 +17,7 @@
   </div>
   <div class="metric-card">
     <div class="metric-icon good"><svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg></div>
-    <div><div class="metric-label">Healthy</div><div class="metric-value">{{ healthy_tanks }}</div><div class="metric-sub">{{ unhealthy_tanks }} need attention</div></div>
+    <div><div class="metric-label">Healthy</div><div class="metric-value">{{ healthy_tanks }}</div><div class="metric-sub">{{ unhealthy_tanks }} {{ "needs" if unhealthy_tanks == 1 else "need" }} attention</div></div>
   </div>
   <div class="metric-card">
     <div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M4 8h16M4 16h16"/><path d="M8 4v16M16 4v16"/></svg></div>
