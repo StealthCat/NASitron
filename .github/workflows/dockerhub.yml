@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a vX.Y.Z release tag'; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected an X.Y.Z or vX.Y.Z release tag'; exit 1; }
           gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" > release.json
           jq -e '.draft == false and .prerelease == false' release.json >/dev/null
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"

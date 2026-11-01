@@ -18,14 +18,18 @@ Images are built by GitHub Actions and pushed to `stealthcat128/nasitron` on Doc
 
 1. Merge and test the source intended for release. Update the application's version
    and user-facing release notes as appropriate.
-2. Tag that exact commit as `vX.Y.Z` and publish a non-draft, non-prerelease GitHub
+2. Tag that exact commit as `X.Y.Z` or `vX.Y.Z` and publish a non-draft, non-prerelease GitHub
    release for the tag.
 3. Watch **Actions → Publish Docker Hub**.
 
-The publisher rejects tags outside `vX.Y.Z`, drafts, and prereleases. It resolves the
+The publisher accepts stable tags in `X.Y.Z` or `vX.Y.Z` form and rejects other
+formats, drafts, and prereleases. It resolves the
 tag to a commit SHA, then calls the existing test workflow with that exact SHA.
 Both the application/Docker smoke tests and browser UI checks must pass before
 the publisher logs into Docker Hub.
+
+Both tag forms publish the same Docker version (for example, `1.0.4` or
+`v1.0.4` produces `stealthcat128/nasitron:1.0.4`).
 
 The build pushes one multi-platform image for `linux/amd64` and `linux/arm64` as
 `stealthcat128/nasitron:X.Y.Z`, with source/version/revision OCI labels and GitHub
