@@ -3,13 +3,14 @@ import json
 import logging
 from contextlib import contextmanager
 import shlex
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, update
 
 from .collector import SSHCollector
+from .db import utcnow as _utcnow
 from .config import REMOTE_HELPER_PATH
 from .experience import effective_role
 from .insights import session
@@ -119,7 +120,7 @@ def install(app, templates):
         row = db.get(MaintenanceAction, action_id)
         if row is None or row.server_id != server_id or row.actor != request.state.current_user.username:
             raise HTTPException(404)
-        if row.state != "preview" or row.created_at < datetime.utcnow() - timedelta(minutes=10):
+        if row.state != "preview" or row.created_at < _utcnow() - timedelta(minutes=10):
             return problem(409, "This preview expired or was already submitted. Generate a new preview.")
         plan = json.loads(row.output)
         if confirm_text != plan["confirmation"]:
@@ -128,7 +129,7 @@ def install(app, templates):
             with action_lock(server_id):
                 claimed = db.execute(update(MaintenanceAction).where(MaintenanceAction.id == action_id,
                     MaintenanceAction.state == "preview",
-                    MaintenanceAction.created_at >= datetime.utcnow() - timedelta(minutes=10)).values(state="executing"))
+                    MaintenanceAction.created_at >= _utcnow() - timedelta(minutes=10)).values(state="executing"))
                 if claimed.rowcount != 1:
                     db.rollback()
                     return problem(409, "This action expired or was already submitted")
@@ -145,7 +146,7 @@ def install(app, templates):
                     row.state = "unknown"
                     row.success = False
                     row.output = "Execution outcome is unknown. Inspect pool status before retrying. " + str(exc)[:19000]
-                row.completed_at = datetime.utcnow()
+                row.completed_at = _utcnow()
                 db.commit()
                 invalidate_inventory_cache(server_id)
                 try:

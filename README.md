@@ -1,5 +1,15 @@
 # NASitron
 
+> **1.0.4:** Full code and visual review. Security hardening of the web layer
+> (cross-site request refusal, open-redirect and CSRF comparison fixes, atomic
+> one-time enrollments), of replication (received and cloned datasets are forced
+> `canmount=noauto`, `setuid=off`, `devices=off` and mount only under `/mnt` or
+> `/srv`) and of the installer and container. Collection no longer fails on hosts
+> with many slow drives (SMART reads are deferred near the deadline), disk matching
+> no longer confuses `sda` with `sdap`, and several `zpool status`/SMART parsing,
+> alerting and UI fixes. **Update the remote helper to 1.0.2** via Servers →
+> Upgrade Server.
+
 > **1.0.3:** Servers → **Upgrade Server** prepares a checksum-verified command to
 > upgrade or reinstall an existing NAS helper, including 0.x → 1.x upgrades,
 > while preserving SSH credentials, server registration, labels and history.

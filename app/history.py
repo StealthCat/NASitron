@@ -200,7 +200,7 @@ def compact_history(
     Insertion and source deletion commit together; interrupted work is rolled
     back and can safely retry without double counting.
     """
-    now = now or datetime.utcnow()
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     count = 0
     for model, resolution, cutoff, source_resolution in [
         (Metric, 3600, now - timedelta(days=raw_days), None),

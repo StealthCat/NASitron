@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Settings · NASitron{% endblock %}
-{% block content %}<a class="button" href="/settings/database">Database health &amp; retention →</a>
+{% block content %}
 <div class="page-head settings-head">
   <div class="page-title-wrap">
     <div class="hero-kicker">Configuration</div>
-    <h1>Settings</h1><a class="button" href="/settings/tools">Backup & tuning comparison</a>
+    <h1>Settings</h1>
     <p class="muted">Configure notifications, health policy, history retention, host enrollment, and HTTPS independently.</p>
   </div>
+  <div class="row"><a class="button" href="/settings/database">Database health &amp; retention →</a><a class="button" href="/settings/tools">Backup &amp; tuning comparison</a></div>
 </div>
 
 {% if request.query_params.get('message') %}

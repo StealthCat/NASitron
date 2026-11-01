@@ -14,7 +14,7 @@
 <label>State<select name="state">{% for key,label in [('active','Active'),('resolved','Resolved'),('acknowledged','Acknowledged'),('all','All')] %}<option value="{{ key }}" {{ 'selected' if state == key else '' }}>{{ label }}</option>{% endfor %}</select></label>
 <label>Severity<select name="severity"><option value="">All severities</option>{% for v in ['critical','warning','info'] %}<option {{ 'selected' if severity == v else '' }}>{{ v }}</option>{% endfor %}</select></label>
 <label>Server<select name="server"><option value="">All servers</option>{% for s in servers %}<option value="{{ s.id }}" {{ 'selected' if server_filter == s.id|string else '' }}>{{ s.name }}</option>{% endfor %}</select></label><button class="primary">Filter</button></form>
-<p>{{ total }} matching alerts · page {{ page }} of {{ pages }}</p>
+<p>{{ total }} matching {{ "alert" if total == 1 else "alerts" }} · page {{ page }} of {{ pages }}</p>
 <div class="panel flush scroll">
 <table class="readable-table">
 <thead><tr><th>State</th><th>Severity</th><th>Server</th><th>Condition</th><th>First Seen</th><th>Last Seen</th><th data-operator-only>Action</th></tr></thead>

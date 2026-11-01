@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -19,6 +19,11 @@ from .settings_store import get_int, set_setting
 from .history import compact_history, delete_chunks
 
 _db_write_lock = threading.Lock()
+
+
+def _utcnow() -> datetime:
+    """Naive UTC, matching how timestamps are stored in the database."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _pool_map(snapshot: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
@@ -145,7 +150,9 @@ def _merge_previous_subsystems(
                 continue
 
             current = disk.get("smart") or {}
-            if not smart_sampled:
+            # Empty SMART means this drive was not sampled this cycle (SMART
+            # not due, or deferred by the collection deadline).
+            if not smart_sampled or not current:
                 disk["smart"] = _mark_smart_stale(old["smart"])
                 continue
             if not current.get("data_available"):
@@ -192,7 +199,7 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
 
     started = time.monotonic()
     previous_state = server.last_collection_state
-    now = datetime.utcnow()
+    now = _utcnow()
     include_smart = (
         server.last_smart_at is None
         or now - server.last_smart_at
@@ -235,11 +242,17 @@ def collect_server(db: Session, server_id: int) -> dict[str, Any]:
                 >= timedelta(minutes=snapshot_interval)
             )
             if full_snapshot_due:
+                # History rows are never used to seed the collector, so do not
+                # duplicate the raw command cache into every retained snapshot.
+                history_payload = json.dumps(
+                    {k: v for k, v in snapshot.items() if k != "_detail_cache"},
+                    separators=(",", ":"),
+                )
                 db.add(
                     Snapshot(
                         server_id=server.id,
                         captured_at=now,
-                        payload_json=payload,
+                        payload_json=history_payload,
                     )
                 )
                 server.last_full_snapshot_at = now
@@ -327,14 +340,16 @@ def latest_snapshot_row(db: Session, server_id: int) -> CurrentState | None:
 
 
 def prune_history(db: Session, now: datetime | None = None) -> tuple[int, int]:
-    now = now or datetime.utcnow()
+    now = now or _utcnow()
     metric_days = max(1, min(3650, get_int(db, "metric_retention_days", 90)))
     snapshot_days = max(1, min(3650, get_int(db, "snapshot_retention_days", 30)))
     metrics = delete_chunks(db, _db_write_lock, Metric, Metric.captured_at < now - timedelta(days=metric_days))
     delete_chunks(db, _db_write_lock, MetricRollup, MetricRollup.captured_at < now - timedelta(days=metric_days))
     snapshots = delete_chunks(db, _db_write_lock, Snapshot, Snapshot.captured_at < now - timedelta(days=snapshot_days))
     delete_chunks(db, _db_write_lock, MonitorEvent, MonitorEvent.captured_at < now - timedelta(days=metric_days))
-    rolled = compact_history(db, _db_write_lock, now, raw_days=get_int(db,"raw_history_days",7), hourly_days=get_int(db,"hourly_history_days",30))
+    raw_days = max(1, min(3650, get_int(db, "raw_history_days", 7)))
+    hourly_days = max(raw_days, min(3650, get_int(db, "hourly_history_days", 30)))
+    rolled = compact_history(db, _db_write_lock, now, raw_days=raw_days, hourly_days=hourly_days)
     with _db_write_lock:
         set_setting(db, "history_housekeeping_at", now.isoformat())
         set_setting(db, "history_housekeeping_result", f"Removed {metrics} raw samples and {snapshots} snapshots; wrote {rolled} summary buckets")

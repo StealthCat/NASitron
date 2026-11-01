@@ -15,7 +15,9 @@ RUN pip install --no-cache-dir -r requirements.lock
 COPY app ./app
 COPY scripts ./scripts
 COPY README.md .
-RUN mkdir -p /data && chown -R nasitron:nasitron /app /data
+# Application code stays root-owned and read-only to the runtime user; only
+# the data volume is writable.
+RUN mkdir -p /data && chown nasitron:nasitron /data
 
 USER nasitron
 EXPOSE 8080

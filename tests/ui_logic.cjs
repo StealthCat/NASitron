@@ -67,5 +67,24 @@ function dom(html) {
   await tick();
   assert.match(temp.window.document.querySelector('details p').textContent,/Minimum 104.0°F; maximum 122.0°F; latest 113.0°F/);
   temp.window.close();
+  // An invalid configured zone must not break every timestamp and chart on the page.
+  const badZone=dom('<body data-timezone="Not/AZone"></body>');badZone.window.eval(script);await tick();
+  assert.notEqual(badZone.window.NASitronTime.zone,'Not/AZone');
+  assert.doesNotThrow(()=>badZone.window.NASitronTime.format(Date.now()));
+  badZone.window.close();
+  const retained=dom('<article class="panel"><h2>History</h2><canvas></canvas></article>');
+  retained.window.eval(script);await tick();
+  retained.window.NASitronChart(retained.window.document.querySelector('canvas'),'',{data:{points:[{t:new Date().toISOString(),v:5}],retained_resolution_seconds:300}});
+  await tick();
+  assert.match(retained.window.document.querySelector('.chart-status').textContent,/retained resolution 5m/);
+  retained.window.close();
+  // A series missing from the batch response renders as empty instead of fetching the HTML page.
+  const missing=dom(`<select id="io-server"><option>1</option></select><select id="io-disk"><option>A</option></select><div id="io-compare"><input id="io-drive-search"><div id="io-selected"></div></div><p id="io-selection-state"></p><select id="io-compare-metric"><option value="read_bps">Read</option></select><form id="io-range-form"><select id="io-range"><option value="1">Last 1h</option><option value="custom">Custom</option></select><input id="io-start"><input id="io-end"><input id="io-auto" type="checkbox"><div id="io-custom"></div></form><p id="io-range-error"></p><div id="io-comparisons"></div><div id="io-charts" data-server="1" data-identity="A"><article class="panel"><h2>Read</h2><canvas data-io-metric="read_bps" data-unit="bytes"></canvas></article></div>`);
+  let missingCalls=0;missing.window.fetch=async()=>{missingCalls++;return {ok:true,json:async()=>({series:[]})};};
+  missing.window.eval(script);await tick();missing.window.eval(fs.readFileSync('app/static/disk_io.js','utf8'));await tick();await tick();
+  assert.equal(missingCalls,1);
+  assert.match(missing.window.document.querySelector('#io-charts .chart-status').textContent,/No samples/);
+  assert.match(missing.window.document.getElementById('io-selection-state').textContent,/Displayed window: last 1h/);
+  missing.window.close();
   console.log('Chart race, inventory paging, and batched comparison checks passed');
 })().catch(e=>{console.error(e);process.exit(1)});

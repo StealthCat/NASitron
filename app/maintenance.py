@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .devices import is_zvol
+from .devices import is_same_or_partition, is_zvol
 
 import copy
 import json
@@ -97,12 +97,8 @@ def _best_stable_path(paths: list[str]) -> str | None:
 
 
 def _is_path_on_disk(vdev_path: str, disk_path: str) -> bool:
-    if vdev_path == disk_path:
-        return True
-    if not vdev_path.startswith(disk_path):
-        return False
-    suffix = vdev_path[len(disk_path) :]
-    return bool(suffix) and (suffix[0].isdigit() or suffix.startswith("p"))
+    # Exact disk or a real partition only: /dev/sdap is not on /dev/sda.
+    return is_same_or_partition(vdev_path, disk_path)
 
 
 def _fallback_status_with_guids(

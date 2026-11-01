@@ -1,6 +1,8 @@
 """Presentation of collected ZFS topology, without estimating usable capacity."""
 import re
 
+from .devices import is_same_or_partition
+
 
 ROLE_LABELS = {
     "data": "Data vdevs", "log": "Intent log", "cache": "Read cache",
@@ -16,12 +18,10 @@ def _disk_for(name, drives):
         path = disk.get("path") or ""
         if not path:
             continue
-        if name == path or name == path.removeprefix("/dev/"):
+        if is_same_or_partition(name, path) or is_same_or_partition(
+            name, path.removeprefix("/dev/")
+        ):
             matches.append(disk)
-        elif name.startswith(path):
-            suffix = name[len(path):]
-            if re.fullmatch(r"p?\d+", suffix):
-                matches.append(disk)
     return matches[0] if len(matches) == 1 else None
 
 

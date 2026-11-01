@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .devices import is_zvol
+from .devices import is_same_or_partition, is_zvol
 
 from .disk_io import parse_disk_io
 from .pool_capacity import parse_capacity
@@ -23,6 +23,24 @@ def _float(value: Any, default: float = 0.0) -> float:
         return float(str(value).replace("%", "").replace("x", ""))
     except (TypeError, ValueError):
         return default
+
+
+_COUNT_SUFFIXES = {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40, "P": 1 << 50}
+
+
+_COUNTER_TOKEN = re.compile(r"(?:\d+(?:\.\d+)?[KMGTP]?|-)", re.IGNORECASE)
+
+
+def _count(value: Any) -> int:
+    """Parse zpool status error counters, including human forms like 1.2K."""
+    text = str(value).strip().upper()
+    multiplier = _COUNT_SUFFIXES.get(text[-1:], 1)
+    if multiplier != 1:
+        text = text[:-1]
+    try:
+        return int(float(text) * multiplier)
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def parse_os_release(text: str) -> dict[str, str]:
@@ -114,6 +132,10 @@ def parse_pool_list(text: str) -> list[dict[str, Any]]:
 
 
 def _scrub_finished(scan: str) -> str | None:
+    # Only a completed scrub counts: "resilvered ... on", "scrub canceled on"
+    # and similar lines also end in a date but are not scrub completions.
+    if not re.match(r"\s*scrub (?:repaired|completed)\b", scan):
+        return None
     match = re.search(
         r"\bon\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})",
         scan,
@@ -135,6 +157,7 @@ _ZFS_STATES = {
     "UNAVAIL",
     "REMOVED",
     "AVAIL",
+    "INUSE",
 }
 
 
@@ -207,16 +230,23 @@ def parse_pool_status(text: str) -> dict[str, Any]:
             )
             if state_index is None or state_index == 0 or len(parts) < state_index + 1:
                 continue
+            # Spares print "AVAIL"/"INUSE  currently in use" without counters;
+            # only numeric tokens are READ/WRITE/CKSUM, the rest is detail.
+            rest = parts[state_index + 1:]
+            counters: list[int] = []
+            while len(counters) < 3 and rest and _COUNTER_TOKEN.fullmatch(rest[0]):
+                counters.append(_count(rest.pop(0)))
+            counters += [None] * (3 - len(counters))
             config.append(
                 {
                     "name": " ".join(parts[:state_index]),
                     "state": _normalize_vdev_state(parts[state_index]),
-                    "read_errors": _int(parts[state_index + 1]) if len(parts) > state_index + 1 else None,
-                    "write_errors": _int(parts[state_index + 2]) if len(parts) > state_index + 2 else None,
-                    "checksum_errors": _int(parts[state_index + 3]) if len(parts) > state_index + 3 else None,
+                    "read_errors": counters[0],
+                    "write_errors": counters[1],
+                    "checksum_errors": counters[2],
                     "role": role,
                     "indent": len(line) - len(line.lstrip()),
-                    "detail": " ".join(parts[state_index + 4:]),
+                    "detail": " ".join(rest),
                     "guid": None,
                     "size_bytes": 0,
                     "leaf": False,
@@ -315,6 +345,8 @@ def parse_pool_status_json(
     for key, role in (
         ("logs", "log"),
         ("cache", "cache"),
+        # OpenZFS JSON output names the L2ARC section "l2cache".
+        ("l2cache", "cache"),
         ("special", "special"),
         ("dedup", "dedup"),
         ("spares", "spare"),
@@ -372,7 +404,10 @@ def parse_property_rows(text: str) -> dict[str, list[dict[str, Any]]]:
             parts = line.split(None, 3)
         if len(parts) < 4:
             continue
-        name, prop, value, source = parts[0], parts[1], parts[2], parts[3]
+        # Values (notably user properties) may themselves contain tabs; the
+        # source is always the last column.
+        name, prop, source = parts[0], parts[1], parts[-1]
+        value = "\t".join(parts[2:-1])
         row = {
             "property": prop,
             "value": value,
@@ -448,6 +483,8 @@ SMART_EXIT_BITS = {
 def parse_smart(text: str, command_exit: int | None = None) -> dict[str, Any]:
     try:
         data = json.loads(text)
+        if not isinstance(data, dict):
+            raise TypeError("smartctl JSON is not an object")
     except (json.JSONDecodeError, TypeError):
         status = int(command_exit or 0)
         return {
@@ -473,6 +510,19 @@ def parse_smart(text: str, command_exit: int | None = None) -> dict[str, Any]:
     }
     if result["smart_passed"] is None and status & (1 << 3):
         result["smart_passed"] = False
+    # Bits 0/1 mean smartctl could not parse its arguments or open/identify
+    # the device: the JSON then carries only diagnostics, not SMART data.
+    if status & 0b11 and not any(
+        key in data
+        for key in (
+            "smart_status",
+            "ata_smart_attributes",
+            "nvme_smart_health_information_log",
+            "scsi_grown_defect_list",
+            "temperature",
+        )
+    ):
+        result["data_available"] = False
 
     temp = (data.get("temperature") or {}).get("current")
     nvme = data.get("nvme_smart_health_information_log") or {}
@@ -501,16 +551,11 @@ def parse_smart(text: str, command_exit: int | None = None) -> dict[str, Any]:
 
 
 def _device_matches_disk(vdev_name: str, disk_path: str) -> bool:
-    if vdev_name == disk_path:
-        return True
-    if not vdev_name.startswith(disk_path):
-        return False
-    suffix = vdev_name[len(disk_path) :]
-    return bool(suffix) and (suffix[0].isdigit() or suffix.startswith("p"))
+    return is_same_or_partition(vdev_name, disk_path)
 
 
 def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> dict[str, Any]:
-    captured_at = captured_at or datetime.utcnow()
+    captured_at = captured_at or datetime.now(timezone.utc).replace(tzinfo=None)
     sampled_at = captured_at.isoformat() + "Z"
 
     os_release = parse_os_release(raw.get("os_release", {}).get("stdout", ""))
@@ -699,12 +744,17 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
     smart_sampled = bool(raw.get("smart_sampled"))
     smart_inventory_ok = bool(raw.get("smart_inventory_ok"))
     smart_attempted_count = int(raw.get("smart_attempted_count") or 0)
+    smart_deferred = set(raw.get("smart_deferred") or [])
     smart_refreshed: list[str] = []
 
     for disk in disks:
         smart_result = smart_map.get(disk["path"])
         if is_zvol(disk):
             smart = {"data_available": False, "not_applicable": True}
+        elif smart_sampled and disk["path"] in smart_deferred and not smart_result:
+            # Deadline-deferred: treated like an unsampled cycle so the last
+            # known SMART data is carried forward as stale, not as a failure.
+            smart = {}
         elif smart_sampled:
             if smart_result:
                 smart = parse_smart(
@@ -749,8 +799,21 @@ def build_snapshot(raw: dict[str, Any], captured_at: datetime | None = None) -> 
                 }
             )
             failed_subsystems.add("smart.inventory")
+        if smart_deferred:
+            errors.append(
+                {
+                    "subsystem": "smart.deferred",
+                    "message": (
+                        f"SMART sampling for {len(smart_deferred)} drive(s) was deferred "
+                        "to keep host collection within its deadline."
+                    ),
+                }
+            )
+            failed_subsystems.add("smart.deferred")
         for disk in disks:
             smart = disk.get("smart") or {}
+            if is_zvol(disk) or (not smart and disk["path"] in smart_deferred):
+                continue
             if not smart.get("data_available"):
                 subsystem = f"smart:{disk.get('serial') or disk.get('path')}"
                 errors.append(

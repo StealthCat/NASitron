@@ -16,6 +16,13 @@
   const initial = available.includes(requested) ? requested : (data.pools.length ? 'add' : 'create');
   if (available.includes(initial)) action.value = initial;
   let submitted = false;
+  function sizeText(bytes) {
+    let n = Number(bytes), i = 0;
+    if (!Number.isFinite(n) || n <= 0) return 'Unknown size';
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return `${n.toFixed(i ? 2 : 0)} ${units[i]}`;
+  }
   function show(id, visible) {
     const el = document.getElementById(id);
     el.hidden = !visible;
@@ -57,7 +64,7 @@
       input.name = 'disks'; input.value = disk.id;
       name.textContent = disk.id; copy.className = 'zfs-disk-copy'; meta.className = 'subtle';
       meta.textContent = a === 'split' ? `${roots.find(r => r.guid === disk.parent_guid)?.id} · ${disk.state}`
-        : `${(disk.size / 1024 ** 4).toFixed(2)} TiB · Blank disk`;
+        : `${sizeText(disk.size)} · Blank disk`;
       copy.append(name, meta); label.append(input, copy); choices.append(label);
     });
     if (diskField && !disks.length) choices.textContent = a === 'split' ? 'No eligible mirror members. A helper update may be required.' : 'No eligible blank disks. Rescan after connecting a blank drive.';

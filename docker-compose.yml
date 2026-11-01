@@ -25,6 +25,11 @@ services:
       WEB_CONCURRENCY: "1"
     volumes:
       - nasitron_data:/data
+    # Runs as an unprivileged user on port 8080; it needs no Linux capabilities.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   caddy:
     image: caddy:2.11.4-alpine

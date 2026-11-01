@@ -7,11 +7,11 @@ import json
 import smtplib
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import Alert, Server, MaintenanceWindow
@@ -20,7 +20,8 @@ from .settings_store import get_bool, get_int, get_many, get_setting
 
 
 def _utcnow() -> datetime:
-    return datetime.utcnow()
+    # Naive UTC, matching how timestamps are stored in the database.
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _email_addresses(value: str) -> list[str]:
@@ -487,6 +488,10 @@ def evaluate_snapshot(db: Session, server: Server, snapshot: dict[str, Any]) -> 
             "endurance": f"drive.nvme_endurance:{ident}",
         }
 
+        if not smart:
+            # Not sampled yet (SMART not due since this drive appeared, or
+            # deferred): absence of a sample is not a SMART read failure.
+            continue
         if smart.get("stale") and smart.get("data_available", True):
             continue
 
@@ -673,7 +678,11 @@ def deliver_pending_notifications(db: Session) -> int:
                 Alert.next_notification_at <= now,
             ),
         )
-        .order_by(Alert.server_id, Alert.severity.desc(), Alert.first_seen)
+        .order_by(
+            Alert.server_id,
+            case((Alert.severity == "critical", 0), (Alert.severity == "warning", 1), else_=2),
+            Alert.first_seen,
+        )
     ).all()
     if not pending:
         return 0
@@ -687,6 +696,7 @@ def deliver_pending_notifications(db: Session) -> int:
             continue
         grouped.setdefault(alert.server_id, []).append(alert)
 
+    temperature_unit = get_setting(db, "temperature_unit", "C")
     sent_groups = 0
     for alerts in grouped.values():
         server = alerts[0].server
@@ -695,7 +705,7 @@ def deliver_pending_notifications(db: Session) -> int:
             lines.extend(
                 [
                     f"[{alert.severity.upper()}] {alert.title}",
-                    temperature_message(alert.message, get_setting(db, "temperature_unit", "C")),
+                    temperature_message(alert.message, temperature_unit),
                     "",
                 ]
             )

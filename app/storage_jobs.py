@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 from .alerts import _upsert_alert
 from .collector import SSHCollector
 from .config import REMOTE_HELPER_PATH
-from .db import SessionLocal
+from .db import SessionLocal, utcnow as _utcnow
 from .maintenance import MaintenanceBusy, maintenance_lock
 from .models import Server, StoragePolicy, StorageRun, Alert, MaintenanceAction
 from .zfs_actions import helper_json, helper_call
@@ -125,7 +125,7 @@ def execute(server, payload, actor):
     with SessionLocal() as db:
         audit = db.get(MaintenanceAction, aid)
         audit.state, audit.exit_code, audit.output = state, code, detail
-        audit.success, audit.completed_at = state == "accepted", datetime.utcnow()
+        audit.success, audit.completed_at = state == "accepted", _utcnow()
         db.commit()
     if state != "accepted":
         raise RuntimeError(f"{state}: {detail}")
@@ -170,7 +170,7 @@ def _remote_value(ssh, dataset, prop):
 def _snapshot_guids(ssh, dataset):
     response = ssh.run(
         shlex.join(
-            ["zfs", "list", "-Hp", "-r", "-t", "snapshot", "-o", "name,guid", dataset]
+            ["zfs", "list", "-Hp", "-d", "1", "-t", "snapshot", "-o", "name,guid", dataset]
         ),
         timeout=30,
     )
@@ -328,7 +328,9 @@ def replicate(source, destination, config, snapshot, run_id):
                         delay = count / rate - (time.monotonic() - started)
                         if delay > 0:
                             time.sleep(min(delay, 1))
-                elif send.exit_status_ready():
+                elif send.exit_status_ready() and not send.recv_ready():
+                    # Exit status can arrive while stream bytes are still buffered;
+                    # only stop once the buffer is confirmed empty.
                     break
                 else:
                     time.sleep(0.05)
@@ -417,16 +419,25 @@ def run_policy(policy_id, run_id):
             if policy.kind == "replication"
             else None
         )
-        if run.state == "cancel_requested":
-            run.state, run.completed_at, run.detail = (
-                "cancelled",
-                datetime.utcnow(),
-                "Cancelled before starting",
-            )
-            db.commit()
-            return
-        run.state = "running"
+        # Claim atomically: a cancel recorded after the read above must not be
+        # overwritten by "running" (check_progress would then never see it).
+        claimed = db.execute(
+            update(StorageRun)
+            .where(StorageRun.id == run_id, StorageRun.state == "queued")
+            .values(state="running")
+        )
         db.commit()
+        if claimed.rowcount != 1:
+            db.refresh(run)
+            if run.state == "cancel_requested":
+                run.state, run.completed_at, run.detail = (
+                    "cancelled",
+                    _utcnow(),
+                    "Cancelled before starting",
+                )
+                db.commit()
+            return
+        db.refresh(run)
         actor = f"policy:{policy.id}"
         verified_at = None
         try:
@@ -443,7 +454,7 @@ def run_policy(policy_id, run_id):
                         config["dataset"]
                         + "@"
                         + prefix
-                        + datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+                        + _utcnow().strftime("%Y%m%dT%H%M%S")
                         + "-"
                         + str(run_id)
                     )
@@ -503,7 +514,7 @@ def run_policy(policy_id, run_id):
                         actor,
                     )
             run.state, run.detail = "success", detail
-            policy.last_success = verified_at or datetime.utcnow()
+            policy.last_success = verified_at or _utcnow()
             alert = db.scalar(
                 select(Alert).where(
                     Alert.server_id == source.id,
@@ -511,13 +522,13 @@ def run_policy(policy_id, run_id):
                 )
             )
             if alert:
-                alert.active, alert.resolved_at = False, datetime.utcnow()
+                alert.active, alert.resolved_at = False, _utcnow()
         except TransferCancelled as exc:
             run.state, run.detail = "cancelled", str(exc)
         except MaintenanceBusy as exc:
             run.state, run.detail = "deferred", str(exc)
             policy.next_run = min(
-                policy.next_run, datetime.utcnow() + timedelta(minutes=5)
+                policy.next_run, _utcnow() + timedelta(minutes=5)
             )
         except Exception as exc:
             run.state, run.detail = "failed", str(exc)[:20000]
@@ -536,7 +547,7 @@ def run_policy(policy_id, run_id):
                 "Storage job needs attention: " + policy.name,
                 run.detail,
             )
-        run.completed_at = datetime.utcnow()
+        run.completed_at = _utcnow()
         db.commit()
 
 
@@ -569,7 +580,7 @@ def enqueue(policy_id):
 def tick():
     due_ids = []
     with SessionLocal() as db:
-        now = datetime.utcnow()
+        now = _utcnow()
         policies = db.scalars(
             select(StoragePolicy).where(StoragePolicy.enabled.is_(True))
         ).all()
@@ -615,7 +626,7 @@ def recover_interrupted():
             .where(StorageRun.state.in_(["queued", "running", "cancel_requested"]))
             .values(
                 state="unknown",
-                completed_at=datetime.utcnow(),
+                completed_at=_utcnow(),
                 detail="NASitron restarted before a confirmed outcome. Inspect the NAS; replication can resume retained partial receives.",
             )
         )

@@ -2,7 +2,7 @@
 
 from .devices import is_zvol
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 from urllib.parse import quote
@@ -28,6 +28,11 @@ from .settings_store import get_int, get_setting
 from .experience import server_state, smart_state
 
 
+def _utcnow() -> datetime:
+    """Naive UTC, matching how timestamps are stored in the database."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def server_filter(value):
     if not value:
         return None
@@ -45,7 +50,7 @@ def install(app, templates):
 
         live = collector_states()
         rows = []
-        now = datetime.utcnow()
+        now = _utcnow()
         for s in servers:
             snapshot = states.get(s.id, {})
             due = (
@@ -227,7 +232,7 @@ def install(app, templates):
         query = (
             select(events, Server.name.label("server_name"))
             .join(Server, Server.id == events.c.server_id)
-            .where(events.c.at <= datetime.utcnow())
+            .where(events.c.at <= _utcnow())
         )
         if server is not None:
             query = query.where(events.c.server_id == server)
@@ -294,7 +299,7 @@ def install(app, templates):
     @app.get("/settings/database")
     def database(request: Request, db=Depends(session)):
         # Exact counts are opt-in; normal page loads never scan the history table.
-        now = datetime.utcnow()
+        now = _utcnow()
         stats = {
             "raw_days": get_int(db, "raw_history_days", 7),
             "hourly_days": get_int(db, "hourly_history_days", 30),

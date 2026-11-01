@@ -25,7 +25,7 @@
   </div>
 </div>
 
-<p class="row"><a href="/diagnostics">Collection diagnostics</a><a href="/timeline?server={{ server.id }}">Event timeline</a><a href="/drive-bays?server={{ server.id }}">Drive bay map</a></p>
+<p class="row page-links"><a href="/diagnostics">Collection diagnostics</a><a href="/timeline?server={{ server.id }}">Event timeline</a><a href="/drive-bays?server={{ server.id }}">Drive bay map</a></p>
 <nav class="page-tabs" role="tablist" aria-label="Server sections">{% for key,label in [('overview','Overview'),('pools','Pools'),('drives','Drives'),('datasets','Datasets'),('performance','Performance'),('events','Events'),('settings','Settings')] %}<button type="button" role="tab" data-page-tab="{{ key }}" {{ 'data-admin-only' if key == 'settings' else '' }}>{{ label }}</button>{% endfor %}</nav>
 {% if server.last_collection_state == 'partial' and snapshot %}
 <div class="message"><strong>Partial collection:</strong> some telemetry sources did not refresh. Stale values are retained and marked until a successful refresh.</div>
@@ -66,11 +66,11 @@
   </div>
   <div class="metric-card">
     <div class="metric-icon accent"><svg viewBox="0 0 24 24"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg></div>
-    <div><div class="metric-label">ARC Hit Rate</div><div class="metric-value">{{ "%.1f"|format(snapshot.arc.hit_rate_pct) }}%</div><div class="metric-sub">{{ snapshot.arc.size_bytes|human_bytes }} ARC</div></div>
+    <div><div class="metric-label">ARC Hit Rate</div><div class="metric-value">{{ ("%.1f"|format(snapshot.arc.hit_rate_pct) ~ "%") if snapshot.arc.hit_rate_pct is number else "—" }}</div><div class="metric-sub">{{ snapshot.arc.size_bytes|human_bytes }} ARC</div></div>
   </div>
   <div class="metric-card">
     <div class="metric-icon"><svg viewBox="0 0 24 24"><path d="M8 3v18M16 3v18M5 7h14M5 17h14"/></svg></div>
-    <div><div class="metric-label">Memory Used</div><div class="metric-value">{{ "%.1f"|format(snapshot.system.memory.used_pct) }}%</div><div class="metric-sub">{{ snapshot.system.memory.used_bytes|human_bytes }} of {{ snapshot.system.memory.total_bytes|human_bytes }}</div></div>
+    <div><div class="metric-label">Memory Used</div><div class="metric-value">{{ ("%.1f"|format(snapshot.system.memory.used_pct) ~ "%") if snapshot.system.memory.used_pct is number else "—" }}</div><div class="metric-sub">{{ snapshot.system.memory.used_bytes|human_bytes }} of {{ snapshot.system.memory.total_bytes|human_bytes }}</div></div>
   </div>
   <div class="metric-card">
     <div class="metric-icon good"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 16 0"/><path d="m12 12 5-4"/><path d="M12 4v2M5.6 6.6 7 8M18.4 6.6 17 8"/></svg></div>
@@ -142,11 +142,11 @@
 
 <section data-page-pane="performance" class="grid two section-block">
   <div class="panel chart-wrap">
-    <div class="panel-title"><h2>ARC Hit Rate · 24h</h2><span class="badge">{{ "%.1f"|format(snapshot.arc.hit_rate_pct) }}%</span></div>
+    <div class="panel-title"><h2>ARC Hit Rate · 24h</h2><span class="badge">{{ ("%.1f"|format(snapshot.arc.hit_rate_pct) ~ "%") if snapshot.arc.hit_rate_pct is number else "—" }}</span></div>
     <canvas class="chart" id="arc_hit"></canvas>
   </div>
   <div class="panel chart-wrap">
-    <div class="panel-title"><h2>Memory Used · 24h</h2><span class="badge">{{ "%.1f"|format(snapshot.system.memory.used_pct) }}%</span></div>
+    <div class="panel-title"><h2>Memory Used · 24h</h2><span class="badge">{{ ("%.1f"|format(snapshot.system.memory.used_pct) ~ "%") if snapshot.system.memory.used_pct is number else "—" }}</span></div>
     <canvas class="chart" id="mem_used"></canvas>
   </div>
   {% for pool in snapshot.pools %}
@@ -190,10 +190,10 @@
     <dl class="statlist">
       <dt>ARC size</dt><dd>{{ snapshot.arc.size_bytes|human_bytes }} / target {{ snapshot.arc.target_bytes|human_bytes }}</dd>
       <dt>ARC bounds</dt><dd>{{ snapshot.arc.min_bytes|human_bytes }} – {{ snapshot.arc.max_bytes|human_bytes }}</dd>
-      <dt>ARC hit rate</dt><dd>{{ "%.2f"|format(snapshot.arc.hit_rate_pct) }}%</dd>
+      <dt>ARC hit rate</dt><dd>{{ ("%.2f"|format(snapshot.arc.hit_rate_pct) ~ "%") if snapshot.arc.hit_rate_pct is number else "—" }}</dd>
       <dt>Hits / misses</dt><dd>{{ snapshot.arc.hits }} / {{ snapshot.arc.misses }}</dd>
       <dt>L2ARC size</dt><dd>{{ snapshot.arc.l2_size_bytes|human_bytes }}</dd>
-      <dt>L2ARC hit rate</dt><dd>{{ "%.2f"|format(snapshot.arc.l2_hit_rate_pct) }}%</dd>
+      <dt>L2ARC hit rate</dt><dd>{{ ("%.2f"|format(snapshot.arc.l2_hit_rate_pct) ~ "%") if snapshot.arc.l2_hit_rate_pct is number else "—" }}</dd>
     </dl>
   </div>
   <div class="panel">
@@ -236,6 +236,8 @@
     <table class="readable-table" data-table><thead><tr><th>Status</th><th>Severity</th><th>Alert</th><th>Last seen</th></tr></thead><tbody>
     {% for alert in alerts %}
     <tr><td>{{ "Active" if alert.active else "Resolved" }}</td><td><span class="badge {{ alert.severity }}">{{ alert.severity }}</span></td><td><strong>{{ alert.title }}</strong><div class="subtle">{{ alert.message|alert_temperature }}</div></td><td>{{ alert.last_seen|fmt_dt }}</td></tr>
+    {% else %}
+    <tr><td colspan="4" class="subtle">No alerts recorded for this server.</td></tr>
     {% endfor %}
     </tbody></table>
   </div>

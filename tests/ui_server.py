@@ -1,7 +1,7 @@
 """Synthetic UI fixture. Never polls a real host. For CI/manual preview only."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.db import init_db, SessionLocal
@@ -13,7 +13,7 @@ from app.settings_store import ensure_defaults
 
 init_db()
 payload = json.loads((Path(__file__).parent / "fixtures/preview.json").read_text())
-now = datetime.utcnow()
+now = datetime.now(timezone.utc).replace(tzinfo=None)
 payload["collection"]["captured_at"] = now.isoformat() + "Z"
 payload["snapshot_inventory"] = {
     "fresh": True,

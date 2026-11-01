@@ -66,7 +66,7 @@
       if(!response.ok) throw new Error(response.status===401?'Session expired; sign in again.':`History unavailable (${response.status}).`);
       const data=await response.json();if(request!==generation) return;
       const series=(scope,key)=>data.series.find(s=>s.scope===scope&&s.name===prefix+key);
-      const options=(c,scope)=>({data:series(scope,c.dataset.ioMetric),range:windowRange,minZero:true,bytes:c.dataset.unit==='bytes',suffix:c.dataset.unit==='bytes'?'':c.dataset.unit,max100:c.dataset.ioMetric==='busy_pct'});
+      const options=(c,scope)=>({data:series(scope,c.dataset.ioMetric)||{points:[]},range:windowRange,minZero:true,bytes:c.dataset.unit==='bytes',suffix:c.dataset.unit==='bytes'?'':c.dataset.unit,max100:c.dataset.ioMetric==='busy_pct'});
       canvases.forEach(c=>NASitronChart(c,'',options(c,charts.dataset.identity)));
       comparison.querySelectorAll('canvas').forEach(c=>c._dispose?.());comparison.replaceChildren();
       if(extra.length) {
@@ -81,7 +81,7 @@
           NASitronChart(canvas,'',{...options(canvas,scope),bounds,syncGroup:'disk-comparison'});
         }
       }
-      selectionState.textContent='Displayed window: '+(windowRange.hours ? 'last '+windowRange.hours+' hours' : NASitronTime.format(windowRange.start)+' – '+NASitronTime.format(windowRange.end))+' · '+NASitronTime.zone;
+      selectionState.textContent='Displayed window: '+(windowRange.hours ? (range.selectedOptions[0]?.textContent||'last '+windowRange.hours+'h').toLowerCase() : NASitronTime.format(windowRange.start)+' – '+NASitronTime.format(windowRange.end))+' · '+NASitronTime.zone;
       charts.classList.remove('history-pending');comparison.classList.remove('history-pending');
       error.textContent='';
     } catch(e) {if(request===generation) error.textContent=(e.name==='AbortError'?'History request timed out.':e.message)+' Use Apply / Refresh to retry. Previously displayed charts may be from an earlier selection.';}

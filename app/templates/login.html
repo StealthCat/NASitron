@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#070b12">
   <title>Sign in · NASitron</title>
   <link rel="icon" href="/static/nasitron-logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css">
-  <link rel="stylesheet" href="/static/ui.css">
+  <link rel="stylesheet" href="/static/app.css?v=1.0.3">
+  <link rel="stylesheet" href="/static/ui.css?v=1.0.3">
 </head>
 <body class="login-page">
   <main class="login-shell">
@@ -24,17 +24,17 @@
       <h1>Sign in to NASitron</h1>
       <p class="muted">Sign in with your local NASitron account.</p>
       {% if request.query_params.get('message') %}<div class="message login-error">{{ request.query_params.get('message') }}</div>{% endif %}
-      {% if error %}<div class="message login-error">{{ error }}</div>{% endif %}
+      {% if error %}<div class="message login-error" role="alert">{{ error }}</div>{% endif %}
       <form method="post" action="/login" class="login-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="next" value="{{ next_url }}">
         <div class="field">
           <label for="username">Username</label>
-          <input id="username" name="username" autocomplete="username" required autofocus>
+          <input id="username" name="username" autocomplete="username" value="{{ username|default('', true) }}" required {{ '' if username else 'autofocus' }}>
         </div>
         <div class="field">
           <label for="password">Password</label>
-          <input id="password" type="password" name="password" autocomplete="current-password" required>
+          <input id="password" type="password" name="password" autocomplete="current-password" required {{ 'autofocus' if username else '' }}>
         </div>
         <button class="primary login-submit" type="submit">Sign in</button>
       </form>

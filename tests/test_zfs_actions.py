@@ -285,3 +285,13 @@ errors: none
 def test_malformed_action_type_is_validation_error():
     with pytest.raises(h.HelperError):
         h._action_request('{"action":[],"pool":"tank"}')
+
+
+def test_recommended_helper_version_matches_packaged_helper():
+    import re
+
+    from app.config import RECOMMENDED_HELPER_VERSION
+
+    helper = Path('remote/nasitron_root_helper.py').read_text()
+    match = re.search(r'^HELPER_VERSION = "([^"]+)"$', helper, re.M)
+    assert match and match.group(1) == RECOMMENDED_HELPER_VERSION
