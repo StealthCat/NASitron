@@ -144,7 +144,7 @@ jobs:
           node tests/ui_smoke.cjs
           node tests/zfs_actions_smoke.cjs
           node tests/storage_smoke.cjs
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: preview-ui-screenshots
