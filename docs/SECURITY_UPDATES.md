@@ -1,6 +1,6 @@
 # Security update 1.0.5
 
-This source update addresses CodeQL alerts 1–23 and Dependabot alert 1.
+This source update addresses CodeQL alerts 1â€“23 and Dependabot alerts 1â€“6.
 
 - Route web redirects through one application-local URL validator, rejecting
   external and browser-normalized network paths while preserving local queries.
@@ -18,6 +18,9 @@ This source update addresses CodeQL alerts 1–23 and Dependabot alert 1.
   obsolete SHA-1-only servers are no longer supported.
 - Rename the frozen runtime requirements to `requirements-frozen.txt`, which
   Dependabot can discover; Docker and development installs use that same file.
+- Update cryptography to 50.0.2 for the bundled OpenSSL, PKCS#7 decryption,
+  certificate-chain complexity, and wildcard name-constraint alerts. Update
+  certifi to 2026.10.19 to remove the compromised emSign certificate authority.
 
 The recommended remote helper version is 1.0.3. Update remote helpers to receive
 the file-permission hardening. This source update does not publish a container
