@@ -11,7 +11,6 @@ import threading
 from functools import lru_cache
 
 from fastapi import Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
 from sqlalchemy import select, delete
 
 from .config import RECOMMENDED_HELPER_VERSION
@@ -34,7 +33,7 @@ from .storage_insights import (
     vdev_diagnosis,
 )
 from .zfs_actions import admin, helper_json
-from .security import require_csrf
+from .security import local_redirect, require_csrf
 from .db import SessionLocal, utcnow as _utcnow
 
 _refresh_pool = None
@@ -45,6 +44,19 @@ _refreshing = set()
 @lru_cache(maxsize=1)
 def _zones():
     return tuple(sorted(available_timezones()))
+
+
+def valid_dataset_name(value, *, child=False):
+    # Split components before matching to avoid ambiguous nested repetitions.
+    if not isinstance(value, str) or not 1 <= len(value) <= 255:
+        return False
+    parts = value.split("/")
+    return (
+        (not child or len(parts) > 1)
+        and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]*", parts[0]) is not None
+        and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", part) is not None
+                for part in parts[1:])
+    )
 
 
 def validate_policy(kind, config, cron, zone):
@@ -58,18 +70,12 @@ def validate_policy(kind, config, cron, zone):
     ):
         raise ValueError("Retention must be 1–3650; overdue threshold 1–8760 hours")
     if kind in {"snapshot", "replication"}:
-        if not re.fullmatch(
-            r"[A-Za-z][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*)*",
-            config["dataset"],
-        ):
+        if not valid_dataset_name(config["dataset"]):
             raise ValueError(
                 "Use an exact dataset name; wildcards and recursive policies are not supported"
             )
     if kind == "replication":
-        if not re.fullmatch(
-            r"[A-Za-z][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*)+",
-            config["destination"],
-        ):
+        if not valid_dataset_name(config["destination"], child=True):
             raise ValueError("Destination must be a dedicated child dataset")
         if not 0 <= int(config["bandwidth_mib"]) <= 10000:
             raise ValueError("Bandwidth must be 0–10000 MiB/s; zero means unlimited")
@@ -333,7 +339,7 @@ def install(app, templates):
         if not db.get(Server, server_id):
             raise HTTPException(404)
         request_refresh(server_id)
-        return RedirectResponse(
+        return local_redirect(
             f"/servers/{server_id}/storage?message=Inventory+refresh+queued.+Reload+in+a+moment.",
             303,
         )
@@ -452,7 +458,7 @@ def install(app, templates):
             )
         )
         db.commit()
-        return RedirectResponse(f"/servers/{server_id}/storage?tab=jobs", 303)
+        return local_redirect(f"/servers/{server_id}/storage?tab=jobs", 303)
 
     @app.post(
         "/servers/{server_id}/storage/policies/{policy_id}/{operation}",
@@ -497,4 +503,4 @@ def install(app, templates):
             )
         )
         db.commit()
-        return RedirectResponse(f"/servers/{server_id}/storage?tab=jobs", 303)
+        return local_redirect(f"/servers/{server_id}/storage?tab=jobs", 303)

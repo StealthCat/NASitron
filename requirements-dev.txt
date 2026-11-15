@@ -1,5 +1,5 @@
--r requirements.lock
-certifi==2026.7.22
+-r requirements-frozen.txt
+certifi==2026.10.19
 httpcore==1.0.9
 httpx==0.28.1
 iniconfig==2.3.0

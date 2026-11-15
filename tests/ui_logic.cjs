@@ -4,6 +4,18 @@ const fs=require('node:fs');
 const assert=require('node:assert/strict');
 const script=fs.readFileSync('app/static/app.js','utf8');
 const tick=()=>new Promise(r=>setTimeout(r,0));
+{
+  const handler=fs.readFileSync('app/static/operations.js','utf8');
+  const page=new JSDOM('<form id="window-form" action="/servers/1/maintenance-window"></form><select id="window-server"></select>',{url:'https://nas.example/',runScripts:'outside-only'});
+  const w=page.window, select=w.document.getElementById('window-server'), form=w.document.getElementById('window-form');
+  w.eval(handler);
+  for (const value of ['7','//outside.example','<img src=x onerror=alert(1)>','0','-1','NaN','9007199254740992']) {
+    const option=w.document.createElement('option'); option.value=value; select.appendChild(option);
+    select.value=value; select.dispatchEvent(new w.Event('change'));
+    assert.equal(form.getAttribute('action'),'/servers/7/maintenance-window');
+  }
+  w.close();
+}
 function dom(html) {
   const d=new JSDOM(html,{url:'http://localhost/',runScripts:'outside-only'}),w=d.window;
   w.matchMedia=()=>({matches:false,addEventListener(){}});
@@ -63,9 +75,9 @@ function dom(html) {
   }
   const temp=dom('<article class="panel"><h2>Temperature</h2><canvas></canvas></article>');
   temp.window.eval(script);await tick();
-  temp.window.NASitronChart(temp.window.document.querySelector('canvas'),'',{temperatureUnit:'F',suffix:'°F',data:{points:[{t:new Date().toISOString(),v:45,min:40,max:50}]}});
+  temp.window.NASitronChart(temp.window.document.querySelector('canvas'),'',{temperatureUnit:'F',suffix:'Â°F',data:{points:[{t:new Date().toISOString(),v:45,min:40,max:50}]}});
   await tick();
-  assert.match(temp.window.document.querySelector('details p').textContent,/Minimum 104.0°F; maximum 122.0°F; latest 113.0°F/);
+  assert.match(temp.window.document.querySelector('details p').textContent,/Minimum 104.0Â°F; maximum 122.0Â°F; latest 113.0Â°F/);
   temp.window.close();
   // An invalid configured zone must not break every timestamp and chart on the page.
   const badZone=dom('<body data-timezone="Not/AZone"></body>');badZone.window.eval(script);await tick();

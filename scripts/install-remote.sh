@@ -962,7 +962,7 @@ def cmd_actions(args: list[str]) -> int:
 
 
 # NASitron 1.0 storage protocol. This remains embedded in the standalone helper.
-HELPER_VERSION = "1.0.2"
+HELPER_VERSION = "1.0.3"
 DATASET_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*)*$")
 SNAP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,200}$")
 DATASET_PROPS = {'compression', 'recordsize', 'quota', 'refquota', 'reservation', 'refreservation', 'atime', 'readonly', 'sync', 'mountpoint'}
@@ -1257,7 +1257,7 @@ def _execute_plan(plan):
                     stream.write(data)
                     stream.flush()
                     os.fsync(stream.fileno())
-                os.chmod(temporary, 0o755)
+                os.chmod(temporary, 0o700)
                 os.chown(temporary, 0, 0)
                 os.replace(temporary, dest)
             finally:
@@ -1389,13 +1389,13 @@ done
 if [[ "$UPGRADE_ONLY" -eq 1 ]]; then
   [[ ! -L "$HELPER_PATH" && ! -L "$HELPER_PATH.previous" ]] || die "Helper and backup must not be symlinks"
   if [[ -f "$HELPER_PATH" ]]; then
-    install -o root -g root -m 0755 "$HELPER_PATH" "$TMP_DIR/previous-helper"
-    install -o root -g root -m 0755 "$TMP_DIR/previous-helper" "$HELPER_PATH.previous"
+    install -o root -g root -m 0700 "$HELPER_PATH" "$TMP_DIR/previous-helper"
+    install -o root -g root -m 0700 "$TMP_DIR/previous-helper" "$HELPER_PATH.previous"
   fi
 fi
 # Stage on the destination filesystem so replacing the helper is atomic.
 STAGED_HELPER="$(mktemp "$(dirname "$HELPER_PATH")/.nasitron-helper.XXXXXX")"
-install -o root -g root -m 0755 "$TMP_DIR/nasitron-root-helper" "$STAGED_HELPER"
+install -o root -g root -m 0700 "$TMP_DIR/nasitron-root-helper" "$STAGED_HELPER"
 mv -f -- "$STAGED_HELPER" "$HELPER_PATH"
 STAGED_HELPER=""
 

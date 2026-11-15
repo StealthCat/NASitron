@@ -8,12 +8,13 @@ anyio==4.15.1
 bcrypt==5.0.0
 cffi==2.1.1
 click==8.5.0
-cryptography==46.0.7
+cryptography==50.0.2
 fastapi==0.141.1
 h11==0.16.0
 httptools==0.8.0
 idna==3.20
-paramiko==4.0.0
+invoke==3.0.3
+paramiko==5.0.1
 pycparser==3.0
 pydantic==2.13.5
 pydantic-core==2.46.5

@@ -10,6 +10,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Form, HTTPException, Request
+from fastapi.responses import RedirectResponse
+from urllib.parse import urlsplit
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -256,7 +258,16 @@ def safe_next_url(value: str | None) -> str:
         or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
     ):
         return "/"
-    return value[:2048]
+    target = urlsplit(value)
+    if target.scheme or target.netloc:
+        return "/"
+    # The URL root is application-controlled; request data supplies only a suffix.
+    return "/" + value.lstrip("/")[:2047]
+
+
+def local_redirect(url: str, status_code: int = 303):
+    """Build redirects only to validated, application-local destinations."""
+    return RedirectResponse(safe_next_url(url), status_code=status_code)
 
 
 def _client_key(request: Request) -> str:

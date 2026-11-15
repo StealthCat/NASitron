@@ -45,7 +45,7 @@ def _certificate_pair(common_name: str = "nas.example.com") -> tuple[bytes, byte
 def test_uploaded_certificate_must_match_private_key():
     cert, key = _certificate_pair()
     info = validate_certificate_pair(cert, key)
-    assert "nas.example.com" in info["subject"]
+    assert info["subject"] == "CN=nas.example.com"
 
     _other_cert, other_key = _certificate_pair("other.example.com")
     with pytest.raises(TLSConfigurationError, match="does not match"):

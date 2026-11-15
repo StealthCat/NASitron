@@ -287,8 +287,9 @@ def test_caddyfile_rejects_placeholder_injection():
     with pytest.raises(TLSConfigurationError):
         build_caddyfile("acme", domain="nas.example.com", email="a{$SECRET}@example.com",
                         acme_ca="https://ca.example/directory")
-    assert "nas.example.com" in build_caddyfile(
-        "acme", domain="nas.example.com", email="ops@example.com", acme_ca="https://ca.example/directory")
+    lines = build_caddyfile(
+        "acme", domain="nas.example.com", email="ops@example.com", acme_ca="https://ca.example/directory").splitlines()
+    assert "nas.example.com {" in lines
 
 
 def test_invalid_timezone_path_is_a_config_error(monkeypatch):

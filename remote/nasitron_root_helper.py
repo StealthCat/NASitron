@@ -657,7 +657,7 @@ def cmd_actions(args: list[str]) -> int:
 
 
 # NASitron 1.0 storage protocol. This remains embedded in the standalone helper.
-HELPER_VERSION = "1.0.2"
+HELPER_VERSION = "1.0.3"
 DATASET_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*)*$")
 SNAP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,200}$")
 DATASET_PROPS = {'compression', 'recordsize', 'quota', 'refquota', 'reservation', 'refreservation', 'atime', 'readonly', 'sync', 'mountpoint'}
@@ -952,7 +952,7 @@ def _execute_plan(plan):
                     stream.write(data)
                     stream.flush()
                     os.fsync(stream.fileno())
-                os.chmod(temporary, 0o755)
+                os.chmod(temporary, 0o700)
                 os.chown(temporary, 0, 0)
                 os.replace(temporary, dest)
             finally:
