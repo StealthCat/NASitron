@@ -7,7 +7,7 @@ import pytest
 
 def test_all_templates_parse():
     template_dir = Path(__file__).resolve().parents[1] / "app" / "templates"
-    env = Environment(loader=FileSystemLoader(str(template_dir)))
+    env = Environment(loader=FileSystemLoader(str(template_dir)), autoescape=True)
     templates = sorted(p.name for p in template_dir.glob("*.html"))
     assert templates
     for name in templates:

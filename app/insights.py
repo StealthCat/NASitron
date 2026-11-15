@@ -7,7 +7,6 @@ import json
 from urllib.parse import quote
 
 from fastapi import Depends, Form, HTTPException, Request, UploadFile, File
-from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import Session
@@ -24,7 +23,7 @@ from .models import (
     MaintenanceWindow,
     MaintenanceAction,
 )
-from .security import require_csrf
+from .security import local_redirect, require_csrf
 from .service import latest_snapshot, current_states
 from .support import sanitize_diagnostics
 from .settings_store import get_int
@@ -209,7 +208,7 @@ def install(app, templates):
                 )
             )
         db.commit()
-        return RedirectResponse("/operations", status_code=303)
+        return local_redirect("/operations", status_code=303)
 
     @app.post("/alerts/{alert_id}/snooze", dependencies=[Depends(require_csrf)])
     def snooze(alert_id: int, minutes: int = Form(60), db: Session = Depends(session)):
@@ -222,7 +221,7 @@ def install(app, templates):
             _utcnow() + timedelta(minutes=minutes) if minutes else None
         )
         db.commit()
-        return RedirectResponse("/alerts", status_code=303)
+        return local_redirect("/alerts", status_code=303)
 
     @app.get("/servers/{server_id}/drive")
     def drive(
@@ -283,7 +282,7 @@ def install(app, templates):
         else:
             db.add(DriveLabel(server_id=server_id, identity=identity, label=label))
         db.commit()
-        return RedirectResponse(
+        return local_redirect(
             f"/servers/{server_id}/drive?identity=" + quote(identity, safe=""),
             status_code=303,
         )

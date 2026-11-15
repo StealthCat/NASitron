@@ -271,8 +271,10 @@ raise SystemExit(subprocess.call(['/usr/bin/install',*clean]))
     assert response.returncode == 0, response.stderr
     assert ownership_checks.read_text().splitlines() == ancestors
     assert target.read_text() == Path("remote/nasitron_root_helper.py").read_text()
+    assert target.stat().st_mode & 0o777 == 0o700
     assert f"custom-monitor ALL=(root) NOPASSWD: {target}" in sudoers.read_text()
     assert "preserved" in response.stdout
     if existing:
         assert Path(str(target) + ".previous").read_text() == "old helper"
+        assert Path(str(target) + ".previous").stat().st_mode & 0o777 == 0o700
     assert not list(target.parent.glob(".nasitron-helper.*"))

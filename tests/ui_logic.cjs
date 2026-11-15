@@ -4,6 +4,19 @@ const fs=require('node:fs');
 const assert=require('node:assert/strict');
 const script=fs.readFileSync('app/static/app.js','utf8');
 const tick=()=>new Promise(r=>setTimeout(r,0));
+{
+  const operations=fs.readFileSync('app/templates/operations.html','utf8');
+  const handler=operations.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const page=new JSDOM('<form id="window-form" action="/servers/1/maintenance-window"></form><select id="window-server"></select>',{url:'https://nas.example/',runScripts:'outside-only'});
+  const w=page.window, select=w.document.getElementById('window-server'), form=w.document.getElementById('window-form');
+  w.eval(handler);
+  for (const value of ['7','//outside.example','<img src=x onerror=alert(1)>','0','-1','NaN','9007199254740992']) {
+    const option=w.document.createElement('option'); option.value=value; select.appendChild(option);
+    select.value=value; select.dispatchEvent(new w.Event('change'));
+    assert.equal(form.getAttribute('action'),'/servers/7/maintenance-window');
+  }
+  w.close();
+}
 function dom(html) {
   const d=new JSDOM(html,{url:'http://localhost/',runScripts:'outside-only'}),w=d.window;
   w.matchMedia=()=>({matches:false,addEventListener(){}});

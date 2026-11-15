@@ -19,7 +19,7 @@ from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from cryptography.hazmat.primitives import serialization
@@ -76,6 +76,7 @@ from .security import (
     require_csrf,
     require_secure_maintenance,
     safe_next_url,
+    local_redirect,
 )
 from .experience import server_state, smart_state, pool_state, effective_role, operation_status, alert_target
 from .insights import install as install_insights
@@ -259,7 +260,7 @@ async def require_web_session(request: Request, call_next):
 
     query = request.url.query
     next_url = path + (f"?{query}" if query else "")
-    return RedirectResponse(
+    return local_redirect(
         "/login?next=" + quote(safe_next_url(next_url), safe="/"),
         status_code=303,
     )
@@ -281,7 +282,7 @@ def login_page(
     db: Session = Depends(get_db),
 ):
     if request_is_authenticated(request, db):
-        return RedirectResponse(safe_next_url(next), status_code=303)
+        return local_redirect(safe_next_url(next), status_code=303)
     return templates.TemplateResponse(
         request=request,
         name="login.html",
@@ -333,7 +334,7 @@ def login(
     clear_login_failures(request)
     user.last_login_at = utcnow()
     db.commit()
-    response = RedirectResponse(next_url, status_code=303)
+    response = local_redirect(next_url, status_code=303)
     response.set_cookie(
         SESSION_COOKIE_NAME,
         create_session_token(user),
@@ -348,7 +349,7 @@ def login(
 
 @app.post("/logout")
 def logout(_: None = Depends(require_csrf)):
-    response = RedirectResponse("/login", status_code=303)
+    response = local_redirect("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return response
 
@@ -1380,7 +1381,7 @@ def create_server(
     db.refresh(server)
     if server.enabled:
         trigger_now(server.id)
-    return RedirectResponse(f"/servers/{server.id}", status_code=303)
+    return local_redirect(f"/servers/{server.id}", status_code=303)
 
 
 @app.get("/servers/{server_id}/edit", response_class=HTMLResponse)
@@ -1477,7 +1478,7 @@ def update_server(
     invalidate_inventory_cache(server.id)
     if enabled:
         trigger_now(server.id)
-    return RedirectResponse(f"/servers/{server.id}", status_code=303)
+    return local_redirect(f"/servers/{server.id}", status_code=303)
 
 
 @app.get("/servers/{server_id}/host-key", response_class=HTMLResponse)
@@ -1526,7 +1527,7 @@ def enroll_host_key(
     server.strict_host_key = True
     db.commit()
     trigger_now(server.id)
-    return RedirectResponse(f"/servers/{server.id}", status_code=303)
+    return local_redirect(f"/servers/{server.id}", status_code=303)
 
 
 @app.post("/servers/{server_id}/delete")
@@ -1540,7 +1541,7 @@ def delete_server(
         invalidate_inventory_cache(server.id)
         db.delete(server)
         db.commit()
-    return RedirectResponse("/", status_code=303)
+    return local_redirect("/", status_code=303)
 
 
 @app.post("/servers/{server_id}/poll")
@@ -1552,7 +1553,7 @@ def poll_server(
     if not db.get(Server, server_id):
         raise HTTPException(404)
     trigger_now(server_id)
-    return RedirectResponse(f"/servers/{server_id}", status_code=303)
+    return local_redirect(f"/servers/{server_id}", status_code=303)
 
 
 @app.get("/servers/{server_id}", response_class=HTMLResponse)
@@ -1624,7 +1625,7 @@ def forget_expected_pool(
             alert.resolved_at = now
             alert.next_notification_at = None
     db.commit()
-    return RedirectResponse(f"/servers/{server.id}", status_code=303)
+    return local_redirect(f"/servers/{server.id}", status_code=303)
 
 
 @app.get("/servers/{server_id}/replace-drive", response_class=HTMLResponse)
@@ -1698,7 +1699,7 @@ def perform_drive_replacement(
     expected = f"REPLACE {clean_pool}"
     if clean_confirm != expected:
         message = f"Confirmation text did not match. Type exactly: {expected}"
-        return RedirectResponse(
+        return local_redirect(
             f"/servers/{server_id}/replace-drive?message=" + quote(message),
             status_code=303,
         )
@@ -1771,7 +1772,7 @@ def perform_drive_replacement(
         db.commit()
         message = f"Replacement was not started: {exc}"
 
-    return RedirectResponse(
+    return local_redirect(
         f"/servers/{server_id}/replace-drive?message=" + quote(message),
         status_code=303,
     )
@@ -1966,7 +1967,7 @@ def acknowledge_alert(
     if alert:
         alert.acknowledged = True
         db.commit()
-    return RedirectResponse("/alerts", status_code=303)
+    return local_redirect("/alerts", status_code=303)
 
 
 @app.get("/users", response_class=HTMLResponse)
@@ -2037,7 +2038,7 @@ def create_web_user(
     )
     db.add(user)
     db.commit()
-    return RedirectResponse(
+    return local_redirect(
         "/users?message=" + quote(f"User {clean_username} created."),
         status_code=303,
     )
@@ -2135,14 +2136,14 @@ def update_web_user(
     db.commit()
 
     if user.id == current.id and security_changed:
-        response = RedirectResponse(
+        response = local_redirect(
             "/login?message=" + quote("Account updated. Sign in again."),
             status_code=303,
         )
         response.delete_cookie(SESSION_COOKIE_NAME, path="/")
         return response
 
-    return RedirectResponse(
+    return local_redirect(
         "/users?message=" + quote(f"User {clean_username} updated."),
         status_code=303,
     )
@@ -2175,7 +2176,7 @@ def delete_web_user(
     username = user.username
     db.delete(user)
     db.commit()
-    return RedirectResponse(
+    return local_redirect(
         "/users?message=" + quote(f"User {username} deleted."),
         status_code=303,
     )
@@ -2423,7 +2424,7 @@ def save_settings(
         redirect_tab = section
         message = f"{saved_sections[0]} settings saved."
 
-    return RedirectResponse(
+    return local_redirect(
         "/settings?tab=" + quote(redirect_tab) + "&message=" + quote(message),
         status_code=303,
     )
@@ -2530,7 +2531,7 @@ async def save_tls_settings(
     set_setting(db, "tls_acme_email", email)
     set_setting(db, "tls_acme_ca", ca_url)
     db.commit()
-    return RedirectResponse(
+    return local_redirect(
         "/settings?tab=tls&message=" + quote("TLS configuration applied successfully."),
         status_code=303,
     )
@@ -2555,7 +2556,7 @@ def test_email(
         result = f"{transport.upper()} test message sent."
     except Exception as exc:
         result = f"Email test failed: {exc}"
-    return RedirectResponse("/settings?tab=smtp&message=" + quote(result), status_code=303)
+    return local_redirect("/settings?tab=smtp&message=" + quote(result), status_code=303)
 
 # Register focused read-only insight pages and monitoring controls.
 install_insights(app, templates)

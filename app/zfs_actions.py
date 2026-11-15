@@ -6,7 +6,6 @@ import shlex
 from datetime import timedelta
 
 from fastapi import Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
 from sqlalchemy import select, update
 
 from .collector import SSHCollector
@@ -17,7 +16,7 @@ from .insights import session
 from .maintenance import MaintenanceBusy, maintenance_lock, invalidate_inventory_cache
 from .models import MaintenanceAction, Server
 from .scheduler import trigger_now
-from .security import require_csrf, require_secure_maintenance
+from .security import local_redirect, require_csrf, require_secure_maintenance
 
 
 @contextmanager
@@ -152,7 +151,7 @@ def install(app, templates):
                 try:
                     trigger_now(server_id)
                 except Exception:
-                    logging.getLogger(__name__).exception("Could not schedule refresh after ZFS action %s", action_id)
+                    logging.getLogger(__name__).exception("Could not schedule refresh after ZFS action")
         except HTTPException as exc:
             return problem(exc.status_code, str(exc.detail))
-        return RedirectResponse(f"/servers/{server_id}/zfs-actions?result_id={action_id}", status_code=303)
+        return local_redirect(f"/servers/{server_id}/zfs-actions?result_id={action_id}", status_code=303)

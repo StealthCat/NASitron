@@ -9,8 +9,8 @@ WORKDIR /app
 
 RUN addgroup --system nasitron && adduser --system --ingroup nasitron --home /app nasitron
 
-COPY requirements.lock .
-RUN pip install --no-cache-dir -r requirements.lock
+COPY requirements-frozen.txt .
+RUN pip install --no-cache-dir -r requirements-frozen.txt
 
 COPY app ./app
 COPY scripts ./scripts
