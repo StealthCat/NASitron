@@ -43,7 +43,7 @@ jobs:
       - name: Apply release-validation installer fixture
         if: ${{ inputs.source_ref != '' }}
         run: cp .ci-validation/tests/test_server_upgrade.py tests/test_server_upgrade.py
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
@@ -121,7 +121,7 @@ jobs:
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: actions/setup-node@v7
